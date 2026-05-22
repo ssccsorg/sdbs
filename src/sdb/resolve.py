@@ -17,6 +17,7 @@ Usage::
 
 from __future__ import annotations
 
+import logging
 import argparse
 import fnmatch
 import re
@@ -24,6 +25,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+
 
 
 # ======================================================================
@@ -983,5 +985,6 @@ def resolve_all(docs_root: Path, check_only: bool = False) -> bool:
         print(f"Combined: {total_fixes} broken path(s) {action}")
     else:
         print("All paths valid.")
+    sys.stdout.flush()
 
     return total_fixes == 0
