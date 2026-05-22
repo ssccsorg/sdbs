@@ -566,6 +566,19 @@ _INLINE_COMMAND_MAP: Dict[Tuple[str, ...], Tuple[str, str]] = {
 }
 
 
+# Default pre-build commands (always run first, before user config)
+_DEFAULT_PRE_BUILD_COMMANDS = [
+    ["python3", "_utils/generate_latest_docs.py"],
+    ["python3", "resolve.py"],
+    ["rumdl", "fmt", ".", "--silent", "--disable", "MD036"],
+]
+
+# Default post-render commands (always run first, before user config)
+_DEFAULT_POST_RENDER_COMMANDS = [
+    ["python3", "_utils/generate_llms_txt.py"],
+]
+
+
 def _try_dispatch_inline(
     cmd: List[str],
     docs_root: Path,
@@ -703,7 +716,20 @@ def run_pre_build_commands(
     docs_root: Path,
     target_name: Optional[str] = None,
 ) -> None:
-    """Execute pre-build commands from configuration."""
+    """Execute pre-build commands from configuration.
+
+    Built-in defaults (generate_latest_docs, resolve) always run first.
+    User-configured commands from pre_build in build.yml are
+    concatenated after defaults.
+    """
+    # Always run built-in defaults first
+    _run_config_commands(
+        {"_global": _DEFAULT_PRE_BUILD_COMMANDS},
+        docs_root,
+        "Pre-build",
+        target_name=None,
+    )
+    # Then run user-configured commands
     _run_config_commands(
         external_config.get("pre_build", []),
         docs_root,
@@ -717,7 +743,20 @@ def run_post_render_commands(
     docs_root: Path,
     target_name: Optional[str] = None,
 ) -> None:
-    """Execute post-render commands from configuration."""
+    """Execute post-render commands from configuration.
+
+    Built-in default (generate_llms_txt) always runs first.
+    User-configured commands from post_render in build.yml are
+    concatenated after defaults.
+    """
+    # Always run built-in defaults first
+    _run_config_commands(
+        {"_global": _DEFAULT_POST_RENDER_COMMANDS},
+        docs_root,
+        "Post-render",
+        target_name=None,
+    )
+    # Then run user-configured commands
     _run_config_commands(
         external_config.get("post_render", []),
         docs_root,
