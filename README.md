@@ -2,23 +2,43 @@
 
 SSCCS Documentation Build System — a portable Quarto orchestration layer.
 
-## Installation
+## Quick Start
+
+### With pip
 
 ```bash
 pip install sdb
-```
-
-Or with uv:
-
-```bash
-uv tool install sdb
-```
-
-## Usage
-
-```bash
-# Scaffold a new docs directory
 sdb init docs
+sdb build docs --website
+```
+
+### With Docker
+
+```bash
+docker pull ghcr.io/ssccsorg/sdbs:latest
+docker run --rm -v $(pwd)/docs:/work -w /work ghcr.io/ssccsorg/sdbs:latest sdb build docs --website
+```
+
+### Try the example project
+
+```bash
+git clone https://github.com/ssccsorg/sdbs.git
+cd sdbs
+./examples/build.sh quickstart
+```
+
+This installs SDBS from source (or uses Docker if Quarto is not available) and builds
+the `examples/quickstart/` project — a minimal documentation site with a landing page,
+a getting-started guide, and an API reference.
+
+## CLI Reference
+
+```bash
+# Scaffold a new docs directory with default templates
+sdb init docs
+
+# Scaffold with SSCCS-specific templates
+sdb init docs --template ssccs
 
 # Build all targets
 sdb build .
@@ -33,11 +53,26 @@ sdb check .
 sdb resolve .
 ```
 
-## Quick Start with Docker
+## Development
+
+### Setup
 
 ```bash
-docker pull ghcr.io/ssccsorg/sdbs:latest
-docker run --rm -v $(pwd)/docs:/work -w /work ghcr.io/ssccsorg/sdbs:latest sdb build docs --website
+git clone https://github.com/ssccsorg/sdbs.git
+cd sdbs
+pip install -e .
+```
+
+### Run tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+### Build the Docker image
+
+```bash
+docker build -t ghcr.io/ssccsorg/sdbs:latest .
 ```
 
 ## License
