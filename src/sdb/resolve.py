@@ -17,7 +17,6 @@ Usage::
 
 from __future__ import annotations
 
-import logging
 import argparse
 import fnmatch
 import re
