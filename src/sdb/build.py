@@ -716,20 +716,7 @@ def run_pre_build_commands(
     docs_root: Path,
     target_name: Optional[str] = None,
 ) -> None:
-    """Execute pre-build commands from configuration.
-
-    Built-in defaults (generate_latest_docs, resolve) always run first.
-    User-configured commands from pre_build in build.yml are
-    concatenated after defaults.
-    """
-    # Always run built-in defaults first
-    _run_config_commands(
-        {"_global": _DEFAULT_PRE_BUILD_COMMANDS},
-        docs_root,
-        "Pre-build",
-        target_name=None,
-    )
-    # Then run user-configured commands
+    """Execute user-configured pre-build commands from build.yml."""
     _run_config_commands(
         external_config.get("pre_build", []),
         docs_root,
@@ -743,20 +730,7 @@ def run_post_render_commands(
     docs_root: Path,
     target_name: Optional[str] = None,
 ) -> None:
-    """Execute post-render commands from configuration.
-
-    Built-in default (generate_llms_txt) always runs first.
-    User-configured commands from post_render in build.yml are
-    concatenated after defaults.
-    """
-    # Always run built-in defaults first
-    _run_config_commands(
-        {"_global": _DEFAULT_POST_RENDER_COMMANDS},
-        docs_root,
-        "Post-render",
-        target_name=None,
-    )
-    # Then run user-configured commands
+    """Execute user-configured post-render commands from build.yml."""
     _run_config_commands(
         external_config.get("post_render", []),
         docs_root,
@@ -1665,6 +1639,14 @@ def build_targets(
 
     build_temp_path = docs_root.parent / BUILD_TEMP_DIR
 
+    # Run built-in default pre-build commands once
+    _run_config_commands(
+        {"_global": _DEFAULT_PRE_BUILD_COMMANDS},
+        docs_root,
+        "Pre-build",
+        target_name=None,
+    )
+
     run_pre_build_commands(EXTERNAL_CONFIG, docs_root)
 
     for t in targets:
@@ -1849,6 +1831,13 @@ def build_targets(
             )
 
             _sync_llms_files(final_output, docs_root)
+            # Run built-in default post-render commands once
+            _run_config_commands(
+                {"_global": _DEFAULT_POST_RENDER_COMMANDS},
+                docs_root,
+                "Post-render",
+                target_name=None,
+            )
             run_post_render_commands(EXTERNAL_CONFIG, docs_root)
 
             return True
@@ -1923,6 +1912,13 @@ def build_targets(
             docs_root=docs_root,
         )
 
+    # Run built-in default post-render commands once
+    _run_config_commands(
+        {"_global": _DEFAULT_POST_RENDER_COMMANDS},
+        docs_root,
+        "Post-render",
+        target_name=None,
+    )
     run_post_render_commands(EXTERNAL_CONFIG, docs_root)
 
     return True
