@@ -1,0 +1,30 @@
+project:
+  type: website
+  post-render:
+    - 'find . -type d -name "figure-pdf" -exec rm -rf {} + -o -name "figure-beamer" -exec rm -rf {} + -o -name "mediabag" -exec rm -rf {} +'
+
+website:
+  site-url: https://example.org/tinylib
+  repo-url: https://github.com/example/tinylib
+  repo-subdir: docs
+  repo-actions: [edit, issue]
+  llms-txt: true
+  sidebar:
+    collapse-level: 1
+    contents:
+      - href: index.qmd
+        text: "Home"
+      - auto: "*.{qmd,md}"
+
+page-footer:
+  left: "\u00a9 TinyLib Contributors"
+  right:
+    - icon: github
+      href: https://github.com/example/tinylib
+
+metadata-files:
+  - ./_include/format.html.yml
+
+format:
+  html:
+    directory-index: true

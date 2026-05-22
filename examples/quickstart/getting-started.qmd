@@ -1,0 +1,35 @@
+---
+title: "Getting Started"
+date: last-modified
+---
+
+## Installation
+
+```bash
+pip install tinylib
+```
+
+## First Steps
+
+Import and use TinyLib in your project:
+
+```python
+from tinylib import process, analyze
+
+# Process input data
+result = process("input_data")
+
+# Analyze results
+analysis = analyze(result)
+print(analysis)
+```
+
+## Configuration
+
+TinyLib supports the following configuration options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `verbose` | bool | False | Enable detailed logging |
+| `timeout` | int | 30 | Operation timeout in seconds |
+| `retries` | int | 3 | Number of retry attempts |

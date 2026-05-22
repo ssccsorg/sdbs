@@ -1,0 +1,8 @@
+author:
+  - name: TinyLib Team
+    corresponding: true
+    email: team@tinylib.example
+    affiliations:
+      - name: TinyLib Project
+        domain: tinylib.example
+        url: https://tinylib.example

@@ -1,0 +1,17 @@
+# SDBS Build Configuration
+target_config: {}
+
+pre_build:
+  _global: []
+
+post_render:
+  _global: []
+
+exclude:
+  - "**/README.md"
+  - "**/_include/"
+  - "**/*_output/"
+  - "**/*_files/"
+  - "**/*_cached/"
+  - "**/*_libs/"
+  - "**/.jupyter_cache"

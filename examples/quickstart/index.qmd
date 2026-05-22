@@ -1,0 +1,32 @@
+---
+title: "TinyLib Documentation"
+subtitle: "A minimal library for maximum productivity"
+date: last-modified
+metadata-files:
+  - _include/author.yml
+abstract: |
+  TinyLib is a lightweight library designed to do one thing well.
+  This documentation covers installation, usage, and API reference.
+---
+
+## Welcome
+
+TinyLib makes complex tasks simple. Here is a minimal example:
+
+```python
+import tinylib
+
+result = tinylib.process(data)
+print(result)
+```
+
+## Quick Links
+
+- [Getting Started](getting-started.qmd)
+- [API Reference](api-reference.md)
+
+## Features
+
+- **Simple API**: Just a few functions to learn
+- **Fast**: Optimized for performance
+- **Well tested**: 100% test coverage
