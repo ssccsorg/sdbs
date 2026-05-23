@@ -44,7 +44,6 @@ RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
     && mv /root/.TinyTeX /opt/tinytex \
     && /opt/tinytex/bin/x86_64-linux/tlmgr path add \
     && chmod -R 755 /opt/tinytex \
-    && tlmgr update --self \
     && tlmgr install \
         babel-english \
         everypage \
@@ -61,8 +60,7 @@ RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
         microtype \
         beamer \
         translator \
-        luatexbase \
-    && luaotfload-tool --list=config
+        luatexbase
 
 # Install Python dependencies for documentation rendering
 # jupyter is required for Quarto Jupyter engine; the rest are used by
