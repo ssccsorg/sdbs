@@ -60,6 +60,7 @@ RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
         microtype \
         beamer \
         translator \
+        luatexbase \
     && luaotfload-tool --list=config
 
 # Install Python dependencies for documentation rendering
