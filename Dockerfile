@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 mcr.microsoft.com/devcontainers/base:ubuntu-24.04
+FROM --platform=linux/amd64 ubuntu:24.04
 
 # Integrated management of environment variables
 ENV QUARTO_VER="1.9.35" \
