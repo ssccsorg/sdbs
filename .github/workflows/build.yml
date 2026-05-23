@@ -1,8 +1,8 @@
 # Build pipeline
 #
-# 1. Build the Docker image (no push).
-# 2. Test against the freshly built image.
-# 3. Only if all tests pass, push the image to the registry.
+# 1. Build the Docker image with layer caching via buildx.
+# 2. Run all test suites inside the built image.
+# 3. On main branch, push the image to the registry.
 
 name: build
 
@@ -38,17 +38,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            image:
-              - 'Dockerfile'
-              - 'pyproject.toml'
-              - 'src/**'
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -58,7 +47,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Docker image
-        if: steps.filter.outputs.image == 'true'
         uses: docker/build-push-action@v7
         env:
           DOCKER_BUILD_RECORD_UPLOAD: false
@@ -68,21 +56,10 @@ jobs:
           file: Dockerfile
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build
           load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           provenance: false
           sbom: false
-
-      - name: Determine test image
-        id: test-image
-        run: |
-          if [ "${{ steps.filter.outputs.image }}" = "true" ]; then
-            echo "name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Pull existing image
-        if: steps.filter.outputs.image != 'true'
-        run: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Run all test suites
         run: |
@@ -90,11 +67,12 @@ jobs:
             -v ${{ github.workspace }}:/work \
             -w /work \
             -e PYTHONPATH=/work/src \
-            ${{ steps.test-image.outputs.name }} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build \
             bash -c "./tests/run.sh"
 
       - name: Push Docker image
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.filter.outputs.image == 'true'
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
