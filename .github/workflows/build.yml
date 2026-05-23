@@ -24,7 +24,7 @@ permissions:
   packages: write
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -60,7 +60,7 @@ jobs:
             -v ${{ github.workspace }}:/work \
             -w /work \
             -e PYTHONPATH=/work/src \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build \
             bash -c "./tests/run.sh"
 
       - name: Push Docker image
