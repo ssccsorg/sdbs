@@ -1,4 +1,11 @@
-name: Publish Docker Image
+# Build pipeline
+#
+# 1. Run all test suites (unit + production workflow).
+# 2. Only if all tests pass, build and push the Docker image.
+#
+# A failing test blocks publishing -- tested code must never ship broken.
+
+name: build
 
 on:
   push:
@@ -7,7 +14,10 @@ on:
       - "Dockerfile"
       - "pyproject.toml"
       - "src/**"
-      - ".github/workflows/publish.yml"
+      - "tests/**"
+      - ".github/workflows/**"
+  pull_request:
+    branches: ["main"]
   workflow_dispatch:
 
 env:
@@ -23,10 +33,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  test:
     runs-on: ubuntu-latest
+    container: ghcr.io/ssccsorg/sdbs:latest
+    timeout-minutes: 30
+
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
+
+      - name: Run all test suites
+        run: ./tests/run.sh
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
