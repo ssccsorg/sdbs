@@ -43,8 +43,10 @@ jobs:
         id: filter
         with:
           filters: |
-            dockerfile:
+            image:
               - 'Dockerfile'
+              - 'pyproject.toml'
+              - 'src/**'
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -54,7 +56,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Docker image
-        if: steps.filter.outputs.dockerfile == 'true'
+        if: steps.filter.outputs.image == 'true'
         uses: docker/build-push-action@v7
         env:
           DOCKER_BUILD_RECORD_UPLOAD: false
@@ -70,14 +72,14 @@ jobs:
       - name: Determine test image
         id: test-image
         run: |
-          if [ "${{ steps.filter.outputs.dockerfile }}" = "true" ]; then
+          if [ "${{ steps.filter.outputs.image }}" = "true" ]; then
             echo "name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build" >> "$GITHUB_OUTPUT"
           else
             echo "name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Pull existing image
-        if: steps.filter.outputs.dockerfile != 'true'
+        if: steps.filter.outputs.image != 'true'
         run: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Run all test suites
@@ -90,7 +92,7 @@ jobs:
             bash -c "./tests/run.sh"
 
       - name: Push Docker image
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.filter.outputs.dockerfile == 'true'
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.filter.outputs.image == 'true'
         run: |
           docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
