@@ -47,7 +47,7 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build  
           load: true
           cache-from: type=gha,scope=shared-sdbs
           cache-to: type=gha,mode=min,scope=shared-sdbs
@@ -64,5 +64,7 @@ jobs:
             bash -c "./tests/run.sh"
 
       - name: Push Docker image
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
