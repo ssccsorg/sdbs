@@ -63,6 +63,7 @@ RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
 # Install Python dependencies for documentation rendering
 # jupyter is required for Quarto Jupyter engine; the rest are used by
 # Python code blocks in QMD files (plotly, networkx, scipy, etc.)
+# pytest is needed for the test suite (tests/run.sh).
 RUN uv pip install --system --break-system-packages \
         PyYAML>=6.0 \
         graphviz>=0.20 \
@@ -75,7 +76,9 @@ RUN uv pip install --system --break-system-packages \
         jupyter-cache \
         scipy \
         networkx \
-        requests
+        requests \
+        pytest\
+        pytest-timeout
 
 # Install SDBS
 COPY . /tmp/sdb
