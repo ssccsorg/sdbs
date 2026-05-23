@@ -41,8 +41,8 @@ format:
 ```
 
 ```{python}
-#| label: fig-sdbs-architecture
-#| fig-cap: "SDBS architecture: from source documents to published outputs"
+#| label: fig-sdbs-artifect
+#| fig-cap: "SDBS artifects: from source documents to published outputs"
 dot("""
 digraph SDBSArchitecture {
     rankdir=TB;
@@ -52,7 +52,7 @@ digraph SDBSArchitecture {
         label="Source Documents";
         style=dashed;
         color=gray60;
-        QMD [label="*.qmd files\n(YAML frontmatter)"];
+        QMD [label="*.qmd/*.md files"];
         INC [label="_include/\n(shared fragments)"];
         YML [label="build.yml\n(configuration)"];
     }
@@ -61,7 +61,7 @@ digraph SDBSArchitecture {
         label="SDBS Build Engine";
         style=dashed;
         color=gray60;
-        SCHED [label="Scheduler\n(dependency graph)"];
+        SCHED [label="Concurrent Scheduler\nwith an analytical dependency graph"];
         CACHE [label="Cache\n(content-addressed)"];
         PAR [label="Worker Pool\n(parallel renders)"];
         SCHED -> CACHE;
@@ -74,15 +74,15 @@ digraph SDBSArchitecture {
         color=gray60;
         HTML [label="HTML\n(website)"];
         PDF [label="PDF\n(print/archive)"];
-        DOCX [label="DOCX\n(collaboration)"];
     }
 
+    CACHE -> HTML;
+    CACHE -> PDF;
     QMD -> SCHED;
     INC -> SCHED;
     YML -> SCHED;
     PAR -> HTML;
     PAR -> PDF;
-    PAR -> DOCX;
 }
 """)
 ```
@@ -93,7 +93,6 @@ source discovery through parallel rendering to multi-format output. SDBS
 handles caching, dependency tracking, and profile-based configuration so that
 documentation authors focus on content rather than build orchestration.
 
-{{< include _include/_updated_docs_list.qmd >}}
 
 <!-- ------------------------------------------------------------------ -->
 <!-- Multi-format output configuration reference                         -->

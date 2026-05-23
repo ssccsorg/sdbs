@@ -42,6 +42,8 @@ RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
     && mv /root/.TinyTeX /opt/tinytex \
     && /opt/tinytex/bin/x86_64-linux/tlmgr path add \
     && chmod -R 755 /opt/tinytex \
+    && tlmgr update --self \
+    && tlmgr update --all \
     && tlmgr install \
         babel-english \
         everypage \
