@@ -4,12 +4,7 @@
 # Target-specific configurations (optional)
 # These settings override defaults for specific targets.
 # If a target is not listed here, it will still be built with default settings.
-target_config:
-  whitepaper-whitepaper:
-    c2pa: true
-
-  proposal-proposal:
-    c2pa: true
+target_config: []
 
   # Example: target with HTML copy enabled
   # manifesto:
@@ -35,10 +30,7 @@ target_config:
 # If the executable is not found on PATH, the command is silently skipped.
 # If a command fails, an error is logged but the main build process continues.
 pre_build:
-  _global:
-    - ["python3", "_utils/generate_latest_docs.py"]
-    - ["python3", "resolve.py"]
-    - ["rumdl", "fmt", ".", "--silent", "--disable", "MD036"]
+  _global: []
 
 # Post-render commands
 # Commands to execute after all targets have been rendered and merged.
@@ -51,8 +43,7 @@ pre_build:
 # If the executable is not found on PATH, the command is silently skipped.
 # If a command fails, an error is logged but the build is considered successful.
 post_render:
-  _global:
-    - ["python3", "_utils/generate_llms_txt.py"]
+  _global: []
 
 # Exclude patterns (gitignore-style)
 # Files and directories matching these patterns will be excluded from target discovery.
