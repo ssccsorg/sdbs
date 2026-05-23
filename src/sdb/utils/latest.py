@@ -481,12 +481,22 @@ def generate_latest_docs(docs_root: Path) -> bool:
     include_dir.mkdir(parents=True, exist_ok=True)
     try:
         existing = output.read_text(encoding="utf-8")
+        output_exists = True
     except FileNotFoundError:
         existing = ""
+        output_exists = False
 
-    if new_content != existing:
+    if new_content != existing or not output_exists:
         output.write_text(new_content, encoding="utf-8")
-        logger.info("Updated %s with %s entries.", output, len(sorted_items))
+        if not output_exists and not new_content:
+            logger.info(
+                "Created empty %s (no git-tracked documents found).",
+                output,
+            )
+        else:
+            logger.info(
+                "Updated %s with %s entries.", output, len(sorted_items)
+            )
     else:
         logger.info(
             "No change - %s is already up to date (%s entries).",

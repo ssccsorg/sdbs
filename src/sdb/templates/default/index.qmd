@@ -5,6 +5,8 @@ title: "My Documentation"
 subtitle: "SDBS-managed Quarto project"
 # Automatically updated to the last-modified date from git.
 date: last-modified
+# Default output format.
+format: html
 # TODO: add metadata-files for author.yml (see _include/author.yml)
 abstract: |
   Replace this placeholder with your project documentation abstract.
