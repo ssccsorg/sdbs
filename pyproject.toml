@@ -34,6 +34,11 @@ where = ["src"]
 "sdb" = ["py.typed"]
 "*" = ["*.qmd", "*.yml", "*.yaml", "*.py", "*.csl", "*.md"]
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: slow integration tests that require external tools or network",
+]
+
 [build-system]
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"

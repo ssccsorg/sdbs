@@ -8,8 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from sdb.build import (
-    _DEFAULT_PRE_BUILD_COMMANDS,
-    _DEFAULT_POST_RENDER_COMMANDS,
+    _DEFAULT_PRE_BUILD,
+    _DEFAULT_POST_RENDER,
+    _run_default_sequence,
     _run_config_commands,
     build_targets,
     run_pre_build_commands,
@@ -18,23 +19,22 @@ from sdb.build import (
 
 
 class TestDefaultCommandConstants:
-    """Built-in default command lists contain expected entries."""
+    """Built-in default sequences contain expected entries."""
 
-    def test_pre_build_has_generate_latest(self) -> None:
-        cmds_str = [" ".join(c) for c in _DEFAULT_PRE_BUILD_COMMANDS]
-        assert any("generate_latest_docs" in s for s in cmds_str)
+    def test_pre_build_has_callable_generate_latest(self) -> None:
+        from sdb.utils.latest import generate_latest_docs
+        assert generate_latest_docs in _DEFAULT_PRE_BUILD
 
-    def test_pre_build_has_resolve(self) -> None:
-        cmds_str = [" ".join(c) for c in _DEFAULT_PRE_BUILD_COMMANDS]
-        assert any("resolve" in s for s in cmds_str)
+    def test_pre_build_has_callable_resolve_all(self) -> None:
+        from sdb.resolve import resolve_all
+        assert resolve_all in _DEFAULT_PRE_BUILD
 
     def test_pre_build_has_rumdl(self) -> None:
-        names = [c[0] for c in _DEFAULT_PRE_BUILD_COMMANDS]
-        assert "rumdl" in names
+        assert ["rumdl", "fmt", ".", "--silent", "--disable", "MD036"] in _DEFAULT_PRE_BUILD
 
     def test_post_render_has_generate_llms(self) -> None:
-        cmds_str = [" ".join(c) for c in _DEFAULT_POST_RENDER_COMMANDS]
-        assert any("generate_llms_txt" in s for s in cmds_str)
+        from sdb.utils.llms import generate_llms_txt
+        assert generate_llms_txt in _DEFAULT_POST_RENDER
 
 
 class TestRunPreBuildCommandsNoDefaults:
@@ -125,62 +125,59 @@ class TestBuildTargetsDefaultPrePost:
         mock_initialize: MagicMock,
     ) -> None:
         """
-        Verify that _run_config_commands is called with defaults first,
-        then with user config. This prevents N+1 execution in parallel mode.
+        Verify that _run_default_sequence is called with the default
+        sequences before user config commands, preventing N+1 execution
+        in parallel mode.
         """
-        calls = []
+        seq_calls = []
+        config_calls = []
 
-        original_run = _run_config_commands
+        original_seq = _run_default_sequence
+        original_config = _run_config_commands
 
-        def tracking_run(section, dr, phase, target_name=None):
-            calls.append({
+        def tracking_seq(steps, dr, phase):
+            seq_calls.append({"steps": steps, "phase": phase})
+            return original_seq(steps, dr, phase)
+
+        def tracking_config(section, dr, phase, target_name=None):
+            config_calls.append({
                 "section": section,
                 "phase": phase,
                 "target_name": target_name,
             })
-            return original_run(section, dr, phase, target_name=target_name)
+            return original_config(section, dr, phase, target_name=target_name)
 
-        with patch(
-            "sdb.build._run_config_commands", side_effect=tracking_run
+        with (
+            patch("sdb.build._run_default_sequence", side_effect=tracking_seq),
+            patch("sdb.build._run_config_commands", side_effect=tracking_config),
+            patch("sdb.build.Path.cwd", return_value=docs_root),
+            patch("sdb.build.Path.mkdir"),
+            patch("sdb.build.shutil.rmtree"),
+            patch("sdb.build.shutil.copytree"),
+            patch("sdb.build.os.cpu_count", return_value=4),
         ):
-            with patch("sdb.build.Path.cwd", return_value=docs_root):
-                with patch("sdb.build.Path.mkdir"):
-                    with patch("sdb.build.shutil.rmtree"):
-                        with patch("sdb.build.shutil.copytree"):
-                            with patch("sdb.build.os.cpu_count", return_value=4):
-                                build_targets(
-                                    targets=["index"],
-                                    output_dir=None,
-                                    sequence_mode=True,
-                                    max_jobs=1,
-                                    single_command=True,
-                                    website=False,
-                                    docs_root=docs_root,
-                                )
+            build_targets(
+                targets=["index"],
+                output_dir=None,
+                sequence_mode=True,
+                max_jobs=1,
+                single_command=True,
+                website=False,
+                docs_root=docs_root,
+            )
 
-        # Find all pre-build calls (phase == "Pre-build")
-        pre_calls = [c for c in calls if c["phase"] == "Pre-build"]
+        # _run_default_sequence should be called with pre-build then post-render
+        assert len(seq_calls) == 2
+        assert seq_calls[0]["steps"] is _DEFAULT_PRE_BUILD
+        assert seq_calls[0]["phase"] == "Pre-build"
+        assert seq_calls[1]["steps"] is _DEFAULT_POST_RENDER
+        assert seq_calls[1]["phase"] == "Post-render"
 
-        # The FIRST pre-build call should be the defaults
-        assert len(pre_calls) >= 1
-        default_call = pre_calls[0]
-        assert default_call["target_name"] is None
-        assert default_call["section"] == {"_global": _DEFAULT_PRE_BUILD_COMMANDS}
-
-        # The SECOND pre-build call (if any) should be user config (empty in test)
-        if len(pre_calls) > 1:
-            user_call = pre_calls[1]
-            assert user_call["section"] == []
-
-        # Find all post-render calls
-        post_calls = [c for c in calls if c["phase"] == "Post-render"]
-        if post_calls:
-            # The FIRST post-render call should be the defaults
-            default_post = post_calls[0]
-            assert default_post["target_name"] is None
-            assert default_post["section"] == {
-                "_global": _DEFAULT_POST_RENDER_COMMANDS
-            }
+        # _run_config_commands calls should be for user config only
+        pre_config = [c for c in config_calls if c["phase"] == "Pre-build"]
+        assert len(pre_config) >= 1
+        # First user pre-build call (empty in test)
+        assert pre_config[0]["section"] == []
 
     def test_defaults_do_not_run_per_target(
         self,
@@ -201,42 +198,42 @@ class TestBuildTargetsDefaultPrePost:
             "guide": lambda **kw: True,
         }
 
-        calls = []
+        seq_calls = []
 
-        original_run = _run_config_commands
+        original_seq = _run_default_sequence
 
-        def tracking_run(section, dr, phase, target_name=None):
-            calls.append({
-                "section": section,
-                "phase": phase,
-                "target_name": target_name,
-            })
-            return original_run(section, dr, phase, target_name=target_name)
+        def tracking_seq(steps, dr, phase):
+            seq_calls.append({"steps": steps, "phase": phase})
+            return original_seq(steps, dr, phase)
 
-        with patch(
-            "sdb.build._run_config_commands", side_effect=tracking_run
+        with (
+            patch("sdb.build._run_default_sequence", side_effect=tracking_seq),
+            patch("sdb.build._run_config_commands"),
+            patch("sdb.build.Path.cwd", return_value=docs_root),
+            patch("sdb.build.Path.mkdir"),
+            patch("sdb.build.shutil.rmtree"),
+            patch("sdb.build.shutil.copytree"),
+            patch("sdb.build.os.cpu_count", return_value=4),
         ):
-            with patch("sdb.build.Path.cwd", return_value=docs_root):
-                with patch("sdb.build.Path.mkdir"):
-                    with patch("sdb.build.shutil.rmtree"):
-                        with patch("sdb.build.shutil.copytree"):
-                            with patch("sdb.build.os.cpu_count", return_value=4):
-                                build_targets(
-                                    targets=["index", "guide"],
-                                    output_dir=None,
-                                    sequence_mode=True,
-                                    max_jobs=2,
-                                    single_command=True,
-                                    website=False,
-                                    docs_root=docs_root,
-                                )
+            build_targets(
+                targets=["index", "guide"],
+                output_dir=None,
+                sequence_mode=True,
+                max_jobs=2,
+                single_command=True,
+                website=False,
+                docs_root=docs_root,
+            )
 
-        pre_default_calls = [
-            c for c in calls
-            if c["phase"] == "Pre-build"
-            and c["section"] == {"_global": _DEFAULT_PRE_BUILD_COMMANDS}
-        ]
-        # Defaults should run exactly ONCE, not 2x or 3x
-        assert len(pre_default_calls) == 1, (
-            f"Expected 1 default pre-build call, got {len(pre_default_calls)}"
+        # Each default sequence should run exactly ONCE, not 2x or 3x
+        pre_calls = [c for c in seq_calls if c["phase"] == "Pre-build"]
+        assert len(pre_calls) == 1, (
+            f"Expected 1 default pre-build call, got {len(pre_calls)}"
         )
+        assert pre_calls[0]["steps"] is _DEFAULT_PRE_BUILD
+
+        post_calls = [c for c in seq_calls if c["phase"] == "Post-render"]
+        assert len(post_calls) == 1, (
+            f"Expected 1 default post-render call, got {len(post_calls)}"
+        )
+        assert post_calls[0]["steps"] is _DEFAULT_POST_RENDER

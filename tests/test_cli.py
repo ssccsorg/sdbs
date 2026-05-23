@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
-
-import pytest
 
 from sdb.cli import main
 
@@ -21,7 +17,8 @@ def _run_main(argv: list[str]) -> int:
         main(argv)
         return 0
     except SystemExit as e:
-        return e.code if e.code is not None else 0
+        code = e.code if e.code is not None else 0
+        return code if isinstance(code, int) else 1
 
 
 class TestInitCommand:
@@ -109,9 +106,9 @@ class TestBuildCommand:
             assert code == 0
             mock_parse.assert_called_once_with(["whitepaper"])
             mock_build.assert_called_once()
-            _kwargs: dict[str, Any] = mock_build.call_args.kwargs
-            assert _kwargs["max_jobs"] == 4
-            assert _kwargs["website"] is True
+            _kwargs = mock_build.call_args.kwargs
+            assert _kwargs["max_jobs"] == 4  # type: ignore[index]
+            assert _kwargs["website"] is True  # type: ignore[index]
 
     def test_build_all_implicit(self) -> None:
         """When no targets specified, defaults to ['all']."""

@@ -38,6 +38,9 @@ from .render import (
     CommandRunner,
     _render_formats,
 )
+from sdb.resolve import resolve_all
+from sdb.utils.latest import generate_latest_docs
+from sdb.utils.llms import generate_llms_txt
 
 logger = logging.getLogger(__name__)
 
@@ -547,69 +550,72 @@ def refresh_cache_for_target(
 # ---------------------------------------------------------------------------
 
 
-# Mapping of known command patterns to (module_path, function_name) tuples.
-# When a command list matches one of these keys (as a tuple), the
-# corresponding function is called directly instead of via subprocess.
-_INLINE_COMMAND_MAP: Dict[Tuple[str, ...], Tuple[str, str]] = {
-    ("python3", "_utils/generate_latest_docs.py"): (
-        "sdb.utils.latest",
-        "generate_latest_docs",
-    ),
-    ("python3", "resolve.py"): (
-        "sdb.resolve",
-        "resolve_all",
-    ),
-    ("python3", "_utils/generate_llms_txt.py"): (
-        "sdb.utils.llms",
-        "generate_llms_txt",
-    ),
-}
-
-
-# Default pre-build commands (always run first, before user config)
-_DEFAULT_PRE_BUILD_COMMANDS = [
-    ["python3", "_utils/generate_latest_docs.py"],
-    ["python3", "resolve.py"],
+# Default pre-build sequence (always runs first, before user config)
+_DEFAULT_PRE_BUILD: List[Callable[[Path], Any] | List[str]] = [
+    generate_latest_docs,
+    resolve_all,
     ["rumdl", "fmt", ".", "--silent", "--disable", "MD036"],
 ]
 
-# Default post-render commands (always run first, before user config)
-_DEFAULT_POST_RENDER_COMMANDS = [
-    ["python3", "_utils/generate_llms_txt.py"],
+# Default post-render sequence (always runs after build)
+_DEFAULT_POST_RENDER: List[Callable[[Path], Any] | List[str]] = [
+    generate_llms_txt,
 ]
 
 
-def _try_dispatch_inline(
-    cmd: List[str],
+def _run_default_sequence(
+    steps: List[Callable[[Path], Any] | List[str]],
     docs_root: Path,
-    log: logging.Logger,
     phase: str,
-) -> bool:
-    """Try to dispatch *cmd* to an in-process function instead of subprocess.
-
-    Returns ``True`` if the command was handled (success or failure logged),
-    ``False`` if the caller should fall through to subprocess.
-    """
-    key = tuple(cmd)
-    if key not in _INLINE_COMMAND_MAP:
-        logger.debug(f"{phase}: no inline handler for {' '.join(cmd)}, fallback to subprocess")
-        return False
-
-    module_name, func_name = _INLINE_COMMAND_MAP[key]
-    log.info(f"{phase}: calling {module_name}.{func_name}(docs_root={docs_root})")
-    try:
-        import importlib
-
-        module = importlib.import_module(module_name)
-        func = getattr(module, func_name)
-        func(docs_root)
-        log.info(f"{phase}: inline function '{func_name}' completed.")
-    except Exception as e:
-        log.warning(
-            f"{phase}: inline function '{func_name}' raised: {e}, "
-            f"continuing..."
-        )
-    return True
+) -> None:
+    """Run a sequence of default steps, each either a callable or a
+    subprocess command list."""
+    logger.info(
+        "Running %d default %s step(s)...", len(steps), phase.lower()
+    )
+    for step in steps:
+        if callable(step):
+            logger.info(
+                "%s: calling %s(docs_root=%s)", phase, step.__name__, docs_root
+            )
+            try:
+                step(docs_root)
+            except Exception as e:
+                logger.warning(
+                    "%s: %s raised: %s, continuing...",
+                    phase, step.__name__, e,
+                )
+        else:
+            executable = step[0]
+            if not shutil.which(executable):
+                logger.info(
+                    "%s: '%s' not found in PATH, skipping.", phase, executable
+                )
+                continue
+            logger.info("%s: running %s", phase, " ".join(step))
+            try:
+                result = subprocess.run(
+                    step, cwd=docs_root, capture_output=True, text=True
+                )
+                if result.stdout:
+                    logger.debug(result.stdout.strip())
+                if result.stderr:
+                    logger.warning(result.stderr.strip())
+                if result.returncode != 0:
+                    logger.warning(
+                        "%s command '%s' failed with exit code "
+                        "%d, continuing...",
+                        phase, executable, result.returncode,
+                    )
+                else:
+                    logger.info(
+                        "%s command '%s' succeeded.", phase, " ".join(step)
+                    )
+            except Exception as e:
+                logger.warning(
+                    "%s command '%s' raised: %s, continuing...",
+                    phase, executable, e,
+                )
 
 
 def _run_config_commands(
@@ -621,8 +627,7 @@ def _run_config_commands(
     """Execute commands from a named config section (pre_build / post_render).
 
     Handles both global commands (``_global``) and target-specific entries.
-    Known Python commands are dispatched inline via ``_try_dispatch_inline``;
-    others are run as subprocesses.
+    Commands are run as subprocesses.
     """
     if not section:
         return
@@ -679,9 +684,6 @@ def _run_config_commands(
             logger.warning(f"Invalid {prefix} entry: {cmd}, skipping.")
             continue
         executable = cmd[0]
-
-        if _try_dispatch_inline(cmd, docs_root, logger, phase):
-            continue
 
         if not shutil.which(executable):
             logger.info(f"{phase}: '{executable}' not found in PATH, skipping.")
@@ -1339,6 +1341,74 @@ def build_generic(
 # ---------------------------------------------------------------------------
 
 
+def _init_jupyter_db(cache_path: Path) -> None:
+    """Pre-create the jupyter kernel SQLite database to prevent parallel
+    race conditions.
+
+    Parallel Quarto renders attempt ``CREATE TABLE settings`` simultaneously
+    on the same database, producing::
+
+      (sqlite3.OperationalError) table settings already exists
+
+    Creating the database and tables before any parallel render eliminates
+    the race entirely.
+    """
+    import sqlite3
+
+    version_file = cache_path / "__version__.txt"
+    if version_file.exists():
+        return  # already initialized
+
+    version_file.write_text("1.0.1")
+    (cache_path / "executed").mkdir(parents=True, exist_ok=True)
+
+    db_path = cache_path / "global.db"
+    try:
+        con = sqlite3.connect(str(db_path))
+        con.execute("PRAGMA journal_mode=WAL")
+        con.executescript("""
+            CREATE TABLE IF NOT EXISTS settings (
+                pk INTEGER NOT NULL,
+                "key" VARCHAR(36) NOT NULL,
+                value JSON,
+                PRIMARY KEY (pk),
+                UNIQUE ("key")
+            );
+            CREATE TABLE IF NOT EXISTS nbproject (
+                pk INTEGER NOT NULL,
+                uri VARCHAR(255) NOT NULL,
+                read_data JSON NOT NULL,
+                assets JSON NOT NULL,
+                exec_data JSON,
+                created DATETIME NOT NULL,
+                traceback TEXT,
+                PRIMARY KEY (pk),
+                UNIQUE (uri)
+            );
+            CREATE TABLE IF NOT EXISTS nbcache (
+                pk INTEGER NOT NULL,
+                hashkey VARCHAR(255) NOT NULL,
+                uri VARCHAR(255) NOT NULL,
+                description VARCHAR(255) NOT NULL,
+                data JSON,
+                created DATETIME NOT NULL,
+                accessed DATETIME NOT NULL,
+                PRIMARY KEY (pk),
+                UNIQUE (hashkey)
+            );
+        """)
+        con.commit()
+        con.close()
+        logger.debug(
+            "Pre-warmed jupyter kernel database at %s", db_path
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to pre-warm jupyter database at %s: %s",
+            db_path, e,
+        )
+
+
 def initialize_config(docs_root: Path, config_path: Optional[Path] = None) -> None:
     """Initialize global configuration for the given docs root.
 
@@ -1355,6 +1425,12 @@ def initialize_config(docs_root: Path, config_path: Optional[Path] = None) -> No
     jupyter_cache_path.mkdir(parents=True, exist_ok=True)
     JUPYTER_CACHE_PATH = jupyter_cache_path
     os.environ["JUPYTERCACHE"] = str(jupyter_cache_path)
+
+    # Pre-warm the jupyter kernel SQLite database so parallel Quarto
+    # renders do not race on CREATE TABLE.  Multiple processes trying to
+    # create the same table simultaneously produce:
+    #   (sqlite3.OperationalError) table settings already exists
+    _init_jupyter_db(jupyter_cache_path)
 
     EXTERNAL_CONFIG = load_external_config(config_path)
     TARGET_CONFIG = get_target_config(docs_root, EXTERNAL_CONFIG)
@@ -1639,13 +1715,8 @@ def build_targets(
 
     build_temp_path = docs_root.parent / BUILD_TEMP_DIR
 
-    # Run built-in default pre-build commands once
-    _run_config_commands(
-        {"_global": _DEFAULT_PRE_BUILD_COMMANDS},
-        docs_root,
-        "Pre-build",
-        target_name=None,
-    )
+    # Run built-in default pre-build sequence once
+    _run_default_sequence(_DEFAULT_PRE_BUILD, docs_root, "Pre-build")
 
     run_pre_build_commands(EXTERNAL_CONFIG, docs_root)
 
@@ -1831,13 +1902,8 @@ def build_targets(
             )
 
             _sync_llms_files(final_output, docs_root)
-            # Run built-in default post-render commands once
-            _run_config_commands(
-                {"_global": _DEFAULT_POST_RENDER_COMMANDS},
-                docs_root,
-                "Post-render",
-                target_name=None,
-            )
+            # Run built-in default post-render sequence once
+            _run_default_sequence(_DEFAULT_POST_RENDER, docs_root, "Post-render")
             run_post_render_commands(EXTERNAL_CONFIG, docs_root)
 
             return True
@@ -1912,13 +1978,8 @@ def build_targets(
             docs_root=docs_root,
         )
 
-    # Run built-in default post-render commands once
-    _run_config_commands(
-        {"_global": _DEFAULT_POST_RENDER_COMMANDS},
-        docs_root,
-        "Post-render",
-        target_name=None,
-    )
+    # Run built-in default post-render sequence once
+    _run_default_sequence(_DEFAULT_POST_RENDER, docs_root, "Post-render")
     run_post_render_commands(EXTERNAL_CONFIG, docs_root)
 
     return True

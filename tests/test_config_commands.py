@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from typing import Generator
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -17,7 +17,7 @@ def docs_root() -> Path:
 
 
 @pytest.fixture
-def mock_subprocess() -> MagicMock:
+def mock_subprocess() -> Generator[MagicMock, None, None]:
     with patch("sdb.build.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             returncode=0, stdout="", stderr=""
@@ -26,21 +26,14 @@ def mock_subprocess() -> MagicMock:
 
 
 @pytest.fixture
-def mock_which() -> MagicMock:
+def mock_which() -> Generator[MagicMock, None, None]:
     with patch("sdb.build.shutil.which") as mock_w:
         mock_w.return_value = "/usr/bin/echo"
         yield mock_w
 
 
 @pytest.fixture
-def mock_dispatch() -> MagicMock:
-    with patch("sdb.build._try_dispatch_inline") as mock_d:
-        mock_d.return_value = False
-        yield mock_d
-
-
-@pytest.fixture
-def mock_logger() -> MagicMock:
+def mock_logger() -> Generator[MagicMock, None, None]:
     with patch("sdb.build.logger") as mock_log:
         yield mock_log
 
@@ -67,7 +60,6 @@ class TestListStyleGlobalCommands:
         docs_root: Path,
         mock_subprocess: MagicMock,
         mock_which: MagicMock,
-        mock_dispatch: MagicMock,
     ) -> None:
         section = [["echo", "hello"]]
         _run_config_commands(section, docs_root, "Pre-build")
@@ -83,7 +75,6 @@ class TestListStyleGlobalCommands:
         docs_root: Path,
         mock_subprocess: MagicMock,
         mock_which: MagicMock,
-        mock_dispatch: MagicMock,
     ) -> None:
         section = [["echo", "one"], ["echo", "two"]]
         _run_config_commands(section, docs_root, "Pre-build")
@@ -94,7 +85,6 @@ class TestListStyleGlobalCommands:
         docs_root: Path,
         mock_subprocess: MagicMock,
         mock_which: MagicMock,
-        mock_dispatch: MagicMock,
     ) -> None:
         """List-style section with target_name that doesn't exist in target_commands
         runs nothing (list-style implies no target-keyed entries).
@@ -112,7 +102,6 @@ class TestDictStyleWithGlobalKey:
         docs_root: Path,
         mock_subprocess: MagicMock,
         mock_which: MagicMock,
-        mock_dispatch: MagicMock,
     ) -> None:
         section = {"_global": [["echo", "hello"]]}
         _run_config_commands(section, docs_root, "Pre-build")
@@ -128,7 +117,6 @@ class TestDictStyleWithGlobalKey:
         docs_root: Path,
         mock_subprocess: MagicMock,
         mock_which: MagicMock,
-        mock_dispatch: MagicMock,
     ) -> None:
         section = {
             "_global": [["echo", "global"]],
@@ -147,7 +135,6 @@ class TestDictStyleWithGlobalKey:
         docs_root: Path,
         mock_subprocess: MagicMock,
         mock_which: MagicMock,
-        mock_dispatch: MagicMock,
     ) -> None:
         section = {"_global": []}
         _run_config_commands(section, docs_root, "Pre-build")
@@ -162,7 +149,6 @@ class TestDictStyleTargetSpecific:
         docs_root: Path,
         mock_subprocess: MagicMock,
         mock_which: MagicMock,
-        mock_dispatch: MagicMock,
     ) -> None:
         section = {
             "_global": [["echo", "global"]],
@@ -185,7 +171,6 @@ class TestDictStyleTargetSpecific:
         docs_root: Path,
         mock_subprocess: MagicMock,
         mock_which: MagicMock,
-        mock_dispatch: MagicMock,
     ) -> None:
         """target_name that doesn't exist in target_commands -> nothing runs.
         Global commands only execute when target_name is None.
@@ -204,7 +189,6 @@ class TestDictStyleTargetSpecific:
         docs_root: Path,
         mock_subprocess: MagicMock,
         mock_which: MagicMock,
-        mock_dispatch: MagicMock,
     ) -> None:
         section = {"whitepaper": [["echo", "whitepaper"]]}
         _run_config_commands(
@@ -247,10 +231,8 @@ class TestInvalidCommandEntry:
         self,
         docs_root: Path,
         mock_subprocess: MagicMock,
-        mock_dispatch: MagicMock,
         mock_logger: MagicMock,
     ) -> None:
-        mock_dispatch.return_value = False
         with patch("sdb.build.shutil.which") as mock_which:
             mock_which.return_value = "/usr/bin/echo"
             section = [["echo", "valid"], "invalid_string"]
@@ -271,10 +253,8 @@ class TestInvalidCommandEntry:
         self,
         docs_root: Path,
         mock_subprocess: MagicMock,
-        mock_dispatch: MagicMock,
         mock_logger: MagicMock,
     ) -> None:
-        mock_dispatch.return_value = False
         with patch("sdb.build.shutil.which") as mock_which:
             mock_which.return_value = "/usr/bin/echo"
             section = [["echo", "valid"], []]
@@ -290,10 +270,8 @@ class TestInvalidCommandEntry:
         self,
         docs_root: Path,
         mock_subprocess: MagicMock,
-        mock_dispatch: MagicMock,
         mock_logger: MagicMock,
     ) -> None:
-        mock_dispatch.return_value = False
         with patch("sdb.build.shutil.which") as mock_which:
             mock_which.return_value = "/usr/bin/echo"
             # Use a dict (not list or str) to trigger the invalid-type warning.
@@ -321,7 +299,6 @@ class TestPhaseLabelInLogs:
         docs_root: Path,
         mock_subprocess: MagicMock,
         mock_which: MagicMock,
-        mock_dispatch: MagicMock,
         mock_logger: MagicMock,
     ) -> None:
         section = [["echo", "hello"]]
@@ -337,7 +314,6 @@ class TestPhaseLabelInLogs:
         docs_root: Path,
         mock_subprocess: MagicMock,
         mock_which: MagicMock,
-        mock_dispatch: MagicMock,
         mock_logger: MagicMock,
     ) -> None:
         section = [["echo", "hello"]]
