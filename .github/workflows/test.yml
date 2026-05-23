@@ -1,34 +1,28 @@
-name: Test
+# Test suite frontend
+#
+# Runs all test suites under tests/ via tests/run.sh:
+#   1. Python unit tests (pytest)
+#   2. Production workflow test (sdb build docs --website on real ssccs repo)
+#
+# Pass = production build is verified end-to-end + unit tests pass.
+
+name: test
 
 on:
   push:
     branches: ["main"]
-    paths:
-      - "src/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - ".github/workflows/test.yml"
   pull_request:
     branches: ["main"]
-
-permissions:
-  contents: read
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    container: ghcr.io/ssccsorg/sdbs:latest
+    timeout-minutes: 30
+
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          pip install -e .
-          pip install pytest
-
-      - name: Run tests
-        run: python -m pytest tests/ -v
+      - name: Run all test suites
+        run: ./tests/run.sh
