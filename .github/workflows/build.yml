@@ -64,8 +64,6 @@ jobs:
           file: Dockerfile
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build
           load: true
-          cache-from: type=gha,scope=shared-sdbs
-          cache-to: type=gha,mode=min,scope=shared-sdbs
           provenance: false
           sbom: false
 
