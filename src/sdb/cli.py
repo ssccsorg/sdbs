@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> None:
         "--template",
         type=str,
         default="default",
-        help="Template flavour to use (default: 'default', available: 'default', 'ssccs')",
+        help="Template flavour to use (default: 'default', available: 'default', 'advanced')"
     )
 
     # --- build ---

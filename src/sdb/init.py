@@ -29,8 +29,8 @@ DEFAULT_TEMPLATE_MAP: dict[str, str] = {
     ".gitignore": "_gitignore",
 }
 
-# SSCCS-specific template map (adds SSCCS-specific files on top of default)
-SSCCS_TEMPLATE_MAP: dict[str, str] = {
+# Advanced template map (adds graphviz, metadata, and multi-format examples)
+ADVANCED_TEMPLATE_MAP: dict[str, str] = {
     **DEFAULT_TEMPLATE_MAP,
     "_include/_graphviz.py": "_include/_graphviz.py",
     "_include/_title_meta_items.qmd": "_include/_title_meta_items.qmd",
@@ -78,7 +78,7 @@ def scaffold(target_dir: Path, force: bool = False, template: str = "default") -
         template = "default"
         template_dir = TEMPLATES_PACKAGE / template
 
-    template_map = SSCCS_TEMPLATE_MAP if template == "ssccs" else DEFAULT_TEMPLATE_MAP
+    template_map = ADVANCED_TEMPLATE_MAP if template == "advanced" else DEFAULT_TEMPLATE_MAP
 
     logger.info(f"Using '{template}' template set")
 
@@ -108,7 +108,7 @@ def scaffold(target_dir: Path, force: bool = False, template: str = "default") -
     logger.info(f"Done. {total} file(s) written to {target}")
     logger.info("")
     logger.info("Next steps:")
-    if template == "ssccs":
+    if template == "advanced":
         logger.info("  1. Edit _include/author.yml with your information")
         logger.info("  2. Edit _quarto-website.yml with your site URL and repo")
         logger.info("  3. Review _include/_graphviz.py for DOT diagram utilities")

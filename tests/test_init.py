@@ -110,19 +110,19 @@ class TestScaffoldFullRun:
                 f"Expected file {rel_path} was not created"
             )
 
-    def test_ssccs_template_creates_extra_files(
+    def test_advanced_template_creates_extra_files(
         self, temp_target: Path
     ) -> None:
-        """The 'ssccs' template should create ssccs-specific files."""
-        result = scaffold(temp_target, force=False, template="ssccs")
+        """The 'advanced' template should create extra files."""
+        result = scaffold(temp_target, force=False, template="advanced")
         assert result is True
-        ssccs_files = [
+        extra_files = [
             "_include/_graphviz.py",
             "_include/_title_meta_items.qmd",
         ]
-        for rel_path in ssccs_files:
+        for rel_path in extra_files:
             assert (temp_target / rel_path).exists(), (
-                f"Expected SSCCS-specific file {rel_path} was not created"
+                f"Expected file {rel_path} was not created by advanced template"
             )
 
     def test_return_false_on_copy_error(self, temp_target: Path) -> None:

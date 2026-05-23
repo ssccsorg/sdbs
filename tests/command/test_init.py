@@ -67,21 +67,21 @@ class TestInitDefault:
         assert content != "user content"
 
 
-class TestInitSsccsTemplate:
-    """``sdb init --template ssccs`` creates SSCCS-specific files."""
+class TestInitAdvancedTemplate:
+    """``sdb init --template advanced`` creates extra files."""
 
-    def test_ssccs_creates_extra_files(self, tmp_path: Path) -> None:
+    def test_advanced_creates_extra_files(self, tmp_path: Path) -> None:
         target = tmp_path / "site"
-        code = _run_init([str(target), "--template", "ssccs"])
+        code = _run_init([str(target), "--template", "advanced"])
         assert code == 0
         assert (target / "_include" / "_graphviz.py").exists()
         assert (target / "_include" / "_title_meta_items.qmd").exists()
 
-    def test_ssccs_with_force_overwrites(self, tmp_path: Path) -> None:
+    def test_advanced_with_force_overwrites(self, tmp_path: Path) -> None:
         target = tmp_path / "forced"
         target.mkdir()
         (target / "build.yml").write_text("old")
-        code = _run_init([str(target), "--force", "--template", "ssccs"])
+        code = _run_init([str(target), "--force", "--template", "advanced"])
         assert code == 0
         assert (target / "build.yml").read_text() != "old"
 
@@ -105,6 +105,22 @@ class TestInitThenBuild:
         target = tmp_path / "buildable"
         code = _run_init([str(target)])
         assert code == 0
+
+        result = subprocess.run(
+            [sys.executable, "-m", "sdb.cli", "build", str(target), "index", "--sequence"],
+            capture_output=True, text=True,
+            cwd=str(SDBS_SRC.parent), env=_build_env(), timeout=60,
+        )
+        assert result.returncode == 0, f"Build failed:\n{result.stderr}"
+        assert (target / "index.html").exists()
+
+    @pytest.mark.slow
+    def test_advanced_custom_path_builds(self, tmp_path: Path) -> None:
+        """``sdb init mydocs --template advanced --force`` then build."""
+        target = tmp_path / "mydocs"
+        code = _run_init([str(target), "--template", "advanced", "--force"])
+        assert code == 0
+        assert (target / "_include" / "_graphviz.py").exists()
 
         result = subprocess.run(
             [sys.executable, "-m", "sdb.cli", "build", str(target), "index", "--sequence"],

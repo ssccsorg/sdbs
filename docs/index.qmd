@@ -1,7 +1,6 @@
 ---
 title: "SSCCS Documentation"
 subtitle: "Networked Knowledge Base"
-format: html
 ---
 
 ```{python}

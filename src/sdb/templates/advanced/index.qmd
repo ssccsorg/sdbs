@@ -1,0 +1,266 @@
+---
+# Title of the documentation site.
+title: "SDBS Documentation"
+# Subtitle shown below the title on the landing page.
+subtitle: "Build System Specification and Guide"
+# Default output format: html.
+# For multi-format output, use a map with per-format keys:
+#   format:
+#     html: {}
+#     pdf:
+#       include-in-header:
+#         text: |
+#           \\usepackage{geometry}
+# See below for a complete multi-format configuration example.
+# When pdf format is included, ensure format-specific overrides are
+# configured correctly (e.g., LaTeX packages for PDF rendering).
+format: html
+# Metadata files are merged into page frontmatter at render time.
+# Use this for shared author info, format overrides, etc.
+# metadata-files:
+#   - ./_include/author.yml
+#   - ./_include/format.pdf.yml
+# Bibliography file for citations (BibTeX format).
+# bibliography: references.bib
+# Enable link citations in the HTML output.
+# link-citations: true
+# Enable colored hyperlinks (works for both HTML and PDF output).
+# colorlinks: true
+---
+
+```{python}
+#| include: false
+#| context: local
+%run ./_include/_graphviz.py
+```
+
+```{python}
+#| label: fig-sdbs-architecture
+#| fig-cap: "SDBS architecture: from source documents to published outputs"
+dot("""
+digraph SDBSArchitecture {
+    rankdir=TB;
+    node [shape=box, style=rounded, fillcolor=lightyellow, style=filled];
+
+    subgraph cluster_source {
+        label="Source Documents";
+        style=dashed;
+        color=gray60;
+        QMD [label="*.qmd files\n(YAML frontmatter)"];
+        INC [label="_include/\n(shared fragments)"];
+        YML [label="build.yml\n(configuration)"];
+    }
+
+    subgraph cluster_build {
+        label="SDBS Build Engine";
+        style=dashed;
+        color=gray60;
+        SCHED [label="Scheduler\n(dependency graph)"];
+        CACHE [label="Cache\n(content-addressed)"];
+        PAR [label="Worker Pool\n(parallel renders)"];
+        SCHED -> CACHE;
+        SCHED -> PAR;
+    }
+
+    subgraph cluster_output {
+        label="Output Formats";
+        style=dashed;
+        color=gray60;
+        HTML [label="HTML\n(website)"];
+        PDF [label="PDF\n(print/archive)"];
+        DOCX [label="DOCX\n(collaboration)"];
+    }
+
+    QMD -> SCHED;
+    INC -> SCHED;
+    YML -> SCHED;
+    PAR -> HTML;
+    PAR -> PDF;
+    PAR -> DOCX;
+}
+""")
+```
+
+Welcome to the SDBS Documentation Build System. This platform manages the
+end-to-end rendering pipeline for Quarto-based documentation projects, from
+source discovery through parallel rendering to multi-format output. SDBS
+handles caching, dependency tracking, and profile-based configuration so that
+documentation authors focus on content rather than build orchestration.
+
+{{< include _include/_updated_docs_list.qmd >}}
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Multi-format output configuration reference                         -->
+<!-- ------------------------------------------------------------------ -->
+<!--
+To enable multi-format output (html + pdf), replace the top-level
+`format: html` line with the following block:
+
+format:
+  html: {}
+  pdf:
+    # LaTeX header inclusions for PDF typography and metadata.
+    include-in-header:
+      text: |
+        \\usepackage{geometry}
+        \\usepackage{microtype}
+        \\addtokomafont{disposition}{\\rmfamily}
+        \\input{./_files/document_metadata.tex}
+        \\makeatletter
+        \\def\\@maketitle{
+          {\\LARGE \\bfseries \\@title \\par}
+          \\vspace{0.3em}
+          {\\large \\@subtitle \\par}
+          \\vspace{2em}
+        }
+        \\makeatother
+
+When using multi-format mode:
+  - Verify that `bibliography` and `link-citations` are set.
+  - Add format-specific metadata files under `metadata-files` (e.g.
+    `_include/format.pdf.yml` for PDF-only overrides).
+  - Test each format individually: `quarto render file.qmd --to pdf`
+  - See the riscv_space.qmd template in the research directory for a
+    complete working example.
+-->
+
+```{python}
+#| label: fig-pipeline-simple
+#| fig-cap: "Simple data pipeline graph using Python-DOT"
+dot("""
+digraph Pipeline {
+    rankdir=LR;
+    node [shape=box, style=rounded, fillcolor=lightyellow, style=filled];
+    edge [color=gray40];
+    Source [label="Data Source"];
+    Validate [label="Validation"];
+    Transform [label="Transformation"];
+    Store [label="Storage"];
+    Report [label="Reporting"];
+    Source -> Validate [label="raw"];
+    Validate -> Transform [label="clean"];
+    Transform -> Store [label="processed"];
+    Store -> Report [label="aggregated"];
+}
+""")
+```
+
+---
+
+## Build System Features
+
+### Parallel Rendering
+
+SDBS renders multiple Quarto documents concurrently, using physical CPU cores
+for optimal throughput. The worker pool size is configurable via `build.yml`.
+Documents with no dependencies on each other are scheduled in parallel; the
+dependency graph is resolved before any render begins.
+
+### Intelligent Caching
+
+Each document is content-addressed by a hash of its source text, included
+fragments, and configuration. SDBS skips rendering for documents whose hash
+matches the previous build. Modifying an included fragment triggers rebuilds
+only for documents that actually include it. Cache entries are stored in
+`.sdb_cache` by default.
+
+### External Configuration
+
+Build parameters are externalized in `build.yml`, which supports:
+
+- **Target-specific overrides**: Set per-file or per-glob format options, PDF
+  LaTeX headers, and output directories.
+- **Exclusion patterns**: Prevent draft or archive files from being included
+  in the build.
+- **Profiles**: Define `local`, `ci`, or custom profiles to control caching
+  behavior, link checking, and output cleaning per environment.
+
+### Multi-Format Output
+
+Each target can produce multiple output formats in a single build pass. Common
+format combinations include:
+
+- `html` only (default, fastest for iteration)
+- `html + pdf` (website with downloadable print copies)
+- `html + pdf + docx` (full distribution)
+
+Format-specific overrides (LaTeX packages, CSS, include-in-header) are applied
+per target, allowing fine-grained control without duplicating source files.
+
+### C2PA Provenance (Optional)
+
+Selected outputs can be signed with C2PA manifests, providing cryptographic
+proof of authorship and content integrity. Enable this per target in
+`build.yml`:
+
+```yaml
+targets:
+  - path: "release/*.qmd"
+    format:
+      - html
+      - pdf
+    c2pa:
+      enabled: true
+      manifest: "./_c2pa/manifest.json"
+```
+
+### Website-Mode Isolation
+
+For website profiles, each target is rendered in a fully isolated temporary
+directory, preventing resource conflicts between concurrent renders and
+enabling true parallel website generation.
+
+---
+
+## Build and Contribute
+
+SDBS (SSCCS Documentation Build System) orchestrates Quarto renders with
+intelligent caching and parallelism, enabling fast, reproducible builds of
+multi-format outputs. It is designed to handle complex documentation projects
+with many interdependent files while minimizing redundant work. All
+documentation is written in plain Markdown (`.md` / `.qmd`) with YAML
+frontmatter. The build is orchestrated by SDBS using
+[Quarto](https://quarto.org).
+
+### Environment Setup
+
+Clone the SDBS repository and use the provided Docker environment for a
+reproducible build state:
+
+```bash
+git clone https://github.com/ssccsorg/sdbs.git
+cd sdbs
+docker build -t sdbs .
+docker run --rm -v $(pwd)/docs:/workspace/docs sdbs
+```
+
+### Local Build (Without Docker)
+
+A preconfigured DevContainer provides all dependencies pre-installed for
+consistent development across platforms. Alternatively, install SDBS via pip:
+
+```bash
+git clone https://github.com/ssccsorg/sdbs.git
+cd sdbs
+pip install .
+sdbs-build /path/to/docs
+```
+
+### Quick Start
+
+```bash
+sdbs-build /path/to/docs           # generate all targets for local use
+sdbs-build /path/to/docs --website  # generate website-optimized outputs
+```
+
+For other usage examples and a complete description of the system, see the
+[SDBS repository](https://github.com/ssccsorg/sdbs).
+
+### Docs Checker
+
+SDBS includes a documentation validation tool (see the SDBS repository for
+CLI usage):
+
+- Links (local/remote, YAML frontmatter, BibTeX)
+- Citations: reports if `@key` is missing from `.bib`, or if `.bib` is
+  completely unused

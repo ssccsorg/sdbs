@@ -44,14 +44,14 @@ class TestInitCommand:
                 Path("/tmp/test"), force=True, template="default"
             )
 
-    def test_init_template_ssccs(self) -> None:
-        """sdb init --template ssccs -> template='ssccs'."""
+    def test_init_template_advanced(self) -> None:
+        """sdb init --template advanced -> template='advanced'."""
         with patch("sdb.cli.init_module.scaffold") as mock_scaffold:
             mock_scaffold.return_value = True
-            code = _run_main(["init", "--template", "ssccs"])
+            code = _run_main(["init", "--template", "advanced"])
             assert code == 0
             mock_scaffold.assert_called_once_with(
-                Path("docs"), force=False, template="ssccs"
+                Path("docs"), force=False, template="advanced"
             )
 
     def test_init_failure_exit_code(self) -> None:
@@ -66,11 +66,11 @@ class TestInitCommand:
         with patch("sdb.cli.init_module.scaffold") as mock_scaffold:
             mock_scaffold.return_value = True
             code = _run_main(
-                ["init", "/my/path", "--force", "--template", "ssccs"]
+                ["init", "/my/path", "--force", "--template", "advanced"]
             )
             assert code == 0
             mock_scaffold.assert_called_once_with(
-                Path("/my/path"), force=True, template="ssccs"
+                Path("/my/path"), force=True, template="advanced"
             )
 
 
