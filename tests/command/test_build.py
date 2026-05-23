@@ -119,7 +119,7 @@ class TestBuildReal:
         target = tmp_path / "reality"
         from sdb.cli import main as cli_main
         try:
-            cli_main(["init", str(target)])
+            cli_main(["init", str(target), "--template", "default"])
         except SystemExit as e:
             assert e.code in (None, 0)
         result = subprocess.run(

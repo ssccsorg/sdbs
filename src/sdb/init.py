@@ -113,7 +113,7 @@ def scaffold(target_dir: Path, force: bool = False, template: str = "default") -
         logger.info("  2. Edit _quarto-website.yml with your site URL and repo")
         logger.info("  3. Review _include/_graphviz.py for DOT diagram utilities")
         logger.info("  4. Add your content as .qmd files")
-        logger.info(f"  5. Run:  sdb build {build_path} --website")
+        logger.info(f"  5. Run:  sdb build {build_path} (--website)")
     else:
         logger.info("  1. Uncomment and configure _include/author.yml with your information")
         logger.info("  2. Uncomment and configure _quarto-website.yml with your site URL")

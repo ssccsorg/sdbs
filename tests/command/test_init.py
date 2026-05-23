@@ -41,19 +41,19 @@ class TestInitDefault:
 
     def test_default_template_creates_files(self, tmp_path: Path) -> None:
         target = tmp_path / "docs"
-        code = _run_init([str(target)])
+        code = _run_init([str(target), "--template", "default"])
         assert code == 0
         assert (target / "build.yml").exists()
         assert (target / "_quarto.yml").exists()
         assert (target / "index.qmd").exists()
-        code = _run_init([str(target)])
+        code = _run_init([str(target), "--template", "default"])
         assert code == 0
 
     def test_default_no_overwrite_without_force(self, tmp_path: Path) -> None:
         target = tmp_path / "existing"
         target.mkdir()
         (target / "build.yml").write_text("user content")
-        code = _run_init([str(target)])
+        code = _run_init([str(target), "--template", "default"])
         assert code == 0
         assert (target / "build.yml").read_text() == "user content"
 
@@ -61,7 +61,7 @@ class TestInitDefault:
         target = tmp_path / "overwrite"
         target.mkdir()
         (target / "build.yml").write_text("user content")
-        code = _run_init([str(target), "--force"])
+        code = _run_init([str(target), "--force", "--template", "default"])
         assert code == 0
         content = (target / "build.yml").read_text()
         assert content != "user content"
@@ -103,7 +103,7 @@ class TestInitThenBuild:
     @pytest.mark.slow
     def test_default_template_builds(self, tmp_path: Path) -> None:
         target = tmp_path / "buildable"
-        code = _run_init([str(target)])
+        code = _run_init([str(target), "--template", "default"])
         assert code == 0
 
         result = subprocess.run(

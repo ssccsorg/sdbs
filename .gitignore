@@ -73,3 +73,9 @@ examples/**/*_files/
 examples/**/*_output/
 examples/**/.quarto/
 examples/**/.jupyter_cache/
+
+# ============================================================
+# Test artifacts (created by command tests in repo root)
+# ============================================================
+_jupyter_cache/
+mydoc/

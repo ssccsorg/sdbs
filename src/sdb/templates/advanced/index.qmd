@@ -14,7 +14,13 @@ subtitle: "Build System Specification and Guide"
 # See below for a complete multi-format configuration example.
 # When pdf format is included, ensure format-specific overrides are
 # configured correctly (e.g., LaTeX packages for PDF rendering).
-format: html
+metadata-files:
+  - ./_include/author.yml
+  - ./_include/format.pdf.yml
+  - ./_include/format.html.yml
+format:
+  html: {}
+  pdf: {}
 # Metadata files are merged into page frontmatter at render time.
 # Use this for shared author info, format overrides, etc.
 # metadata-files:

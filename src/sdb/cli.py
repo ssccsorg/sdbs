@@ -79,8 +79,8 @@ def main(argv: list[str] | None = None) -> None:
     init_parser.add_argument(
         "--template",
         type=str,
-        default="default",
-        help="Template flavour to use (default: 'default', available: 'default', 'advanced')"
+        default=None,
+        help="Template flavour (omit to see available choices)"
     )
 
     # --- build ---
@@ -181,7 +181,35 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.command == "init":
-        success = init_module.scaffold(args.path, force=args.force, template=args.template)
+        template = args.template
+        if template is None:
+            templates_dir = init_module.TEMPLATES_PACKAGE
+            available = sorted(
+                [d.name for d in templates_dir.iterdir() if d.is_dir()]
+            )
+            print("Available templates:")
+            for i, name in enumerate(available, 1):
+                print(f"  {i}. {name}")
+            while True:
+                try:
+                    choice = input(
+                        f"Select template [1-{len(available)}] (default: 1): "
+                    ).strip()
+                    if not choice:
+                        choice = "1"
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(available):
+                        template = available[idx]
+                        break
+                except (ValueError, IndexError):
+                    pass
+                print(
+                    f"Invalid choice. Enter 1-{len(available)}.",
+                    file=sys.stderr,
+                )
+        success = init_module.scaffold(
+            args.path, force=args.force, template=template
+        )
         sys.exit(0 if success else 1)
 
     elif args.command == "build":

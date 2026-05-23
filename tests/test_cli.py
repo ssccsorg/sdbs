@@ -26,7 +26,10 @@ class TestInitCommand:
 
     def test_init_defaults(self) -> None:
         """sdb init -> command='init', path=Path('docs'), force=False, template='default'."""
-        with patch("sdb.cli.init_module.scaffold") as mock_scaffold:
+        with (
+            patch("sdb.cli.init_module.scaffold") as mock_scaffold,
+            patch("builtins.input", return_value="2"),
+        ):
             mock_scaffold.return_value = True
             code = _run_main(["init"])
             assert code == 0
@@ -36,7 +39,10 @@ class TestInitCommand:
 
     def test_init_custom_path_force(self) -> None:
         """sdb init /tmp/test --force -> path=Path('/tmp/test'), force=True."""
-        with patch("sdb.cli.init_module.scaffold") as mock_scaffold:
+        with (
+            patch("sdb.cli.init_module.scaffold") as mock_scaffold,
+            patch("builtins.input", return_value="2"),
+        ):
             mock_scaffold.return_value = True
             code = _run_main(["init", "/tmp/test", "--force"])
             assert code == 0
@@ -56,7 +62,10 @@ class TestInitCommand:
 
     def test_init_failure_exit_code(self) -> None:
         """When scaffold returns False, sdb init should exit with code 1."""
-        with patch("sdb.cli.init_module.scaffold") as mock_scaffold:
+        with (
+            patch("sdb.cli.init_module.scaffold") as mock_scaffold,
+            patch("builtins.input", return_value="2"),
+        ):
             mock_scaffold.return_value = False
             code = _run_main(["init"])
             assert code == 1

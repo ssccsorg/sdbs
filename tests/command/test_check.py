@@ -75,7 +75,7 @@ class TestCheckReal:
     def test_check_scaffolded_project(self, tmp_path: Path) -> None:
         from sdb.cli import main as cli_main
         try:
-            cli_main(["init", str(tmp_path / "docs")])
+            cli_main(["init", str(tmp_path / "docs"), "--template", "default"])
         except SystemExit as e:
             assert e.code in (None, 0)
         result = subprocess.run(
