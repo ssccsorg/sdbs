@@ -1,10 +1,4 @@
-# Build pipeline
-#
-# 1. Build the Docker image with layer caching via buildx.
-# 2. Run all test suites inside the built image.
-# 3. On main branch, push the image to the registry.
-
-name: build
+name: Build and Publish SDBS Image
 
 on:
   push:
@@ -15,29 +9,25 @@ on:
       - "src/**"
       - "tests/**"
       - ".github/workflows/**"
-  pull_request:
-    branches: ["main"]
   workflow_dispatch:
+
+concurrency:
+  group: "sdbs-image"
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ssccsorg/sdbs
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
-concurrency:
-  group: "docker-image"
-  cancel-in-progress: false
-
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -45,6 +35,9 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Build Docker image
         uses: docker/build-push-action@v7
@@ -54,9 +47,10 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           load: true
-          cache-from: type=gha
+          cache-from: type=gha,scope=shared-sdbs
+          cache-to: type=gha,mode=min,scope=shared-sdbs
           provenance: false
           sbom: false
 
@@ -66,12 +60,9 @@ jobs:
             -v ${{ github.workspace }}:/work \
             -w /work \
             -e PYTHONPATH=/work/src \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             bash -c "./tests/run.sh"
 
       - name: Push Docker image
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test-build \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
