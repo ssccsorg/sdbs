@@ -38,6 +38,9 @@ from .render import (
     CommandRunner,
     _render_formats,
 )
+from sdb.resolve import resolve_all
+from sdb.utils.latest import generate_latest_docs
+from sdb.utils.llms import generate_llms_txt
 
 logger = logging.getLogger(__name__)
 
@@ -547,69 +550,72 @@ def refresh_cache_for_target(
 # ---------------------------------------------------------------------------
 
 
-# Mapping of known command patterns to (module_path, function_name) tuples.
-# When a command list matches one of these keys (as a tuple), the
-# corresponding function is called directly instead of via subprocess.
-_INLINE_COMMAND_MAP: Dict[Tuple[str, ...], Tuple[str, str]] = {
-    ("python3", "_utils/generate_latest_docs.py"): (
-        "sdb.utils.latest",
-        "generate_latest_docs",
-    ),
-    ("python3", "resolve.py"): (
-        "sdb.resolve",
-        "resolve_all",
-    ),
-    ("python3", "_utils/generate_llms_txt.py"): (
-        "sdb.utils.llms",
-        "generate_llms_txt",
-    ),
-}
-
-
-# Default pre-build commands (always run first, before user config)
-_DEFAULT_PRE_BUILD_COMMANDS = [
-    ["python3", "_utils/generate_latest_docs.py"],
-    ["python3", "resolve.py"],
+# Default pre-build sequence (always runs first, before user config)
+_DEFAULT_PRE_BUILD: List[Callable[[Path], Any] | List[str]] = [
+    generate_latest_docs,
+    resolve_all,
     ["rumdl", "fmt", ".", "--silent", "--disable", "MD036"],
 ]
 
-# Default post-render commands (always run first, before user config)
-_DEFAULT_POST_RENDER_COMMANDS = [
-    ["python3", "_utils/generate_llms_txt.py"],
+# Default post-render sequence (always runs after build)
+_DEFAULT_POST_RENDER: List[Callable[[Path], Any] | List[str]] = [
+    generate_llms_txt,
 ]
 
 
-def _try_dispatch_inline(
-    cmd: List[str],
+def _run_default_sequence(
+    steps: List[Callable[[Path], Any] | List[str]],
     docs_root: Path,
-    log: logging.Logger,
     phase: str,
-) -> bool:
-    """Try to dispatch *cmd* to an in-process function instead of subprocess.
-
-    Returns ``True`` if the command was handled (success or failure logged),
-    ``False`` if the caller should fall through to subprocess.
-    """
-    key = tuple(cmd)
-    if key not in _INLINE_COMMAND_MAP:
-        logger.debug(f"{phase}: no inline handler for {' '.join(cmd)}, fallback to subprocess")
-        return False
-
-    module_name, func_name = _INLINE_COMMAND_MAP[key]
-    log.info(f"{phase}: calling {module_name}.{func_name}(docs_root={docs_root})")
-    try:
-        import importlib
-
-        module = importlib.import_module(module_name)
-        func = getattr(module, func_name)
-        func(docs_root)
-        log.info(f"{phase}: inline function '{func_name}' completed.")
-    except Exception as e:
-        log.warning(
-            f"{phase}: inline function '{func_name}' raised: {e}, "
-            f"continuing..."
-        )
-    return True
+) -> None:
+    """Run a sequence of default steps, each either a callable or a
+    subprocess command list."""
+    logger.info(
+        "Running %d default %s step(s)...", len(steps), phase.lower()
+    )
+    for step in steps:
+        if callable(step):
+            logger.info(
+                "%s: calling %s(docs_root=%s)", phase, step.__name__, docs_root
+            )
+            try:
+                step(docs_root)
+            except Exception as e:
+                logger.warning(
+                    "%s: %s raised: %s, continuing...",
+                    phase, step.__name__, e,
+                )
+        else:
+            executable = step[0]
+            if not shutil.which(executable):
+                logger.info(
+                    "%s: '%s' not found in PATH, skipping.", phase, executable
+                )
+                continue
+            logger.info("%s: running %s", phase, " ".join(step))
+            try:
+                result = subprocess.run(
+                    step, cwd=docs_root, capture_output=True, text=True
+                )
+                if result.stdout:
+                    logger.debug(result.stdout.strip())
+                if result.stderr:
+                    logger.warning(result.stderr.strip())
+                if result.returncode != 0:
+                    logger.warning(
+                        "%s command '%s' failed with exit code "
+                        "%d, continuing...",
+                        phase, executable, result.returncode,
+                    )
+                else:
+                    logger.info(
+                        "%s command '%s' succeeded.", phase, " ".join(step)
+                    )
+            except Exception as e:
+                logger.warning(
+                    "%s command '%s' raised: %s, continuing...",
+                    phase, executable, e,
+                )
 
 
 def _run_config_commands(
@@ -621,8 +627,7 @@ def _run_config_commands(
     """Execute commands from a named config section (pre_build / post_render).
 
     Handles both global commands (``_global``) and target-specific entries.
-    Known Python commands are dispatched inline via ``_try_dispatch_inline``;
-    others are run as subprocesses.
+    Commands are run as subprocesses.
     """
     if not section:
         return
@@ -679,9 +684,6 @@ def _run_config_commands(
             logger.warning(f"Invalid {prefix} entry: {cmd}, skipping.")
             continue
         executable = cmd[0]
-
-        if _try_dispatch_inline(cmd, docs_root, logger, phase):
-            continue
 
         if not shutil.which(executable):
             logger.info(f"{phase}: '{executable}' not found in PATH, skipping.")
@@ -1639,13 +1641,8 @@ def build_targets(
 
     build_temp_path = docs_root.parent / BUILD_TEMP_DIR
 
-    # Run built-in default pre-build commands once
-    _run_config_commands(
-        {"_global": _DEFAULT_PRE_BUILD_COMMANDS},
-        docs_root,
-        "Pre-build",
-        target_name=None,
-    )
+    # Run built-in default pre-build sequence once
+    _run_default_sequence(_DEFAULT_PRE_BUILD, docs_root, "Pre-build")
 
     run_pre_build_commands(EXTERNAL_CONFIG, docs_root)
 
@@ -1831,13 +1828,8 @@ def build_targets(
             )
 
             _sync_llms_files(final_output, docs_root)
-            # Run built-in default post-render commands once
-            _run_config_commands(
-                {"_global": _DEFAULT_POST_RENDER_COMMANDS},
-                docs_root,
-                "Post-render",
-                target_name=None,
-            )
+            # Run built-in default post-render sequence once
+            _run_default_sequence(_DEFAULT_POST_RENDER, docs_root, "Post-render")
             run_post_render_commands(EXTERNAL_CONFIG, docs_root)
 
             return True
@@ -1912,13 +1904,8 @@ def build_targets(
             docs_root=docs_root,
         )
 
-    # Run built-in default post-render commands once
-    _run_config_commands(
-        {"_global": _DEFAULT_POST_RENDER_COMMANDS},
-        docs_root,
-        "Post-render",
-        target_name=None,
-    )
+    # Run built-in default post-render sequence once
+    _run_default_sequence(_DEFAULT_POST_RENDER, docs_root, "Post-render")
     run_post_render_commands(EXTERNAL_CONFIG, docs_root)
 
     return True
