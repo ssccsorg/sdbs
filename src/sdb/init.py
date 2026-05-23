@@ -63,6 +63,8 @@ def scaffold(target_dir: Path, force: bool = False, template: str = "default") -
     target = target_dir.resolve()
     logger.info(f"Scaffolding docs directory: {target}")
 
+    build_path = str(target_dir)
+
     if not TEMPLATES_PACKAGE.is_dir():
         logger.error(f"Templates directory not found: {TEMPLATES_PACKAGE}")
         return False
@@ -111,10 +113,10 @@ def scaffold(target_dir: Path, force: bool = False, template: str = "default") -
         logger.info("  2. Edit _quarto-website.yml with your site URL and repo")
         logger.info("  3. Review _include/_graphviz.py for DOT diagram utilities")
         logger.info("  4. Add your content as .qmd files")
-        logger.info("  5. Run:  sdb build . --website")
+        logger.info(f"  5. Run:  sdb build {build_path} --website")
     else:
         logger.info("  1. Uncomment and configure _include/author.yml with your information")
         logger.info("  2. Uncomment and configure _quarto-website.yml with your site URL")
         logger.info("  3. Add your content as .qmd files")
-        logger.info("  4. Run:  sdb build . --website")
+        logger.info(f"  4. Run:  sdb build {build_path} --website")
     return True
