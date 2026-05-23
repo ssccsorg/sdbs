@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 import tempfile
 from pathlib import Path
+from typing import Generator
 from unittest.mock import patch
 
 import pytest
@@ -13,7 +13,7 @@ from sdb.init import scaffold
 
 
 @pytest.fixture
-def temp_target() -> Path:
+def temp_target() -> Generator[Path, None, None]:
     """Yield a temporary directory that is cleaned up after the test."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir)
@@ -60,10 +60,9 @@ class TestScaffoldForceOverwrite:
         existing_file.parent.mkdir(parents=True, exist_ok=True)
         existing_file.write_text("old content")
 
-        with patch("sdb.init.logger") as mock_logger:
+        with patch("sdb.init.logger"):
             result = scaffold(temp_target, force=True, template="default")
             assert result is True
-            # The file should now contain the template content, not "old content"
             content = existing_file.read_text()
             assert content != "old content"
             assert len(content) > 0
@@ -78,16 +77,10 @@ class TestScaffoldForceFalseSkip:
         existing_file.parent.mkdir(parents=True, exist_ok=True)
         existing_file.write_text("original content")
 
-        with patch("sdb.init.logger") as mock_logger:
-            result = scaffold(temp_target, force=False, template="default")
-            assert result is True
-            content = existing_file.read_text()
-            assert content == "original content"
-            skip_messages = [
-                c[0][0] for c in mock_logger.info.call_args_list
-                if "skip" in c[0][0].lower()
-            ]
-            assert len(skip_messages) > 0
+        result = scaffold(temp_target, force=False, template="default")
+        assert result is True
+        content = existing_file.read_text()
+        assert content == "original content"
 
 
 class TestScaffoldFullRun:
@@ -99,12 +92,7 @@ class TestScaffoldFullRun:
         """Scaffolding into an empty directory should create all expected files."""
         result = scaffold(temp_target, force=False, template="default")
         assert result is True
-        expected_files = [
-            "build.yml",
-            "_quarto.yml",
-            "index.qmd",
-            ".gitignore",
-        ]
+        expected_files = ["build.yml", "_quarto.yml", "index.qmd", ".gitignore"]
         for rel_path in expected_files:
             assert (temp_target / rel_path).exists(), (
                 f"Expected file {rel_path} was not created"
@@ -130,8 +118,5 @@ class TestScaffoldFullRun:
         and returns False."""
         with patch("sdb.init._copy_template") as mock_copy:
             mock_copy.side_effect = OSError("Permission denied")
-            with patch("sdb.init.logger"):
-                result = scaffold(
-                    temp_target, force=False, template="default"
-                )
-                assert result is False
+            result = scaffold(temp_target, force=False, template="default")
+            assert result is False

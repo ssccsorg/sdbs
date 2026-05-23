@@ -17,7 +17,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SDBS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FAILED=0
 
 # ANSI color helpers

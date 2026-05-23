@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from unittest.mock import patch
 
 from sdb.cli import main
 
