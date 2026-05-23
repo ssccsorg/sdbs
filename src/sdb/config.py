@@ -90,7 +90,10 @@ class ConfigManager:
 
     @staticmethod
     def get_target_config_from_external(external_config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-        return external_config.get("target_config", {})
+        raw = external_config.get("target_config", {})
+        if not isinstance(raw, dict):
+            return {}
+        return raw
 
     @staticmethod
     def matches_gitignore_pattern(rel_path: Path, patterns: List[str]) -> bool:
