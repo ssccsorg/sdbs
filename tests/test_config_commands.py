@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from typing import Generator
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -17,7 +17,7 @@ def docs_root() -> Path:
 
 
 @pytest.fixture
-def mock_subprocess() -> MagicMock:
+def mock_subprocess() -> Generator[MagicMock, None, None]:
     with patch("sdb.build.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             returncode=0, stdout="", stderr=""
@@ -26,14 +26,14 @@ def mock_subprocess() -> MagicMock:
 
 
 @pytest.fixture
-def mock_which() -> MagicMock:
+def mock_which() -> Generator[MagicMock, None, None]:
     with patch("sdb.build.shutil.which") as mock_w:
         mock_w.return_value = "/usr/bin/echo"
         yield mock_w
 
 
 @pytest.fixture
-def mock_logger() -> MagicMock:
+def mock_logger() -> Generator[MagicMock, None, None]:
     with patch("sdb.build.logger") as mock_log:
         yield mock_log
 
