@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 ubuntu:24.04
+FROM --platform=linux/amd64 mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 
 # Integrated management of environment variables
 ENV QUARTO_VER="1.9.35" \
@@ -38,8 +38,6 @@ RUN sed -i 's/archive.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.li
 RUN uv tool install rumdl==0.1.86
 
 # Install TinyTeX and LaTeX packages
-# tlmgr is updated first so subsequent package installs do not re-trigger
-# the ``updating tlmgr`` message at build time.
 RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
     && mv /root/.TinyTeX /opt/tinytex \
     && /opt/tinytex/bin/x86_64-linux/tlmgr path add \
@@ -60,7 +58,7 @@ RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
         microtype \
         beamer \
         translator \
-        luatexbase
+    && luaotfload-tool --list=config
 
 # Install Python dependencies for documentation rendering
 # jupyter is required for Quarto Jupyter engine; the rest are used by
