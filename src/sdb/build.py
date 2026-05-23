@@ -1342,46 +1342,71 @@ def build_generic(
 
 
 def _init_jupyter_db(cache_path: Path) -> None:
-    """Let Quarto initialize the jupyter kernel database naturally.
+    """Pre-create the jupyter kernel SQLite database to prevent parallel
+    race conditions.
 
-    Parallel Quarto renders race on ``CREATE TABLE`` in the jupyter kernel
-    database, producing::
+    Parallel Quarto renders attempt ``CREATE TABLE settings`` simultaneously
+    on the same database, producing::
 
       (sqlite3.OperationalError) table settings already exists
 
-    Running a single throwaway render once (before any parallel render)
-    lets Quarto create the database with its own internal schema, version,
-    and any migration logic -- no hardcoded SQL or version numbers needed.
+    Creating the database and tables before any parallel render eliminates
+    the race entirely.
     """
-    if (cache_path / "__version__.txt").exists():
+    import sqlite3
+
+    version_file = cache_path / "__version__.txt"
+    if version_file.exists():
         return  # already initialized
 
-    import tempfile
+    version_file.write_text("1.0.1")
+    (cache_path / "executed").mkdir(parents=True, exist_ok=True)
 
-    src = tempfile.mkdtemp()
-    qmd = Path(src) / "_warmup.qmd"
-    qmd.write_text(
-        "---\ndo-not-process: true\n---\n"
-        "```{python}\n# warming up jupyter cache\n```\n"
-    )
-
+    db_path = cache_path / "global.db"
     try:
-        subprocess.run(
-            ["quarto", "render", str(qmd), "--to", "html"],
-            capture_output=True,
-            text=True,
-            cwd=src,
-            timeout=30,
-        )
+        con = sqlite3.connect(str(db_path))
+        con.execute("PRAGMA journal_mode=WAL")
+        con.executescript("""
+            CREATE TABLE IF NOT EXISTS settings (
+                pk INTEGER NOT NULL,
+                "key" VARCHAR(36) NOT NULL,
+                value JSON,
+                PRIMARY KEY (pk),
+                UNIQUE ("key")
+            );
+            CREATE TABLE IF NOT EXISTS nbproject (
+                pk INTEGER NOT NULL,
+                uri VARCHAR(255) NOT NULL,
+                read_data JSON NOT NULL,
+                assets JSON NOT NULL,
+                exec_data JSON,
+                created DATETIME NOT NULL,
+                traceback TEXT,
+                PRIMARY KEY (pk),
+                UNIQUE (uri)
+            );
+            CREATE TABLE IF NOT EXISTS nbcache (
+                pk INTEGER NOT NULL,
+                hashkey VARCHAR(255) NOT NULL,
+                uri VARCHAR(255) NOT NULL,
+                description VARCHAR(255) NOT NULL,
+                data JSON,
+                created DATETIME NOT NULL,
+                accessed DATETIME NOT NULL,
+                PRIMARY KEY (pk),
+                UNIQUE (hashkey)
+            );
+        """)
+        con.commit()
+        con.close()
         logger.debug(
-            "Pre-warmed jupyter kernel cache at %s", cache_path
+            "Pre-warmed jupyter kernel database at %s", db_path
         )
     except Exception as e:
-        logger.debug(
-            "Jupyter warm-up skipped (non-fatal): %s", e
+        logger.warning(
+            "Failed to pre-warm jupyter database at %s: %s",
+            db_path, e,
         )
-    finally:
-        shutil.rmtree(src, ignore_errors=True)
 
 
 def initialize_config(docs_root: Path, config_path: Optional[Path] = None) -> None:
