@@ -38,10 +38,13 @@ RUN sed -i 's/archive.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.li
 RUN uv tool install rumdl==0.1.86
 
 # Install TinyTeX and LaTeX packages
+# tlmgr is updated first so subsequent package installs do not re-trigger
+# the ``updating tlmgr`` message at build time.
 RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
     && mv /root/.TinyTeX /opt/tinytex \
     && /opt/tinytex/bin/x86_64-linux/tlmgr path add \
     && chmod -R 755 /opt/tinytex \
+    && tlmgr update --self \
     && tlmgr install \
         babel-english \
         everypage \
@@ -58,6 +61,7 @@ RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
         microtype \
         beamer \
         translator \
+        luatexbase \
     && luaotfload-tool --list=config
 
 # Install Python dependencies for documentation rendering
