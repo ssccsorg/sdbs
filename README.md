@@ -1,6 +1,6 @@
 # SDBS
 
-SSCCS Documentation Build System — a portable Quarto orchestration layer.
+SSCCS Documentation Build System: a high-level orchestration layer for docs generation solutions (currently Quarto).
 
 ## Quick Start
 
