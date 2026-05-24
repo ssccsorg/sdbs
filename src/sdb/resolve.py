@@ -689,7 +689,7 @@ def _run_check_only(
 # ======================================================================
 # IncludeResolver — ensure _title_meta_items.qmd include is present
 # ======================================================================
-class IncludeResolver(_BaseResolver):
+class TitleMetaResolver(_BaseResolver):
     """Ensure every ``.qmd`` file includes the title-meta-items template.
 
     If a ``.qmd`` file has no ``{{< include ... _title_meta_items.qmd >}}``
@@ -701,7 +701,7 @@ class IncludeResolver(_BaseResolver):
     SOURCE_EXTENSIONS: Set[str] = {".qmd"}
     INCLUDE_FILE = "_include/_title_meta_items.qmd"
 
-    RE_INCLUDE = re.compile(
+    RE_TITLE_META = re.compile(
         r"\{\{<\s*include\s+[^>]*_title_meta_items\.qmd\s*>\}\}"
     )
 
@@ -727,60 +727,32 @@ class IncludeResolver(_BaseResolver):
         except Exception:
             return 0
 
-        # Beamer-only documents have no HTML output — no header needed.
-        # Remove any existing include so it won't render in beamer PDFs.
+        # Beamer-only: remove title-meta include (only, not other includes)
         if self._is_beamer_only(text):
-            m = self.RE_INCLUDE.search(text)
+            m = self.RE_TITLE_META.search(text)
             if m:
-                # Remove the include directive (and trailing newlines)
-                new_text = self.RE_INCLUDE.sub("", text, count=1).strip()
-                rel_display = file_path.relative_to(root)
+                new_text = self.RE_TITLE_META.sub("", text, count=1)
+                rel = file_path.relative_to(root)
                 if dry_run:
-                    print(f"\n[{rel_display}]")
+                    print(f"\n[{rel}]")
                     print(f"  - {m.group(0)}")
                     print("  + (removed -- beamer-only)")
                 else:
                     try:
                         file_path.write_text(new_text, encoding="utf-8")
                     except Exception as e:
-                        print(f"  ERROR writing {rel_display}: {e}", file=sys.stderr)
+                        print(f"  ERROR writing {rel}: {e}", file=sys.stderr)
                         return 0
-                    print(f"  {rel_display}: removed {{< include ... >}} (beamer-only)")
+                    print(f"  {rel}: removed {{< include ... >}} (beamer-only)")
                 return 1
             return 0
 
-        # Compute correct relative path from file to _include/_title_meta_items.qmd
-        include_abs = (root / self.INCLUDE_FILE).resolve()
         doc_dir = file_path.parent.resolve()
-        correct_rel = self._compute_rel_path(doc_dir, include_abs)
 
-        # Check if include already exists with a possibly wrong path
-        m = self.RE_INCLUDE.search(text)
-        if m:
-            existing = m.group(0)
-            expected = "{{< include " + correct_rel + " >}}"
-            if existing == expected:
-                return 0  # correct path already in place
-            # Replace wrong path with correct one
-            new_text = text[: m.start()] + expected + text[m.end() :]
-            rel_display = file_path.relative_to(root)
-            if dry_run:
-                print(f"\n[{rel_display}]")
-                print(f"  - {existing}")
-                print(f"  + {expected}")
-            else:
-                try:
-                    file_path.write_text(new_text, encoding="utf-8")
-                except Exception as e:
-                    print(
-                        f"  ERROR writing {rel_display}: {e}", file=sys.stderr
-                    )
-                    return 0
-                print(f"  {rel_display}: {existing} -> {expected}")
-            return 1
+        # Insert title-meta include if missing
+        if self.RE_TITLE_META.search(text):
+            return 0
 
-        # Include does not exist — insert after YAML frontmatter
-        # Skip auto-insertion for root index.qmd (homepage)
         if file_path.parent == root and file_path.name == "index.qmd":
             return 0
 
@@ -788,23 +760,23 @@ class IncludeResolver(_BaseResolver):
         if not m:
             return 0
 
+        include_abs = (root / self.INCLUDE_FILE).resolve()
+        correct_rel = self._compute_rel_path(doc_dir, include_abs)
         directive = f"\n{{{{< include {correct_rel} >}}}}\n"
         insert_at = m.end()
         new_text = text[:insert_at] + directive + text[insert_at:]
 
-        rel_display = file_path.relative_to(root)
+        rel_path = file_path.relative_to(root)
         if dry_run:
-            print(f"\n[{rel_display}]")
+            print(f"\n[{rel_path}]")
             print(f"  + {directive.strip()}")
         else:
             try:
                 file_path.write_text(new_text, encoding="utf-8")
             except Exception as e:
-                print(
-                    f"  ERROR writing {rel_display}: {e}", file=sys.stderr
-                )
+                print(f"  ERROR writing {rel_path}: {e}", file=sys.stderr)
                 return 0
-            print(f"  {rel_display}: added {{< include {correct_rel} >}}")
+            print(f"  {rel_path}: added {{< include {correct_rel} >}}")
 
         return 1
 
@@ -939,6 +911,93 @@ class DocExtResolver(_BaseResolver):
         )
 
 
+
+class IncludeResolver(_BaseResolver):
+    """Correct relative paths in ``{{< include ... >}}`` directives.
+
+    Scans all ``.qmd`` files for ``{{< include path >}}`` and corrects
+    the path if the file is not found at the given location. Searches
+    upward from the document directory for the same relative path.
+    """
+
+    _APPLY_BUILD_YML_EXCLUDE = True
+    SOURCE_EXTENSIONS: Set[str] = {".qmd", ".md"}
+
+    RE_INCLUDE = re.compile(
+        r"\{\{<\s*include\s+([^>\s]+)\s*>\}\}"
+    )
+
+    def fix_one_file(
+        self, file_path: Path, root: Path, dry_run: bool, verbose: bool
+    ) -> int:
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except Exception:
+            return 0
+
+        doc_dir = file_path.parent.resolve()
+        changes = 0
+
+        matches = list(self.RE_INCLUDE.finditer(text))
+        for m in reversed(matches):
+            raw_path = m.group(1).strip()
+            candidate = (doc_dir / raw_path).resolve()
+            if candidate.exists():
+                continue
+            # File not found — search upward for the same relative path
+            found = None
+            for parent in [doc_dir] + list(doc_dir.parents):
+                if parent == root.resolve().parent:
+                    break
+                probe = (parent / raw_path).resolve()
+                if probe.exists():
+                    found = probe
+                    break
+            if found is None:
+                if verbose:
+                    print(
+                        f"  {file_path.relative_to(root)}: {raw_path}  -> [NOT FOUND]"
+                    )
+                continue
+            correct_rel = self._compute_rel_path(doc_dir, found)
+            expected = "{{< include " + correct_rel + " >}}"
+            if m.group(0) == expected:
+                continue
+            text = text[: m.start()] + expected + text[m.end() :]
+            rel_display = file_path.relative_to(root)
+            if dry_run:
+                print(f"\n[{rel_display}]")
+                print(f"  - {m.group(0)}")
+                print(f"  + {expected}")
+            else:
+                print(f"  {rel_display}: {m.group(0)} -> {expected}")
+            changes += 1
+
+        if changes > 0 and not dry_run:
+            try:
+                file_path.write_text(text, encoding="utf-8")
+            except Exception as e:
+                print(f"  ERROR writing {file_path}: {e}", file=sys.stderr)
+                return 0
+
+        return changes
+
+    def resolve_all(
+        self,
+        root: Path,
+        scan_root: Path,
+        dry_run: bool,
+        verbose: bool,
+    ) -> Tuple[int, int]:
+        return self._run_fix_all(
+            root,
+            scan_root,
+            dry_run,
+            verbose,
+            "Correcting {{< include ... >}} paths",
+        )
+
+
 # ======================================================================
 # resolve_all — top-level entry point
 # ======================================================================
@@ -963,12 +1022,14 @@ def resolve_all(docs_root: Path, check_only: bool = False) -> bool:
         LinkResolver(),
         IncludeResolver(),
         DocExtResolver(),
+        TitleMetaResolver(),
     ]
     headers = [
         "Asset paths",
         "Markdown links",
-        "Missing title-meta-items include",
+        "Include paths",
         "Doc ext .qmd/.md -> .html",
+        "Missing title-meta-items include",
     ]
 
     dry_run = check_only
