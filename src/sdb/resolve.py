@@ -756,14 +756,27 @@ class TitleMetaResolver(_BaseResolver):
         if file_path.parent == root and file_path.name == "index.qmd":
             return 0
 
+        # Find insertion point: after YAML frontmatter, but if the file
+        # defines a ``title_meta_items`` dict in a Python code block,
+        # insert the include after that block so the variable is defined
+        # before the include tries to use it via ``globals()``.
         m = re.match(r"^---\s*\n.*?\n(?:---)\s*\n?", text, re.DOTALL)
         if not m:
             return 0
 
+        insert_at = m.end()
+
+        # Scan for title_meta_items = { ... }  code block
+        tmi_match = re.search(
+            r"```\{python\}\n.*?title_meta_items\s*=\s*\{.*?\}\s*\n```",
+            text[insert_at:], re.DOTALL,
+        )
+        if tmi_match:
+            insert_at += tmi_match.end()
+
         include_abs = (root / self.INCLUDE_FILE).resolve()
         correct_rel = self._compute_rel_path(doc_dir, include_abs)
         directive = f"\n{{{{< include {correct_rel} >}}}}\n"
-        insert_at = m.end()
         new_text = text[:insert_at] + directive + text[insert_at:]
 
         rel_path = file_path.relative_to(root)
