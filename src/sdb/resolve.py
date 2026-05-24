@@ -719,6 +719,21 @@ class TitleMetaResolver(_BaseResolver):
     # ------------------------------------------------------------------
     # Fix a single file
     # ------------------------------------------------------------------
+    @staticmethod
+    def _find_tmi_block_end(text: str, search_start: int = 0) -> int | None:
+        """Return the end position of the ``title_meta_items`` Python code
+        block, or ``None`` if not found."""
+        m = re.search(
+            r"```\{python\}\n.*?title_meta_items\s*=\s*\{.*?\}\s*\n```",
+            text[search_start:], re.DOTALL,
+        )
+        if m:
+            return search_start + m.end()
+        return None
+
+    # ------------------------------------------------------------------
+    # Fix a single file
+    # ------------------------------------------------------------------
     def fix_one_file(
         self, file_path: Path, root: Path, dry_run: bool, verbose: bool
     ) -> int:
@@ -727,7 +742,7 @@ class TitleMetaResolver(_BaseResolver):
         except Exception:
             return 0
 
-        # Beamer-only: remove title-meta include (only, not other includes)
+        # Beamer-only: remove title-meta include
         if self._is_beamer_only(text):
             m = self.RE_TITLE_META.search(text)
             if m:
@@ -747,49 +762,60 @@ class TitleMetaResolver(_BaseResolver):
                 return 1
             return 0
 
-        doc_dir = file_path.parent.resolve()
-
-        # Insert title-meta include if missing
-        if self.RE_TITLE_META.search(text):
-            return 0
-
         if file_path.parent == root and file_path.name == "index.qmd":
             return 0
 
-        # Find insertion point: after YAML frontmatter, but if the file
-        # defines a ``title_meta_items`` dict in a Python code block,
-        # insert the include after that block so the variable is defined
-        # before the include tries to use it via ``globals()``.
-        m = re.match(r"^---\s*\n.*?\n(?:---)\s*\n?", text, re.DOTALL)
-        if not m:
-            return 0
-
-        insert_at = m.end()
-
-        # Scan for title_meta_items = { ... }  code block
-        tmi_match = re.search(
-            r"```\{python\}\n.*?title_meta_items\s*=\s*\{.*?\}\s*\n```",
-            text[insert_at:], re.DOTALL,
-        )
-        if tmi_match:
-            insert_at += tmi_match.end()
-
+        doc_dir = file_path.parent.resolve()
         include_abs = (root / self.INCLUDE_FILE).resolve()
         correct_rel = self._compute_rel_path(doc_dir, include_abs)
         directive = f"\n{{{{< include {correct_rel} >}}}}\n"
-        new_text = text[:insert_at] + directive + text[insert_at:]
+
+        # Find positions
+        fm = re.match(r"^---\s*\n.*?\n(?:---)\s*\n?", text, re.DOTALL)
+        if not fm:
+            return 0
+        fm_end = fm.end()
+
+        tmi_block_end = self._find_tmi_block_end(text, fm_end)
+        existing_include = self.RE_TITLE_META.search(text)
+
+        # Determine where the include SHOULD be
+        if tmi_block_end is not None:
+            target_pos = tmi_block_end
+        else:
+            target_pos = fm_end
+
+        # Check if include already exists in the correct position
+        if existing_include:
+            inc_start = existing_include.start()
+            if abs(inc_start - target_pos) <= 2:
+                # Already correctly positioned (within 2 chars)
+                return 0
+            # Remove existing include (it's in the wrong place)
+            text = self.RE_TITLE_META.sub("", text, count=1)
+            # Adjust target_pos if the include was before it
+            if inc_start < target_pos:
+                target_pos -= (existing_include.end() - existing_include.start())
+
+        new_text = text[:target_pos] + directive + text[target_pos:]
 
         rel_path = file_path.relative_to(root)
+        action = "moved" if existing_include else "added"
         if dry_run:
-            print(f"\n[{rel_path}]")
-            print(f"  + {directive.strip()}")
+            if existing_include:
+                print(f"\n[{rel_path}]")
+                print(f"  - {{{{< include ... >}}}} (relocated)")
+                print(f"  + {directive.strip()}")
+            else:
+                print(f"\n[{rel_path}]")
+                print(f"  + {directive.strip()}")
         else:
             try:
                 file_path.write_text(new_text, encoding="utf-8")
             except Exception as e:
                 print(f"  ERROR writing {rel_path}: {e}", file=sys.stderr)
                 return 0
-            print(f"  {rel_path}: added {{< include {correct_rel} >}}")
+            print(f"  {rel_path}: {action} {{< include {correct_rel} >}}")
 
         return 1
 
