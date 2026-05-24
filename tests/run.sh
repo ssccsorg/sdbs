@@ -42,11 +42,20 @@ run_suite() {
 # ------------------------------------------------------------------
 # Suite 1: Python unit tests
 # ------------------------------------------------------------------
-run_suite \
-  "Python unit tests" \
-  python3 -m pytest "$SCRIPT_DIR" \
-    --ignore="$SCRIPT_DIR/workflow" \
-    -v --timeout=30
+# Exit immediately on failure so workflow tests are not attempted.
+set +e
+PYTHONPATH="$SCRIPT_DIR/../src" python3 -m pytest "$SCRIPT_DIR" \
+  --ignore="$SCRIPT_DIR/workflow" \
+  --ignore="$SCRIPT_DIR/command" \
+  -v --timeout=30
+status=$?
+set -e
+if [ "$status" -ne 0 ]; then
+  fail "Python unit tests"
+  printf "\n${RED}Aborting: workflow tests require passing unit tests.${NC}\n"
+  exit 1
+fi
+ok "Python unit tests"
 
 # ------------------------------------------------------------------
 # Suite 2: Workflow tests (each run.sh under tests/*/)

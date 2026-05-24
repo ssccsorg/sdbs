@@ -804,7 +804,7 @@ class TitleMetaResolver(_BaseResolver):
         if dry_run:
             if existing_include:
                 print(f"\n[{rel_path}]")
-                print(f"  - {{{{< include ... >}}}} (relocated)")
+                print("  - {{{{< include ... >}}}} (relocated)")
                 print(f"  + {directive.strip()}")
             else:
                 print(f"\n[{rel_path}]")
