@@ -5,7 +5,7 @@ Subcommands:
   init     Scaffold a new docs directory with default templates.
   build    Build one or more Quarto targets.
   check    Validate links, citations, and cross-references.
-  resolve  Resolve relative paths, includes, and links.
+  pre      Run pre-render steps (latest docs, path resolution, formatting).
 """
 
 import argparse
@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> None:
         "--template",
         type=str,
         default=None,
-        help="Template flavour (omit to see available choices)"
+        help="Template flavour (omit to see available choices)",
     )
 
     # --- build ---
@@ -159,23 +159,20 @@ def main(argv: list[str] | None = None) -> None:
         help="Remove uncited bibliography entries",
     )
 
-    # --- resolve ---
-    resolve_parser = subparsers.add_parser(
-        "resolve",
-        help="Resolve relative paths and includes",
-        description="Fix relative paths in QMD/MD files, update includes, "
-        "and resolve broken links.",
+    # --- pre ---
+    pre_parser = subparsers.add_parser(
+        "pre",
+        help="Run pre-render steps (latest docs, path resolution, formatting)",
+        description="Execute the default pre-build sequence: generate latest docs, "
+        "resolve relative paths and includes, and format QMD/MD files. "
+        "These same steps run automatically before every build.",
     )
-    resolve_parser.add_argument(
+    pre_parser.add_argument(
         "docs_root",
         type=Path,
         nargs="?",
         default=Path("."),
         help="Path to the docs directory (default: current directory)",
-    )
-    resolve_parser.add_argument(
-        "--check-only", action="store_true",
-        help="Only report issues, do not modify files",
     )
 
     args = parser.parse_args(argv)
@@ -286,14 +283,18 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(0 if success else 1)
 
-    elif args.command == "resolve":
+    elif args.command == "pre":
         _setup_logging()
-        from .resolve import resolve_all as resolve_fn
-        success = resolve_fn(
-            docs_root=args.docs_root.resolve(),
-            check_only=args.check_only,
+        docs_root = args.docs_root.resolve()
+        # Run the same default pre-build sequence that executes before every build
+        build_module._run_default_sequence(
+            build_module._DEFAULT_PRE_BUILD, docs_root, "Pre-build"
         )
-        sys.exit(0 if success else 1)
+        sys.exit(0)
+
+    else:
+        parser.print_help()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

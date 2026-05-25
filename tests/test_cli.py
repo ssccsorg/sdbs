@@ -178,16 +178,26 @@ class TestCheckCommand:
             )
 
 
-class TestResolveCommand:
-    """Tests for the ``sdb resolve`` subcommand."""
+class TestPreCommand:
+    """Tests for the ``sdb pre`` subcommand."""
 
-    def test_resolve_check_only(self) -> None:
-        """sdb resolve . --check-only triggers check_only=True."""
-        with patch("sdb.resolve.resolve_all") as mock_resolve_all:
-            mock_resolve_all.return_value = True
-            code = _run_main(["resolve", ".", "--check-only"])
+    def test_pre_defaults(self) -> None:
+        """sdb pre -> calls _run_default_sequence with Pre-build phase."""
+        with patch("sdb.build._run_default_sequence") as mock_seq:
+            code = _run_main(["pre"])
             assert code == 0
-            mock_resolve_all.assert_called_once()
+            mock_seq.assert_called_once()
+            args = mock_seq.call_args
+            assert args[0][2] == "Pre-build"
+
+    def test_pre_with_docs_root(self) -> None:
+        """sdb pre /tmp/docs -> resolved docs_root passed to _run_default_sequence."""
+        with patch("sdb.build._run_default_sequence") as mock_seq:
+            code = _run_main(["pre", "/tmp/docs"])
+            assert code == 0
+            mock_seq.assert_called_once()
+            args = mock_seq.call_args
+            assert str(args[0][1]).endswith("/tmp/docs")
 
 
 class TestInvalidCommand:
@@ -202,4 +212,3 @@ class TestInvalidCommand:
         """Running sdb with an unrecognised command should exit non-zero."""
         code = _run_main(["nonexistent"])
         assert code != 0
-
