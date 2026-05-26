@@ -1,6 +1,8 @@
 # SDBS
 
-SSCCS Documentation Build System: a high-level orchestration layer for docs generation solutions (currently Quarto).
+General Purpose SSCCS Technical Documentation Build System
+
+- A high-level orchestration layer for docs generation solutions (currently Quarto-driven).
 
 ## Quick Start
 
