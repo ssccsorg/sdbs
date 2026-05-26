@@ -295,6 +295,8 @@ class PathResolver(_BaseResolver):
     SOURCE_EXTENSIONS: Set[str] = {".qmd"}
     PATH_KEYS: Set[str] = {"metadata-files", "bibliography", "csl"}
     RE_RUN = re.compile(r"^\s*%run\s+([^\s#]+)", re.MULTILINE)
+    # Match quoted relative paths inside Python code blocks (Path(), open(), etc.)
+    RE_PY_STR_PATH = re.compile(r"""['"](\.\.(?:/[^/"']+)+)['"]""")
 
     # ------------------------------------------------------------------
     # Extract relative paths from a single file
@@ -333,6 +335,15 @@ class PathResolver(_BaseResolver):
                     run_path,
                     cell_start + run_m.start(1),
                     cell_start + run_m.end(1),
+                ))
+            for str_m in self.RE_PY_STR_PATH.finditer(cell_body):
+                str_path = str_m.group(1)
+                if self._is_url_or_absolute(str_path):
+                    continue
+                results.append((
+                    str_path,
+                    cell_start + str_m.start(1),
+                    cell_start + str_m.end(1),
                 ))
 
         return results
