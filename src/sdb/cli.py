@@ -286,9 +286,18 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "pre":
         _setup_logging()
         docs_root = args.docs_root.resolve()
-        # Run the same default pre-build sequence that executes before every build
+
+        # Load external config
+        config_path = docs_root / "build.yml"
+        if config_path.exists():
+            build_module.initialize_config(docs_root, config_path)
+
+        # Run default sequence + configured pre_build commands
         build_module._run_default_sequence(
             build_module._DEFAULT_PRE_BUILD, docs_root, "Pre-build"
+        )
+        build_module.run_pre_build_commands(
+            build_module.EXTERNAL_CONFIG, docs_root
         )
         sys.exit(0)
 
