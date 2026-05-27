@@ -9,6 +9,14 @@ on:
       - "src/**"
       - "tests/**"
       - ".github/workflows/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 concurrency:

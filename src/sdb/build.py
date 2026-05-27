@@ -741,6 +741,22 @@ def run_post_render_commands(
     )
 
 
+def run_pre_build_sequence(external_config: Dict[str, Any], docs_root: Path, targets: Optional[List[str]] = None) -> None:
+    """Run the full pre-build sequence: user global config first, then target-specific,
+    then built-in defaults."""
+    run_pre_build_commands(external_config, docs_root)
+    if targets:
+        for t in targets:
+            run_pre_build_commands(external_config, docs_root, target_name=t)
+    _run_default_sequence(_DEFAULT_PRE_BUILD, docs_root, "Pre-build")
+
+
+def run_post_render_sequence(external_config: Dict[str, Any], docs_root: Path) -> None:
+    """Run the full post-render sequence: user config first, then built-in defaults."""
+    run_post_render_commands(external_config, docs_root)
+    _run_default_sequence(_DEFAULT_POST_RENDER, docs_root, "Post-render")
+
+
 # ---------------------------------------------------------------------------
 # Core build function
 # ---------------------------------------------------------------------------
@@ -1715,13 +1731,8 @@ def build_targets(
 
     build_temp_path = docs_root.parent / BUILD_TEMP_DIR
 
-    # Run built-in default pre-build sequence once
-    _run_default_sequence(_DEFAULT_PRE_BUILD, docs_root, "Pre-build")
-
-    run_pre_build_commands(EXTERNAL_CONFIG, docs_root)
-
-    for t in targets:
-        run_pre_build_commands(EXTERNAL_CONFIG, docs_root, target_name=t)
+    # Run user-configured pre-build commands first (build.yml), then defaults
+    run_pre_build_sequence(EXTERNAL_CONFIG, docs_root, targets)
 
     capture_initial_cached_targets(docs_root)
 
@@ -1902,9 +1913,8 @@ def build_targets(
             )
 
             _sync_llms_files(final_output, docs_root)
-            # Run built-in default post-render sequence once
-            _run_default_sequence(_DEFAULT_POST_RENDER, docs_root, "Post-render")
-            run_post_render_commands(EXTERNAL_CONFIG, docs_root)
+            # Run user-configured post-render commands first (build.yml), then defaults
+            run_post_render_sequence(EXTERNAL_CONFIG, docs_root)
 
             return True
 
@@ -1978,9 +1988,8 @@ def build_targets(
             docs_root=docs_root,
         )
 
-    # Run built-in default post-render sequence once
-    _run_default_sequence(_DEFAULT_POST_RENDER, docs_root, "Post-render")
-    run_post_render_commands(EXTERNAL_CONFIG, docs_root)
+    # Run user-configured post-render commands first (build.yml), then defaults
+    run_post_render_sequence(EXTERNAL_CONFIG, docs_root)
 
     return True
 
