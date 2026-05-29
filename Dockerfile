@@ -86,8 +86,7 @@ RUN uv pip install --system --break-system-packages \
 # Install SDBS dependencies (cached until pyproject.toml changes)
 COPY pyproject.toml README.md LICENSE /tmp/sdb/
 RUN mkdir -p /tmp/sdb/src/sdb && touch /tmp/sdb/src/sdb/__init__.py \
-    && uv pip install --system --break-system-packages /tmp/sdb \
-    && rm -rf /tmp/sdb
+    && uv pip install --system --break-system-packages /tmp/sdb
 
 # Copy SDBS source code (only this layer invalidates on src/ changes)
 COPY src/ /tmp/sdb/src/
