@@ -18,7 +18,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-ITEM_LENGTH = 6
+ITEM_LENGTH = 10
 
 # Mirror of build.yml exclude patterns (only those affecting .qmd/.md files)
 EXCLUDE_PATTERNS = [
