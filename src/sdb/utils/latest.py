@@ -445,19 +445,39 @@ def doc_to_html(rel_path: str, docs_root: Path) -> str:
     return _site_path(p, "html")
 
 
+def _load_latest_count(docs_root: Path) -> int:
+    """Read ``latest_docs_list_count`` from ``build.yml``, falling back to ``ITEM_LENGTH``."""
+    config_path = docs_root / "build.yml"
+    if config_path.is_file():
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            count = cfg.get("latest_docs_list_count")
+            if isinstance(count, int) and count > 0:
+                return count
+        except Exception:
+            pass
+    return ITEM_LENGTH
+
+
 def generate_latest_docs(docs_root: Path) -> bool:
-    """Generate _include/_updated_docs_list.qmd with the 10 most recently
+    """Generate _include/_updated_docs_list.qmd with the most recently
     modified documents.
+
+    The number of entries defaults to 10 and can be overridden via
+    ``latest_count`` in ``build.yml``.
 
     Returns True on success.
     """
+    count = _load_latest_count(docs_root)
+
     files = get_tracked_doc_files(docs_root)
     creation_dates = get_creation_dates(docs_root)
 
     new_files = [(ts, p) for ts, p in files if is_new_file(p, creation_dates, docs_root)]
     old_files = [(ts, p) for ts, p in files if not is_new_file(p, creation_dates, docs_root)]
-    sorted_items = new_files[:ITEM_LENGTH]
-    remaining = ITEM_LENGTH - len(sorted_items)
+    sorted_items = new_files[:count]
+    remaining = count - len(sorted_items)
     if remaining > 0:
         sorted_items += old_files[:remaining]
 
