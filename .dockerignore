@@ -1,0 +1,53 @@
+# ---1. Version Control ---
+.git/
+.gitmodules
+.gitattributes
+.github/
+
+# ---2. Test & CI (not needed for runtime image) ---
+# Excluding tests prevents test file changes from invalidating Docker cache
+tests/
+
+# ---3. Python Build Artifacts ---
+build/
+*.egg-info/
+**/__pycache__/
+**/*.py[cod]
+**/*.pyd
+**/$py.class
+**/.eggs/
+**/dist/
+**/*.so
+**/.pytest_cache/
+
+# ---4. Documentation Build Cache ---
+# Pre-built Quarto output inside templates; not needed for image build
+_cached/
+src/sdb/templates/**/.quarto/
+src/sdb/templates/**/.jupyter_cache/
+src/sdb/templates/**/index.html
+src/sdb/templates/**/index_files/
+
+# ---5. Example Projects ---
+examples/
+
+# ---6. IDE & Local Config ---
+.idea/
+*.sublime-*
+*.code-workspace
+*.local.yml
+*.override.yml
+*.env
+
+# ---7. Virtual Environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# ---8. OS Metadata ---
+.DS_Store
+Thumbs.db
+
+# ---9. Docker Self-Reference ---
+.dockerignore
