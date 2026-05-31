@@ -221,6 +221,10 @@ def capture_initial_cached_targets(docs_root: Path) -> None:
         _INITIAL_CACHED_TARGETS = set()
     else:
         _INITIAL_CACHED_TARGETS = {d.name for d in cache_base.iterdir() if d.is_dir()}
+    logger.info(
+        f"capture_initial_cached_targets: {len(_INITIAL_CACHED_TARGETS)} entries "
+        f"from {cache_base}: {sorted(_INITIAL_CACHED_TARGETS)}"
+    )
 
 
 def get_initial_cached_targets() -> set:
@@ -243,6 +247,13 @@ def should_rerender_for_sidebar(build_targets: set, docs_root: Path) -> bool:
     cached_targets = get_initial_cached_targets()
     has_new_files = not build_targets.issubset(cached_targets)
     has_deleted_files = not cached_targets.issubset(build_targets)
+    if has_new_files or has_deleted_files:
+        logger.info(
+            f"should_rerender_for_sidebar: document set changed - "
+            f"cached={len(cached_targets)}, build={len(build_targets)}, "
+            f"cached-build={sorted(cached_targets - build_targets)}, "
+            f"build-cached={sorted(build_targets - cached_targets)}"
+        )
     return has_new_files or has_deleted_files
 
 
