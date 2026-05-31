@@ -216,11 +216,16 @@ def capture_initial_cached_targets(docs_root: Path) -> None:
     This is used to detect if the document set has changed during the build.
     """
     global _INITIAL_CACHED_TARGETS
+    target_names = set(TARGET_CONFIG.keys())
     cache_base = get_cache_base(docs_root)
     if not cache_base.exists():
         _INITIAL_CACHED_TARGETS = set()
     else:
-        _INITIAL_CACHED_TARGETS = {d.name for d in cache_base.iterdir() if d.is_dir()}
+        all_cached = {d.name for d in cache_base.iterdir() if d.is_dir()}
+        stale = all_cached - target_names
+        if stale:
+            logger.info(f'Ignoring stale cache entries (not in target config): {sorted(stale)}')
+        _INITIAL_CACHED_TARGETS = all_cached & target_names
     logger.info(
         f"capture_initial_cached_targets: {len(_INITIAL_CACHED_TARGETS)} entries "
         f"from {cache_base}: {sorted(_INITIAL_CACHED_TARGETS)}"
@@ -1746,6 +1751,7 @@ def build_targets(
     run_pre_build_sequence(EXTERNAL_CONFIG, docs_root, targets)
 
     capture_initial_cached_targets(docs_root)
+    _cleanup_orphaned_caches(set(TARGET_CONFIG.keys()), docs_root)
 
     results: Dict[str, bool] = {}
 
