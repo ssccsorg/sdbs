@@ -994,15 +994,8 @@ class IncludeResolver(_BaseResolver):
             candidate = (doc_dir / raw_path).resolve()
             if candidate.exists():
                 continue
-            # File not found — search upward for the same relative path
-            found = None
-            for parent in [doc_dir] + list(doc_dir.parents):
-                if parent == root.resolve().parent:
-                    break
-                probe = (parent / raw_path).resolve()
-                if probe.exists():
-                    found = probe
-                    break
+            # File not found — use PathResolver's search_upward logic
+            found = _BaseResolver._search_upward(doc_dir, raw_path, root)
             if found is None:
                 if verbose:
                     print(
