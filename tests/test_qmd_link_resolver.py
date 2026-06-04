@@ -150,13 +150,13 @@ class TestQmdLinkResolver:
         assert n == 0, f"Expected 0 fixes for missing target, got {n}"
 
     def test_absolute_path_qmd(self, tmp_path: Path) -> None:
-        """Absolute /docs/... style .qmd link: URL becomes .html."""
+        """Absolute path .qmd link: resolves from project root correctly."""
         self._make_qmd_with_frontmatter(
             tmp_path, "notes/target.qmd", "Target Abs"
         )
         source = self._make_file(
             tmp_path, "source.qmd",
-            "[/docs/notes/target.qmd](/docs/notes/target.qmd)\n",
+            "[/notes/target.qmd](/notes/target.qmd)\n",
         )
         n = self.resolver.fix_one_file(source, tmp_path, dry_run=False, verbose=False)
         assert n == 2, f"Expected 2 fixes, got {n}"
@@ -486,4 +486,22 @@ class TestQmdLinkResolver:
         # The computed relative path should use the correct number of ../
         assert "deep/dir/target.html" in text or "target.html" in text, (
             f"URL not fixed correctly: {text}"
+        )
+
+    def test_absolute_path_from_subdir(self, tmp_path: Path) -> None:
+        """Absolute path link from a nested source resolves to
+        correct relative path."""
+        self._make_qmd_with_frontmatter(
+            tmp_path, "notes/target.qmd", "Target Abs"
+        )
+        source = self._make_file(
+            tmp_path, "sub/deep/source.qmd",
+            "[/notes/target.qmd](/notes/target.qmd)\n",
+        )
+        n = self.resolver.fix_one_file(source, tmp_path, dry_run=False, verbose=False)
+        assert n == 2, f"Expected 2 fixes, got {n}"
+        text = source.read_text()
+        assert "Target Abs" in text, f"Label not replaced: {text}"
+        assert "../../notes/target.html" in text, (
+            f"Relative path not computed correctly: {text}"
         )

@@ -7,7 +7,8 @@
 #   2. Each subdirectory containing run.sh (e.g. tests/workflow/ssccs/run.sh)
 #
 # Usage:
-#   ./tests/run.sh
+#   ./tests/run.sh              # all suites
+#   ./tests/run.sh --unit       # unit tests only (skip workflow suites)
 #   SSCCS_REPO=/path ./tests/run.sh
 #
 # Exit status:
@@ -19,6 +20,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FAILED=0
 
+# Parse --unit flag: skip workflow suites when set
+RUN_UNIT_ONLY=0
+if [[ "${1:-}" == "--unit" ]]; then
+  RUN_UNIT_ONLY=1
+  shift
+fi
+
 # ANSI color helpers
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -28,21 +36,9 @@ NC='\033[0m' # No Color
 ok()  { printf "  ${GREEN}[PASS]${NC} %s\n" "$1"; }
 fail(){ printf "  ${RED}[FAIL]${NC} %s\n" "$1"; FAILED=1; }
 
-run_suite() {
-  local label="$1"
-  shift
-  printf "\n${CYAN}==== %s${NC}\n\n" "$label"
-  if "$@"; then
-    ok "$label"
-  else
-    fail "$label"
-  fi
-}
-
 # ------------------------------------------------------------------
 # Suite 1: Python unit tests
 # ------------------------------------------------------------------
-# Exit immediately on failure so workflow tests are not attempted.
 set +e
 PYTHONPATH="$SCRIPT_DIR/../src" python3 -m pytest "$SCRIPT_DIR" \
   --ignore="$SCRIPT_DIR/workflow" \
@@ -52,17 +48,36 @@ status=$?
 set -e
 if [ "$status" -ne 0 ]; then
   fail "Python unit tests"
-  printf "\n${RED}Aborting: workflow tests require passing unit tests.${NC}\n"
+  if [ "$RUN_UNIT_ONLY" -eq 0 ]; then
+    printf "\n${RED}Aborting: workflow tests require passing unit tests.${NC}\n"
+    exit 1
+  fi
   exit 1
 fi
 ok "Python unit tests"
+
+# --unit flag: exit after unit tests
+if [ "$RUN_UNIT_ONLY" -eq 1 ]; then
+  printf "\n"
+  if [ "$FAILED" -ne 0 ]; then
+    printf "${RED}Unit tests failed.${NC}\n"
+    exit 1
+  fi
+  printf "${GREEN}All unit tests passed.${NC}\n"
+  exit 0
+fi
 
 # ------------------------------------------------------------------
 # Suite 2: Workflow tests (each run.sh under tests/*/)
 # ------------------------------------------------------------------
 while IFS= read -r -d '' runner; do
   rel="${runner#$SCRIPT_DIR/}"
-  run_suite "$rel" bash "$runner"
+  printf "\n${CYAN}==== %s${NC}\n\n" "$rel"
+  if bash "$runner"; then
+    ok "$rel"
+  else
+    fail "$rel"
+  fi
 done < <(find "$SCRIPT_DIR" -mindepth 2 -name run.sh -print0)
 
 # ------------------------------------------------------------------

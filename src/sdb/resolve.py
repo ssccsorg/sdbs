@@ -469,7 +469,7 @@ class LinkResolver(_BaseResolver):
     """Detect and correct broken internal markdown links in .qmd and .md
     files.
 
-    Handles links such as ``[text](/docs/file.md)`` where the target file
+    Handles links such as ``[text](file.md)`` where the target file
     has been moved to a different location (e.g., ``direction.md``
     became ``direction/index.md``).
 
@@ -856,9 +856,12 @@ class DocExtResolver(_BaseResolver):
     """Replace ``.qmd`` / ``.md`` extensions with ``.html`` in markdown
     links throughout ``.qmd`` and ``.md`` files.
 
-    Links like ``[text](notes/file.qmd)`` or
-    ``[text](/docs/file.md)`` point to editable sources but should
-    point to the rendered ``.html`` output instead.
+    Links like ``[text](notes/file.qmd)`` point to editable sources but
+    should point to the rendered ``.html`` output instead.
+
+    Note: ``QmdLinkResolver`` handles the full .qmd resolution (URL + label).
+    ``DocExtResolver`` runs first and only does extension substitution,
+    which ``QmdLinkResolver`` later re-resolves.
     """
 
     _APPLY_BUILD_YML_EXCLUDE = True
@@ -1108,7 +1111,7 @@ class QmdLinkResolver(LinkResolver):
                             f"  -> [NOT FOUND]"
                         )
                     continue
-                new_link = f"/docs/{found.relative_to(root)}"
+                new_link = _BaseResolver._compute_rel_path(doc_dir, found)
             else:
                 # Relative path: use _search_upward with .qmd for html links
                 search_path = qmd_path if is_html_link else link_path
