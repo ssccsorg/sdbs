@@ -1161,14 +1161,15 @@ class QmdLinkResolver(LinkResolver):
             pre = text[: url_start - 1]
             m = re.search(r'\[([^\]]*)\]$', pre.rstrip())
             if m:
+                label = m.group(1)
                 title = self._yaml_title(found)
                 if title:
-                    fixes.append((m.start(1), m.end(1), title))
+                    if title != label:
+                        fixes.append((m.start(1), m.end(1), title))
                 else:
                     # Fallback: derive label from filename in Capital Case
-                    label = m.group(1)
-                    # Extract stem from found file (not from label)
-                    stem = found.stem  # e.g. "guide" from guide.md, "code_of_conduct"
+                    # Extract stem from found file
+                    stem = found.stem
                     # Convert to Capital Case: code_of_conduct -> Code Of Conduct
                     capital_label = stem.replace("_", " ").replace("-", " ").title()
                     if capital_label != label:
