@@ -962,6 +962,262 @@ class DocExtResolver(_BaseResolver):
 
 
 
+# ======================================================================
+# QmdLinkResolver — fix .qmd links to .html with YAML title labels
+# ======================================================================
+class QmdLinkResolver(LinkResolver):
+    """Fix ``.qmd`` links: URL to ``.html``, label to target's YAML title.
+
+    Overrides ``LinkResolver`` to:
+    * Only process ``.qmd`` links (skip ``.md``).
+    * Replace the link label with the target file's YAML ``title``.
+    * Apply build.yml exclusion rules (true for QMD sources).
+
+    Inherits ``_extract_links``, ``_resolve_link``, ``_clean_url``,
+    ``_skip_link``, and ``_try_migration`` from ``LinkResolver``.
+    """
+
+    _APPLY_BUILD_YML_EXCLUDE = False
+    SOURCE_EXTENSIONS: Set[str] = {".qmd", ".md"}
+    LOCAL_EXCLUDE: List[str] = ["README.md"]
+
+    @staticmethod
+    def _yaml_title(file_path: Path) -> Optional[str]:
+        """Return the ``title`` from a file's YAML frontmatter, falling
+        back to the first ``# `` heading if no frontmatter exists."""
+        try:
+            text = file_path.read_text(encoding="utf-8")
+            fm, _ = _BaseResolver._parse_frontmatter(text)
+            if isinstance(fm, dict) and fm.get("title"):
+                return str(fm["title"])
+            # Fallback: first # heading
+            m = re.search(r'^#\s+(.+)$', text, re.MULTILINE)
+            if m:
+                return m.group(1).strip()
+        except Exception:
+            pass
+        return None
+
+    def _extract_links(
+        self, file_path: Path
+    ) -> List[Tuple[str, int, int]]:
+        """Yield links whose URL (stripped of #anchor) ends with .qmd
+        OR .html (to fix labels for rendered pages).
+
+        Unlike ``LinkResolver._extract_links``, this method uses the
+        parent's ``RE_LINK`` but applies its own filter that accounts
+        for ``#anchor`` suffixes.
+        """
+        results: List[Tuple[str, int, int]] = []
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except Exception:
+            return results
+
+        for m in LinkResolver.RE_LINK.finditer(text):
+            raw_url = m.group(2)
+            url = LinkResolver._clean_url(raw_url)
+            if not url or LinkResolver._skip_link(url):
+                continue
+            url_no_anchor = url.split("#", 1)[0]
+            if not url_no_anchor.endswith((".qmd", ".html")):
+                continue
+            results.append((url, m.start(2), m.end(2)))
+
+        return results
+
+    def fix_one_file(
+        self, file_path: Path, root: Path, dry_run: bool, verbose: bool
+    ) -> int:
+        links = self._extract_links(file_path)
+        if not links:
+            return 0
+
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except Exception:
+            return 0
+
+        doc_dir = file_path.parent
+        fixes: List[Tuple[int, int, str]] = []
+
+        for link_path, url_start, url_end in links:
+            # Skip external URLs and anchors — _skip_link covers http/https/mailto/#/data
+            if LinkResolver._skip_link(link_path):
+                continue
+
+            # Detect code-block lines: scan back to find ``` fence
+            line_start = text.rfind("\n", 0, url_start) + 1
+            if line_start > 0:
+                pre_line = text.rfind("\n", 0, line_start - 1)
+                pre_line_start = pre_line + 1 if pre_line >= 0 else 0
+                prefix = text[pre_line_start:line_start].strip()
+                if prefix.startswith("```") and not prefix.lstrip("```").startswith(("{", "{")):
+                    # Inside a raw fenced code block
+                    if verbose:
+                        print(
+                            f"  {file_path.relative_to(root)}: {link_path}"
+                            f"  -> [SKIP code block]"
+                        )
+                    continue
+
+            # Strip #anchor for lookup, preserve for final URL
+            link_path_raw = link_path
+            anchor = ""
+            if "#" in link_path:
+                link_path, anchor = link_path.split("#", 1)
+                anchor = "#" + anchor
+
+            # For .html links, try to find the corresponding .qmd source
+            # for label extraction. URL stays as .html (already correct).
+            is_html_link = link_path.endswith(".html")
+            qmd_path = (
+                link_path[: -len(".html")] + ".qmd"
+                if is_html_link
+                else link_path
+            )
+
+            if link_path.startswith("/"):
+                # Absolute path: resolve from root, stripping /docs/ prefix
+                rel = link_path.lstrip("/")
+                if rel.startswith("docs/"):
+                    rel = rel[5:]
+                # For .html links, use .qmd to find source
+                search_path = (
+                    rel[: -len(".html")] + ".qmd"
+                    if is_html_link
+                    else rel
+                )
+                candidate = (root / search_path).resolve()
+                if candidate.exists():
+                    found = candidate
+                else:
+                    found = LinkResolver._try_migration(
+                        root, search_path
+                    )
+                # If .qmd not found, try .md (for .html links)
+                if found is None and is_html_link:
+                    md_search = rel[: -len(".html")] + ".md"
+                    cand_md = (root / md_search).resolve()
+                    if cand_md.exists():
+                        found = cand_md
+                if found is None:
+                    if verbose:
+                        print(
+                            f"  {file_path.relative_to(root)}: {link_path}"
+                            f"  -> [NOT FOUND]"
+                        )
+                    continue
+                new_link = f"/docs/{found.relative_to(root)}"
+            else:
+                # Relative path: use _search_upward with .qmd for html links
+                search_path = qmd_path if is_html_link else link_path
+                found = _BaseResolver._search_upward(
+                    doc_dir, search_path, root
+                )
+                # If .qmd not found, try .md
+                if found is None and is_html_link:
+                    md_path = link_path_raw[: -len(".html")] + ".md" \
+                        if link_path_raw.endswith(".html") else None
+                    if md_path:
+                        found = _BaseResolver._search_upward(
+                            doc_dir, md_path, root
+                        )
+                if found is None:
+                    if verbose:
+                        print(
+                            f"  {file_path.relative_to(root)}: {link_path}"
+                            f"  -> [NOT FOUND]"
+                        )
+                    continue
+                new_link = _BaseResolver._compute_rel_path(doc_dir, found)
+
+            # For .html links, label fix only (URL already correct).
+            # Skip URL fix.
+            if not is_html_link:
+                if new_link == link_path:
+                    # Same path, but still need .qmd -> .html and label fix.
+                    pass
+
+                # URL fix: .qmd -> .html
+                raw_url = text[url_start:url_end]
+                html_url = (
+                    new_link[: -len(".qmd")] + ".html"
+                    if new_link.endswith(".qmd")
+                    else new_link
+                )
+                html_url_with_anchor = html_url + anchor
+                old_url_in_raw = link_path_raw if anchor else link_path
+                new_raw = raw_url.replace(
+                    old_url_in_raw, html_url_with_anchor, 1
+                )
+                if new_raw != raw_url:
+                    fixes.append((url_start, url_end, new_raw))
+
+            # Label fix: unconditionally inject target's YAML title.
+            # This is deterministic: every .qmd link gets its label
+            # replaced with the target file's title, even if the
+            # original label is already correct.
+            pre = text[: url_start - 1]
+            m = re.search(r'\[([^\]]*)\]$', pre.rstrip())
+            if m:
+                title = self._yaml_title(found)
+                if title:
+                    fixes.append((m.start(1), m.end(1), title))
+                else:
+                    # Fallback: derive label from filename in Capital Case
+                    label = m.group(1)
+                    # Extract stem from found file (not from label)
+                    stem = found.stem  # e.g. "guide" from guide.md, "code_of_conduct"
+                    # Convert to Capital Case: code_of_conduct -> Code Of Conduct
+                    capital_label = stem.replace("_", " ").replace("-", " ").title()
+                    if capital_label != label:
+                        fixes.append((m.start(1), m.end(1), capital_label))
+
+        if not fixes:
+            return 0
+
+        fixes.sort(key=lambda x: x[0], reverse=True)
+        new_text = text
+        for start, end, new_val in fixes:
+            new_text = new_text[:start] + new_val + new_text[end:]
+
+        rel_display = file_path.relative_to(root)
+        if dry_run:
+            print(f"\n[{rel_display}]")
+            for start, end, new_val in sorted(fixes, key=lambda x: x[0]):
+                print(f"  - {text[start:end]}")
+                print(f"  + {new_val}")
+        else:
+            try:
+                file_path.write_text(new_text, encoding="utf-8")
+            except Exception as e:
+                print(
+                    f"  ERROR writing {rel_display}: {e}",
+                    file=sys.stderr,
+                )
+                return 0
+            for start, end, new_val in sorted(fixes, key=lambda x: x[0]):
+                print(f"  {rel_display}: {text[start:end]} -> {new_val}")
+
+        return len(fixes)
+
+    def resolve_all(
+        self,
+        root: Path,
+        scan_root: Path,
+        dry_run: bool,
+        verbose: bool,
+    ) -> Tuple[int, int]:
+        return self._run_fix_all(
+            root,
+            scan_root,
+            dry_run,
+            verbose,
+            "Resolving .qmd links to .html with title labels",
+        )
+
+
 class IncludeResolver(_BaseResolver):
     """Correct relative paths in ``{{< include ... >}}`` directives.
 
@@ -1061,6 +1317,7 @@ def resolve_all(docs_root: Path, check_only: bool = False) -> bool:
     applied (or would be needed in check-only mode).
     """
     resolvers: List[_BaseResolver] = [
+        QmdLinkResolver(),
         PathResolver(),
         LinkResolver(),
         IncludeResolver(),
@@ -1068,6 +1325,7 @@ def resolve_all(docs_root: Path, check_only: bool = False) -> bool:
         TitleMetaResolver(),
     ]
     headers = [
+        "Qmd reference links",
         "Asset paths",
         "Markdown links",
         "Include paths",
