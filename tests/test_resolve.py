@@ -118,3 +118,29 @@ class TestTitleMetaResolver:
         r = TitleMetaResolver()
         result = r.fix_one_file(qmd, tmp_path, dry_run=False, verbose=False)
         assert result == 0, f"Expected no change, got {result}"
+
+    def test_skips_when_generate_title_meta_false(self, tmp_path: Path) -> None:
+        """File with ``generate-title-meta: false`` is not modified."""
+        inc_dir = tmp_path / "_include"
+        inc_dir.mkdir()
+        (inc_dir / "_title_meta_items.qmd").write_text("")
+        qmd = tmp_path / "sub" / "page.qmd"
+        qmd.parent.mkdir()
+        qmd.write_text(
+            "---\ntitle: Test\ngenerate-title-meta: false\n---\n\nContent\n"
+        )
+        result = self.resolver.fix_one_file(qmd, tmp_path, dry_run=True, verbose=False)
+        assert result == 0
+
+    def test_adds_include_when_generate_title_meta_true(self, tmp_path: Path) -> None:
+        """File with explicit ``generate-title-meta: true`` still gets include."""
+        inc_dir = tmp_path / "_include"
+        inc_dir.mkdir()
+        (inc_dir / "_title_meta_items.qmd").write_text("")
+        qmd = tmp_path / "sub" / "page.qmd"
+        qmd.parent.mkdir()
+        qmd.write_text(
+            "---\ntitle: Test\ngenerate-title-meta: true\n---\n\nContent\n"
+        )
+        result = self.resolver.fix_one_file(qmd, tmp_path, dry_run=True, verbose=False)
+        assert result == 1
