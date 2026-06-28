@@ -267,7 +267,7 @@ class TestQmdLinkResolver:
 
     def test_label_fallback_to_html(self, tmp_path: Path) -> None:
         """Label falls back to .html when target has no title or heading."""
-        target = self._make_file(tmp_path, "notes/doc.qmd", "Just content\n")
+        _ = self._make_file(tmp_path, "notes/doc.qmd", "Just content\n")
         source = self._make_file(
             tmp_path, "source.qmd",
             "[notes/doc.qmd](notes/doc.qmd)\n",
