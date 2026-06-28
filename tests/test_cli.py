@@ -132,25 +132,19 @@ class TestBuildCommand:
             # The 'all' target expands to BUILD_FUNCTIONS keys
             mock_build.assert_called_once()
 
-    def test_build_clean_exit_zero(self) -> None:
-        """sdb build docs clean triggers clean_quarto_artifacts."""
-        with (
-            patch("sdb.cli.build_module.initialize_config"),
-            patch("sdb.cli.build_module.clean_quarto_artifacts") as mock_clean,
-        ):
+    def test_clean_exit_zero(self) -> None:
+        """sdb clean docs triggers clean_quarto_artifacts."""
+        with patch("sdb.cli.build_module.clean_quarto_artifacts") as mock_clean:
             mock_clean.return_value = True
-            code = _run_main(["build", "docs", "clean"])
+            code = _run_main(["clean", "docs"])
             assert code == 0
-            mock_clean.assert_called_once()
+            mock_clean.assert_called_once_with(Path("docs").resolve())
 
-    def test_build_clean_exit_one(self) -> None:
+    def test_clean_exit_one(self) -> None:
         """When clean fails, exit code is 1."""
-        with (
-            patch("sdb.cli.build_module.initialize_config"),
-            patch("sdb.cli.build_module.clean_quarto_artifacts") as mock_clean,
-        ):
+        with patch("sdb.cli.build_module.clean_quarto_artifacts") as mock_clean:
             mock_clean.return_value = False
-            code = _run_main(["build", "docs", "clean"])
+            code = _run_main(["clean", "docs"])
             assert code == 1
 
 

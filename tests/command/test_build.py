@@ -64,21 +64,13 @@ class TestBuildDefaults:
             assert _kwargs["max_jobs"] == 4
             assert _kwargs["website"] is True
 
-    def test_build_clean_succeeds(self) -> None:
+    def test_build_clean_not_a_target(self) -> None:
+        """sdb build docs clean no longer triggers cleanup; clean is not a build target."""
         with (
             patch("sdb.cli.build_module.initialize_config"),
-            patch("sdb.cli.build_module.clean_quarto_artifacts") as mock_clean,
+            patch("sdb.cli.build_module.validate_targets") as mock_val,
         ):
-            mock_clean.return_value = True
-            code = _run_build(["docs", "clean"])
-            assert code == 0
-
-    def test_build_clean_fails(self) -> None:
-        with (
-            patch("sdb.cli.build_module.initialize_config"),
-            patch("sdb.cli.build_module.clean_quarto_artifacts") as mock_clean,
-        ):
-            mock_clean.return_value = False
+            mock_val.side_effect = SystemExit(1)
             code = _run_build(["docs", "clean"])
             assert code == 1
 
