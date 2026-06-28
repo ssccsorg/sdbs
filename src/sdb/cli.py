@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> None:
             "  sdb build docs whitepaper\n"
             "  sdb build docs whitepaper proposal --website -j 4\n"
             "  sdb build docs snapshot\n"
-            "  sdb build docs clean"
+            "  sdb clean docs"
         ),
     )
     build_parser.add_argument(
@@ -109,7 +109,7 @@ def main(argv: list[str] | None = None) -> None:
         nargs="*",
         default=["all"],
         help="Build targets: any discovered .qmd/.md file, 'all' (default), "
-        "'snapshot' to refresh cache, or 'clean' to remove Quarto artifacts",
+        "'snapshot' to refresh cache",
     )
     build_parser.add_argument(
         "--output-dir", "-o", type=Path, default=None,
@@ -175,6 +175,21 @@ def main(argv: list[str] | None = None) -> None:
         help="Path to the docs directory (default: current directory)",
     )
 
+    # --- clean ---
+    clean_parser = subparsers.add_parser(
+        "clean",
+        help="Remove Quarto build artifacts",
+        description="Delete all Quarto rendering artifacts (_cached/, _files/, html, pdf, tex) "
+        "from the docs directory. Run before committing to avoid bloat.",
+    )
+    clean_parser.add_argument(
+        "docs_root",
+        type=Path,
+        nargs="?",
+        default=Path("."),
+        help="Path to the docs directory (default: current directory)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "init":
@@ -221,11 +236,6 @@ def main(argv: list[str] | None = None) -> None:
                 config_path = default_config
 
         build_module.initialize_config(docs_root, config_path)
-
-        # Handle "clean"
-        if "clean" in args.targets:
-            success = build_module.clean_quarto_artifacts(docs_root)
-            sys.exit(0 if success else 1)
 
         # Handle "snapshot"
         if "snapshot" in args.targets:
@@ -293,6 +303,12 @@ def main(argv: list[str] | None = None) -> None:
 
         build_module.run_pre_build_sequence(build_module.EXTERNAL_CONFIG, docs_root)
         sys.exit(0)
+
+    elif args.command == "clean":
+        _setup_logging()
+        docs_root = args.docs_root.resolve()
+        success = build_module.clean_quarto_artifacts(docs_root)
+        sys.exit(0 if success else 1)
 
     else:
         parser.print_help()
