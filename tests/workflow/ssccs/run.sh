@@ -142,9 +142,8 @@ verify_outputs() {
   echo ""
   echo "  --- $label output verification ---"
   echo ""
-  check_html   "$site/guide.html"     "guide.md -> HTML"      || failed=1
   check_html   "$site/index.html"     "index.qmd -> HTML"     || failed=1
-  check_html   "$site/manifesto.html" "manifesto.qmd -> HTML" || failed=1
+  check_html   "$site/code_of_conduct.html" "code_of_conduct.qmd -> HTML" || failed=1
   check_file   "$docs_dir/_include/_updated_docs_list.qmd" "pre-build: _updated_docs_list.qmd" || failed=1
   check_file   "$docs_dir/_llms/llms.txt"                  "post-render: llms.txt"           || failed=1
 
