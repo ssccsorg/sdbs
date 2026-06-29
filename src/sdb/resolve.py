@@ -727,6 +727,14 @@ class TitleMetaResolver(_BaseResolver):
             return "beamer" in fmt and "html" not in fmt
         return False
 
+    @staticmethod
+    def _generate_title_meta_disabled(text: str) -> bool:
+        """Return True if ``generate-title-meta: false`` in front matter."""
+        fm_data, _ = _BaseResolver._parse_frontmatter(text)
+        if not fm_data or not isinstance(fm_data, dict):
+            return False
+        return fm_data.get("generate-title-meta", True) is False
+
     # ------------------------------------------------------------------
     # Fix a single file
     # ------------------------------------------------------------------
@@ -751,6 +759,10 @@ class TitleMetaResolver(_BaseResolver):
         try:
             text = file_path.read_text(encoding="utf-8")
         except Exception:
+            return 0
+
+        # generate-title-meta-items: false → skip entirely
+        if self._generate_title_meta_disabled(text):
             return 0
 
         # Beamer-only: remove title-meta include
