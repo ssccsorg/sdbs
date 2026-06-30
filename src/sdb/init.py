@@ -34,6 +34,7 @@ ADVANCED_TEMPLATE_MAP: dict[str, str] = {
     **DEFAULT_TEMPLATE_MAP,
     "_include/_graphviz.py": "_include/_graphviz.py",
     "_include/_title_meta_items.qmd": "_include/_title_meta_items.qmd",
+    "_include/_generate_metadata_tex.py": "_include/_generate_metadata_tex.py",
 }
 
 
