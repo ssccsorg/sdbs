@@ -153,7 +153,6 @@ This is a test.
         raw_ampersand_lines = [
             line for line in tex_content.splitlines()
             if "&" in line and "\\&" not in line
-            and "newcommand" not in line
         ]
         assert len(raw_ampersand_lines) == 0, (
             f"Unescaped & found in: {raw_ampersand_lines}"

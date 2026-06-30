@@ -71,7 +71,11 @@ def extract_front_matter(qmd_path):
 
 
 def _resolve_metadata_files(front: dict, qmd_path: str) -> dict:
-    """Resolve metadata-files references and merge into front matter."""
+    """Resolve metadata-files references and merge into front matter.
+
+    Applies files in order (later files override earlier ones),
+    then the QMD's own front matter takes highest priority.
+    """
     mf = front.get("metadata-files")
     if not mf or not isinstance(mf, list):
         return front
@@ -91,6 +95,7 @@ def _resolve_metadata_files(front: dict, qmd_path: str) -> dict:
             except Exception:
                 pass
 
+    # QMD's own front matter overrides everything
     merged.update(front)
     return merged
 
