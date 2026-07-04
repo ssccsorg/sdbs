@@ -935,27 +935,24 @@ def validate_all_links(target_dir: str, verbose: bool = False, max_workers: int 
                                 or first_bytes[0:2] in (b"PK", b"\x89H")
                             ):
                                 continue
-                            if resp.status_code in (403, 418):
-                                continue
-                            # Any 4xx/5xx is considered broken
-                            file_broken_remote.append(
-                                (
-                                    file_path.relative_to(root),
-                                    url,
-                                    f"{resp.status_code}",
-                                    line,
+                            # Use GET status for final decision — HEAD may be 403 due to rate limit
+                            status = get_resp.status_code
+                            if status in (403, 418) and resp.status_code in (403, 418):
+                                continue  # both HEAD and GET rate-limited — skip
+                            if status >= 400:
+                                file_broken_remote.append(
+                                    (
+                                        file_path.relative_to(root),
+                                        url,
+                                        f"{status}",
+                                        line,
+                                    )
                                 )
-                            )
                         except Exception:
                             if resp.status_code in (403, 418):
-                                continue
+                                continue  # HEAD rate-limited, GET failed — likely rate limit
                             file_broken_remote.append(
-                                (
-                                    file_path.relative_to(root),
-                                    url,
-                                    f"{resp.status_code} (GET failed)",
-                                    line,
-                                )
+                                (file_path.relative_to(root), url, "Connection Error", line)
                             )
 
                 except Exception:
