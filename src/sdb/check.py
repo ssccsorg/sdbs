@@ -845,7 +845,8 @@ def validate_all_links(target_dir: str, verbose: bool = False, max_workers: int 
     print(f"  (ignoring {len(IGNORE_URL_PATTERNS)} URL patterns)")
     print("-" * 60)
     md_link_pattern = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
-    html_link_pattern = re.compile(r'(?:href|src)=["\']([^"\']+)["\']', re.I)
+    html_link_pattern = re.compile(r'(?:href|src)="([^"]+)"', re.I)
+    bare_url_pattern = re.compile(r"<([a-zA-Z][a-zA-Z0-9+.-]*://[^>]+)>")
     files_to_check = [
         fp
         for fp in root.rglob("*")
@@ -896,6 +897,10 @@ def validate_all_links(target_dir: str, verbose: bool = False, max_workers: int 
             if is_inside_inline_code(content, match.start()):
                 continue
             links.add((match.group(1), content.count("\n", 0, match.start()) + 1))
+        for match in bare_url_pattern.finditer(content):
+            if is_inside_inline_code(content, match.start()):
+                continue
+            links.add((match.group(1), content.count("\n", 0, match.start()) + 1))
         if file_path.suffix in {".qmd", ".md"}:
             links.update(extract_yaml_frontmatter_links(content))
         if file_path.suffix in {".yml", ".yaml"}:
@@ -930,27 +935,24 @@ def validate_all_links(target_dir: str, verbose: bool = False, max_workers: int 
                                 or first_bytes[0:2] in (b"PK", b"\x89H")
                             ):
                                 continue
-                            if resp.status_code in (403, 418):
-                                continue
-                            # Any 4xx/5xx is considered broken
-                            file_broken_remote.append(
-                                (
-                                    file_path.relative_to(root),
-                                    url,
-                                    f"{resp.status_code}",
-                                    line,
+                            # Use GET status for final decision — HEAD may be 403 due to rate limit
+                            status = get_resp.status_code
+                            if status in (403, 418) and resp.status_code in (403, 418):
+                                continue  # both HEAD and GET rate-limited — skip
+                            if status >= 400:
+                                file_broken_remote.append(
+                                    (
+                                        file_path.relative_to(root),
+                                        url,
+                                        f"{status}",
+                                        line,
+                                    )
                                 )
-                            )
                         except Exception:
                             if resp.status_code in (403, 418):
-                                continue
+                                continue  # HEAD rate-limited, GET failed — likely rate limit
                             file_broken_remote.append(
-                                (
-                                    file_path.relative_to(root),
-                                    url,
-                                    f"{resp.status_code} (GET failed)",
-                                    line,
-                                )
+                                (file_path.relative_to(root), url, "Connection Error", line)
                             )
 
                 except Exception:
