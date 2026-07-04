@@ -845,7 +845,8 @@ def validate_all_links(target_dir: str, verbose: bool = False, max_workers: int 
     print(f"  (ignoring {len(IGNORE_URL_PATTERNS)} URL patterns)")
     print("-" * 60)
     md_link_pattern = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
-    html_link_pattern = re.compile(r'(?:href|src)=["\']([^"\']+)["\']', re.I)
+    html_link_pattern = re.compile(r'(?:href|src)="([^"]+)"', re.I)
+    bare_url_pattern = re.compile(r"<([a-zA-Z][a-zA-Z0-9+.-]*://[^>]+)>")
     files_to_check = [
         fp
         for fp in root.rglob("*")
@@ -893,6 +894,10 @@ def validate_all_links(target_dir: str, verbose: bool = False, max_workers: int 
                 continue
             links.add((match.group(2), content.count("\n", 0, match.start()) + 1))
         for match in html_link_pattern.finditer(content):
+            if is_inside_inline_code(content, match.start()):
+                continue
+            links.add((match.group(1), content.count("\n", 0, match.start()) + 1))
+        for match in bare_url_pattern.finditer(content):
             if is_inside_inline_code(content, match.start()):
                 continue
             links.add((match.group(1), content.count("\n", 0, match.start()) + 1))
