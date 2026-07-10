@@ -21,6 +21,7 @@ RUN sed -i 's/archive.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.li
     sed -i 's/security.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.list.d/ubuntu.sources && \
     apt-get update && apt-get install -y --no-install-recommends \
     python3 python-is-python3 graphviz librsvg2-bin wget curl ca-certificates sudo \
+    fonts-noto-cjk \
     && apt-get clean -y && rm -rf /var/lib/apt/lists/* \
     # Install Quarto
     && wget -q "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUARTO_VER}/quarto-${QUARTO_VER}-linux-amd64.tar.gz" \
