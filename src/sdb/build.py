@@ -1957,16 +1957,16 @@ def build_targets(
             succeeded = [t for t, s in results.items() if s]
             failed = [t for t, s in results.items() if not s]
 
-            if publish and succeeded:
-                from sdb.publish import get_publish_dir, run_publish_sequence as _run_pub_seq
-                pub_dir = get_publish_dir(docs_root)
-                _run_pub_seq(
-                    EXTERNAL_CONFIG, docs_root,
-                    targets=succeeded,
-                    publish_dir=pub_dir,
-                )
-
             if failed:
+                # Early publish for succeeded targets even when some fail
+                if publish and succeeded:
+                    from sdb.publish import get_publish_dir, run_publish_sequence as _run_pub_seq
+                    pub_dir = get_publish_dir(docs_root)
+                    _run_pub_seq(
+                        EXTERNAL_CONFIG, docs_root,
+                        targets=succeeded,
+                        publish_dir=pub_dir,
+                    )
                 if succeeded:
                     logger.info(f"Successful targets: {succeeded}")
                 logger.error(f"Failed targets: {failed}")
@@ -1990,6 +1990,15 @@ def build_targets(
             _sync_llms_files(final_output, docs_root)
             # Run user-configured post-render commands first (build.yml), then defaults
             run_post_render_sequence(EXTERNAL_CONFIG, docs_root)
+
+            if publish and succeeded:
+                from sdb.publish import get_publish_dir, run_publish_sequence as _run_pub_seq
+                pub_dir = get_publish_dir(docs_root)
+                _run_pub_seq(
+                    EXTERNAL_CONFIG, docs_root,
+                    targets=succeeded,
+                    publish_dir=pub_dir,
+                )
 
             return True
 
@@ -2053,16 +2062,16 @@ def build_targets(
     succeeded = [t for t, s in results.items() if s]
     failed = [t for t, s in results.items() if not s]
 
-    if publish and succeeded:
-        from sdb.publish import get_publish_dir, run_publish_sequence as _run_pub_seq
-        pub_dir = get_publish_dir(docs_root)
-        _run_pub_seq(
-            EXTERNAL_CONFIG, docs_root,
-            targets=succeeded,
-            publish_dir=pub_dir,
-        )
-
     if failed:
+        # Early publish for succeeded targets even when some fail
+        if publish and succeeded:
+            from sdb.publish import get_publish_dir, run_publish_sequence as _run_pub_seq
+            pub_dir = get_publish_dir(docs_root)
+            _run_pub_seq(
+                EXTERNAL_CONFIG, docs_root,
+                targets=succeeded,
+                publish_dir=pub_dir,
+            )
         if succeeded:
             logger.info(f"Successful targets: {succeeded}")
         logger.error(f"Failed targets: {failed}")
@@ -2080,6 +2089,15 @@ def build_targets(
 
     # Run user-configured post-render commands first (build.yml), then defaults
     run_post_render_sequence(EXTERNAL_CONFIG, docs_root)
+
+    if publish and succeeded:
+        from sdb.publish import get_publish_dir, run_publish_sequence as _run_pub_seq
+        pub_dir = get_publish_dir(docs_root)
+        _run_pub_seq(
+            EXTERNAL_CONFIG, docs_root,
+            targets=succeeded,
+            publish_dir=pub_dir,
+        )
 
     return True
 
