@@ -55,7 +55,7 @@ def run_publish_sequence(
         bundle.mkdir(parents=True, exist_ok=True)
         logger.info("Publishing %r -> %s", target, bundle)
 
-        _capture_tex(qmd_path, bundle / "source", docs_root)
+        _capture_tex(qmd_path, bundle, docs_root)
         _capture_md(qmd_path, bundle / f"{target}.md", docs_root)
         _copy_pdf(qmd_path, bundle / f"{target}.pdf", docs_root)
         _gen_metadata(qmd_path, bundle / "metadata.yaml", docs_root, target)
