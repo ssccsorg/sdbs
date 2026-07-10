@@ -1,0 +1,33 @@
+# SDBS Build Configuration — Publish Test
+target_config:
+  paper:
+    c2pa: false
+    copy_pdf: true
+    to: pdf
+
+pre_build:
+  _global: []
+
+post_render:
+  _global: []
+
+exclude:
+  - "**/README.md"
+  - "**/_include/"
+  - "**/*_output/"
+  - "**/*_files/"
+  - "**/*_cached/"
+  - "**/*_libs/"
+  - "**/.jupyter_cache"
+
+publish:
+  zenodo:
+    sandbox: true
+    metadata:
+      creators:
+        - name: "Test Author"
+          affiliation: "SSCCS"
+      license: "CC-BY-4.0"
+      keywords: ["test", "publish", "ssccs"]
+  c2pa:
+    enabled: false

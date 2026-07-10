@@ -1946,9 +1946,9 @@ def build_targets(
             run_post_render_sequence(EXTERNAL_CONFIG, docs_root)
 
             if publish:
-                from sdb.publish import get_publish_dir, run_publish_sequence as _run_pub
+                from sdb.publish import get_publish_dir
                 pub_dir = get_publish_dir(docs_root)
-                _run_pub(
+                run_publish_sequence(
                     EXTERNAL_CONFIG, docs_root,
                     targets=succeeded,
                     publish_dir=pub_dir,
@@ -2032,9 +2032,9 @@ def build_targets(
     run_post_render_sequence(EXTERNAL_CONFIG, docs_root)
 
     if publish:
-        from sdb.publish import get_publish_dir, run_publish_sequence as _run_pub
+        from sdb.publish import get_publish_dir
         pub_dir = get_publish_dir(docs_root)
-        _run_pub(
+        run_publish_sequence(
             EXTERNAL_CONFIG, docs_root,
             targets=succeeded,
             publish_dir=pub_dir,
@@ -2075,4 +2075,3 @@ IGNORING_ARTIFACT_PATTERNS = [
     "**/*.c2pa_identifier.svg",
     "**/_publish",
 ]
->>>>>>> Stashed changes

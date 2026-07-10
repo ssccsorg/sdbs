@@ -1,0 +1,6 @@
+author:
+  - name: "Test Author"
+    email: "author@example.org"
+    affiliations:
+      - "SSCCS Foundation"
+    orcid: "0000-0000-0000-0000"

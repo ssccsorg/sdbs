@@ -1,0 +1,55 @@
+---
+title: "A Sample Paper for Publish Testing"
+author: "Test Author"
+date: last-modified
+format: pdf
+abstract: |
+  This is a sample paper that exercises the PDF generation path
+  of the SDBS --publish pipeline. It includes a figure, a citation,
+  and a math equation.
+bibliography: refs.bib
+---
+
+{{< include ./_include/_title_meta_items.qmd >}}
+
+## Introduction
+
+This paper demonstrates the SDBS publish pipeline @sdbs2025.
+
+The publish pipeline captures:
+
+1. TeX source files from `quarto render --to tex`
+2. The compiled PDF
+3. Clean markdown for machine readability
+4. C2PA signing (when configured)
+5. Zenodo-compatible metadata
+
+## Methodology
+
+We use a simple approach:
+
+$$
+E = mc^2
+$$
+
+See Figure @fig-demo for a visualization of the pipeline.
+
+![SDBS Publish Pipeline](pipeline.png){#fig-demo}
+
+## Results
+
+The publish bundle is generated at `_publish/paper/` with the following structure:
+
+```text
+_publish/paper/
+├── source/
+│   ├── paper.tex
+│   ├── _files/
+│   └── ...
+├── paper.pdf
+├── paper.md
+├── c2pa_manifest.json
+└── metadata.yaml
+```
+
+## References
