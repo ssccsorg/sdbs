@@ -75,21 +75,7 @@ def _copy_source_context(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
     parent = qmd_path.parent
     copied = 0
 
-    # 1) _include/ from docs_root (preserve relative path)
-    inc_src = docs_root / "_include"
-    if inc_src.exists():
-        inc_dst = bundle / "_include"
-        shutil.copytree(inc_src, inc_dst, dirs_exist_ok=True)
-        copied += 1
-
-    # 3) _extensions/ from docs_root
-    ext_src = docs_root / "_extensions"
-    if ext_src.exists():
-        ext_dst = bundle / "_extensions"
-        shutil.copytree(ext_src, ext_dst, dirs_exist_ok=True)
-        copied += 1
-
-    # 4) .bib, images from QMD's parent directory
+    # 1) .bib, images from QMD's parent directory
     for pat in ["*.bib", "*.png", "*.jpg", "*.jpeg", "*.svg"]:
         for f in parent.glob(pat):
             shutil.copy2(f, bundle / f.name)

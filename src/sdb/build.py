@@ -1694,6 +1694,56 @@ def _cleanup_orphaned_caches(
 # ---------------------------------------------------------------------------
 
 
+def _capture_files_for_publish(target: str, docs_root: Path) -> None:
+    """Capture {stem}_files/ right after render, before Quarto cleanup.
+
+    Saves to two locations:
+      1. ``_publish/.staging/{target}/{stem}_files/`` (for publish post-job)
+      2. ``_cached/{target}/{qmd_hash}/{stem}_files/`` (for cache-hit restore)
+    """
+    from sdb.build import TARGET_CONFIG
+    from sdb.publish import get_publish_dir
+    from sdb.hash import HashManager
+    cfg = TARGET_CONFIG.get(target)
+    if not cfg:
+        return
+    qmd_rel = cfg.get("qmd")
+    if not qmd_rel:
+        return
+    qmd_path = docs_root / qmd_rel
+    if not qmd_path.exists():
+        return
+    stem = qmd_path.stem
+    parent = qmd_path.parent
+    files_dir = parent / f"{stem}_files"
+    if not files_dir.exists() or not files_dir.is_dir():
+        return
+
+    # 1) Staging for publish post-job
+    staging_root = get_publish_dir(docs_root) / ".staging" / target / f"{stem}_files"
+    staging_root.parent.mkdir(parents=True, exist_ok=True)
+    if staging_root.exists():
+        shutil.rmtree(staging_root, ignore_errors=True)
+    try:
+        shutil.copytree(files_dir, staging_root)
+        logger.debug("Captured %s (staging)", files_dir)
+    except Exception as e:
+        logger.warning("Failed to stage %s: %s", files_dir, e)
+
+    # 2) Cache alongside artifact (for cache-hit restore)
+    qmd_hash = HashManager.compute_quarto_file_hash_with_deps(qmd_path, docs_root)
+    cache_dir = docs_root.parent / "_cached" / target / qmd_hash
+    if cache_dir.exists():
+        cache_files = cache_dir / f"{stem}_files"
+        if cache_files.exists():
+            shutil.rmtree(cache_files, ignore_errors=True)
+        try:
+            shutil.copytree(files_dir, cache_files)
+            logger.debug("Captured %s (cache)", files_dir)
+        except Exception as e:
+            logger.warning("Failed to cache %s: %s", files_dir, e)
+
+
 def build_targets(
     targets: List[str],
     output_dir: Optional[Path],
@@ -1827,6 +1877,11 @@ def build_targets(
                     try:
                         success = future.result()
                         results[target] = success
+                        # --publish: capture _files/ from isolated temp dir
+                        if publish and success:
+                            tdir = target_temp_dirs.get(target)
+                            if tdir:
+                                _capture_files_for_publish(target, tdir)
                     except Exception as e:
                         logger.error(
                             f"Exception while rendering {target}: {e}"
@@ -1966,6 +2021,9 @@ def build_targets(
             for future in as_completed(futures):
                 target, success = future.result()
                 results[target] = success
+                # --publish: capture _files/ right after render (before cleanup)
+                if publish and success:
+                    _capture_files_for_publish(target, docs_root)
     else:
         if len(targets) > 1:
             logger.info(
@@ -1982,6 +2040,9 @@ def build_targets(
                 build_targets_set,
             )
             results[target] = success
+            # --publish: capture _files/ right after render (before cleanup)
+            if publish and success:
+                _capture_files_for_publish(target, docs_root)
 
     succeeded = [t for t, s in results.items() if s]
     failed = [t for t, s in results.items() if not s]
