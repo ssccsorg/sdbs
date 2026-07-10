@@ -75,7 +75,13 @@ def _copy_source_context(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
     parent = qmd_path.parent
     copied = 0
 
-    # 1) .bib, images from QMD's parent directory
+    # 1) Quarto metadata _files/ (referenced by \input{_files/...} in .tex)
+    meta_dir = parent / "_files"
+    if meta_dir.exists() and meta_dir.is_dir():
+        shutil.copytree(meta_dir, bundle / "_files", dirs_exist_ok=True)
+        copied += 1
+
+    # 2) .bib, images from QMD's parent directory
     for pat in ["*.bib", "*.png", "*.jpg", "*.jpeg", "*.svg"]:
         for f in parent.glob(pat):
             shutil.copy2(f, bundle / f.name)
@@ -140,6 +146,14 @@ def _capture_artifact_tex(qmd_path: Path, bundle: Path, docs_root: Path) -> None
         shutil.copytree(src, bundle / src.name, dirs_exist_ok=True)
         logger.debug("  %s -> bundle", src.name)
 
+def _site_path(qmd_path: Path, docs_root: Path, stem: str, ext: str) -> Path:
+    """Return ``_site/{qmd_rel_dir}/{stem}.{ext}`` or empty Path if not under docs_root."""
+    try:
+        rel = qmd_path.relative_to(docs_root)
+        return docs_root / "_site" / rel.parent / f"{stem}.{ext}"
+    except ValueError:
+        return Path()
+
 def _capture_artifact_md(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
     """Capture .md: from _llms/ or _site/ first, fallback to --to gfm."""
     stem = qmd_path.stem
@@ -147,6 +161,8 @@ def _capture_artifact_md(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
     for src in [
         docs_root / "_llms" / f"{stem}.llms.md",
         docs_root / "_site" / f"{stem}.llms.md",
+        _site_path(qmd_path, docs_root, stem, "llms.md"),
+        _site_path(qmd_path, docs_root, stem, "llms.html"),
     ]:
         if src.exists():
             shutil.copy2(src, bundle / f"{stem}.md")
@@ -161,6 +177,7 @@ def _copy_artifact_pdf(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
     stem = qmd_path.stem
     for src in [
         docs_root / "_site" / f"{stem}.pdf",
+        _site_path(qmd_path, docs_root, stem, "pdf"),
         qmd_path.parent / f"{stem}.pdf",
     ]:
         if src.exists() and src.stat().st_size > 0:
@@ -174,6 +191,7 @@ def _copy_artifact_html(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
     stem = qmd_path.stem
     for src in [
         docs_root / "_site" / f"{stem}.html",
+        _site_path(qmd_path, docs_root, stem, "html"),
         qmd_path.parent / f"{stem}.html",
     ]:
         if src.exists() and src.stat().st_size > 0:
