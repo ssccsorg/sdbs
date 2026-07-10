@@ -564,3 +564,60 @@ class TestBuildCliPublishFlag:
             kw = mock_build.call_args.kwargs
             assert kw["publish"] is True
             
+
+
+class TestCliPublishCleanup:
+    """_publish/ is cleaned before initialize_config to avoid target discovery."""
+
+    def test_clean_publish_before_init(self) -> None:
+        with (
+            patch("sdb.cli.build_module.initialize_config") as mock_init,
+            patch("sdb.cli.build_module.build_targets") as mock_build,
+            patch("sdb.cli.build_module.BUILD_FUNCTIONS", {"doc": lambda: True}),
+            patch("shutil.rmtree") as mock_rmtree,
+        ):
+            from tempfile import mkdtemp
+            tmp = Path(mkdtemp())
+            pub = tmp / "_publish"
+            pub.mkdir(parents=True)
+            (pub / "stale.md").write_text("stale")
+            (pub / "_include").mkdir()
+            (pub / "_include" / "bad.qmd").write_text("---\ntitle: bad\n---\n")
+
+            from sdb.cli import main as cli_main
+            try:
+                cli_main(["build", str(tmp), "--publish"])
+            except SystemExit:
+                pass
+
+            # rmtree should have been called on _publish dir
+            found = False
+            for call_args in mock_rmtree.call_args_list:
+                if "_publish" in str(call_args):
+                    found = True
+                    break
+            assert found, "_publish/ was not cleaned before initialize_config"
+
+    def test_no_clean_without_publish_flag(self) -> None:
+        with (
+            patch("sdb.cli.build_module.initialize_config") as mock_init,
+            patch("sdb.cli.build_module.build_targets") as mock_build,
+            patch("sdb.cli.build_module.BUILD_FUNCTIONS", {"doc": lambda: True}),
+            patch("shutil.rmtree") as mock_rmtree,
+        ):
+            from tempfile import mkdtemp
+            tmp = Path(mkdtemp())
+            pub = tmp / "_publish"
+            pub.mkdir(parents=True)
+            (pub / "stale.md").write_text("stale")
+
+            from sdb.cli import main as cli_main
+            try:
+                cli_main(["build", str(tmp)])
+            except SystemExit:
+                pass
+
+            # rmtree should NOT have been called on _publish
+            for call_args in mock_rmtree.call_args_list:
+                if "_publish" in str(call_args):
+                    pytest.fail("_publish was cleaned even without --publish flag")
