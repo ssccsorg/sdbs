@@ -6,6 +6,7 @@
 **/*_extensions/
 **/*_cached/
 **/_docsbuild/
+/_publish/
 **/.jupyter_cache/
 __pycache__/
 *.pyc

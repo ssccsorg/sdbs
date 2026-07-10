@@ -245,10 +245,6 @@ def main(argv: list[str] | None = None) -> None:
         _setup_logging()
         docs_root = args.docs_root.resolve()
 
-        # --publish implies --website
-        if args.publish:
-            args.website = True
-
         # Load config
         config_path = args.config
         if config_path is None:
