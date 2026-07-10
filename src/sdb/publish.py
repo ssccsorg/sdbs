@@ -49,6 +49,7 @@ def run_publish_sequence(
         _capture_artifact_tex(qmd_path, bundle, docs_root)
         _capture_artifact_md(qmd_path, bundle, docs_root)
         _copy_artifact_pdf(qmd_path, bundle, docs_root)
+        _copy_artifact_html(qmd_path, bundle, docs_root)
 
         # Metadata
         _gen_metadata(qmd_path, bundle / "metadata.yaml", docs_root, target)
@@ -94,12 +95,8 @@ def _copy_source_context(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
             shutil.copy2(f, bundle / f.name)
             copied += 1
 
-    # 5) Quarto config files from docs_root
-    for cfg_file in ["_quarto.yml", "_quarto-website.yml"]:
-        src = docs_root / cfg_file
-        if src.exists():
-            shutil.copy2(src, bundle / cfg_file)
-            copied += 1
+    # (Quarto config files intentionally excluded; they are not
+    #  part of the publish artifact and would mislead consumers.)
 
     logger.info("  Source context: %d item(s)", copied)
 
@@ -188,6 +185,19 @@ def _copy_artifact_pdf(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
             logger.info("  PDF %s", src.name)
             return
     logger.debug("  No PDF (expected for HTML-only)")
+
+
+def _copy_artifact_html(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
+    stem = qmd_path.stem
+    for src in [
+        docs_root / "_site" / f"{stem}.html",
+        qmd_path.parent / f"{stem}.html",
+    ]:
+        if src.exists() and src.stat().st_size > 0:
+            shutil.copy2(src, bundle / f"{stem}.html")
+            logger.info("  HTML %s", src.name)
+            return
+    logger.debug("  No HTML (unexpected)")
 
 
 def _gen_metadata(qmd_path: Path, out: Path, docs_root: Path, target: str) -> None:
