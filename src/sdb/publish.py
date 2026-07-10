@@ -1,6 +1,6 @@
 import os, shutil, subprocess, logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 PUBLISH_DIR_NAME = "_publish"
@@ -117,24 +117,7 @@ def _capture_artifact_tex(qmd_path: Path, bundle: Path, docs_root: Path) -> None
             logger.debug("  TeX from %s", src)
             return
 
-    # Fallback: render --to latex
-    logger.info("  Rendering --to latex (no .tex found)")
-    try:
-        r = subprocess.run(
-            ["quarto", "render", str(qmd_path), "--to", "latex"],
-            cwd=docs_root, capture_output=True, text=True, timeout=120,
-        )
-        if r.returncode == 0:
-            gen = parent / f"{stem}.tex"
-            if gen.exists():
-                shutil.copy2(gen, bundle / f"{stem}.tex")
-                gen.unlink(missing_ok=True)
-        else:
-            logger.warning("  --to latex failed: %s", r.stderr[:200])
-    except Exception as e:
-        logger.warning("  --to latex error: %s", e)
-
-    # Copy _files/ alongside .tex (generated figures, code output)
+    # Copy _files/ alongside QMD (generated figures, code output)
     gf = parent / f"{stem}_files"
     if gf.exists() and gf.is_dir():
         shutil.copytree(gf, bundle / gf.name, dirs_exist_ok=True)
@@ -154,23 +137,7 @@ def _capture_artifact_md(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
             logger.info("  MD from %s", src.parent.name)
             return
 
-    logger.info("  Rendering --to gfm (no .llms.md found)")
-    try:
-        r = subprocess.run(
-            ["quarto", "render", str(qmd_path), "--to", "gfm"],
-            cwd=docs_root, capture_output=True, text=True, timeout=120,
-        )
-        if r.returncode == 0:
-            gen = qmd_path.parent / f"{stem}.md"
-            if gen.exists():
-                shutil.copy2(gen, bundle / f"{stem}.md")
-                gen.unlink(missing_ok=True)
-    except Exception as e:
-        logger.warning("  --to gfm error: %s", e)
-
-    gf = qmd_path.parent / f"{stem}_files"
-    if gf.exists():
-        shutil.rmtree(gf, ignore_errors=True)
+    logger.debug("  No .llms.md found (expected if --website was not used)")
 
 
 def _copy_artifact_pdf(qmd_path: Path, bundle: Path, docs_root: Path) -> None:

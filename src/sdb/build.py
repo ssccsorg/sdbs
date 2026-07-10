@@ -756,33 +756,6 @@ def run_post_render_sequence(external_config: Dict[str, Any], docs_root: Path) -
     run_post_render_commands(external_config, docs_root)
     _run_default_sequence(_DEFAULT_POST_RENDER, docs_root, "Post-render")
 
-# Default publish sequence (runs only when --publish is set)
-_DEFAULT_POST_PUBLISH: List = []
-
-
-def run_publish_sequence(
-    external_config: Dict[str, Any],
-    docs_root: Path,
-    targets: Optional[List[str]] = None,
-    publish_dir: Optional[Path] = None,
-    zenodo: bool = False,
-    zenodo_sandbox: bool = False,
-) -> None:
-    """Run publish post-jobs: TeX capture, pub.md, C2PA signing, bundle assembly.
-
-    This sequence runs after the full post-render sequence when --publish
-    is enabled. Default steps are defined in _DEFAULT_POST_PUBLISH.
-    """
-    logger.info("Running publish post-job sequence...")
-    _run_default_sequence(_DEFAULT_POST_PUBLISH, docs_root, "Publish")
-    if zenodo:
-        logger.info(
-            "Zenodo upload requested (sandbox=%s). "
-            "Upload logic will be implemented in a future phase.",
-            zenodo_sandbox,
-        )
-
-
 # ---------------------------------------------------------------------------
 # Core build function
 # ---------------------------------------------------------------------------
@@ -1956,17 +1929,6 @@ def build_targets(
             _sync_llms_files(final_output, docs_root)
             # Run user-configured post-render commands first (build.yml), then defaults
             run_post_render_sequence(EXTERNAL_CONFIG, docs_root)
-
-            if publish:
-                from sdb.publish import get_publish_dir, run_publish_sequence as _run_pub_seq
-                pub_dir = get_publish_dir(docs_root)
-                _run_pub_seq(
-                    EXTERNAL_CONFIG, docs_root,
-                    targets=succeeded,
-                    publish_dir=pub_dir,
-                    zenodo=zenodo,
-                    zenodo_sandbox=zenodo_sandbox,
-                )
 
             return True
 
