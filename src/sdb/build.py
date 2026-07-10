@@ -1946,9 +1946,9 @@ def build_targets(
             run_post_render_sequence(EXTERNAL_CONFIG, docs_root)
 
             if publish:
-                from sdb.publish import get_publish_dir
+                from sdb.publish import get_publish_dir, run_publish_sequence as _run_pub_seq
                 pub_dir = get_publish_dir(docs_root)
-                run_publish_sequence(
+                _run_pub_seq(
                     EXTERNAL_CONFIG, docs_root,
                     targets=succeeded,
                     publish_dir=pub_dir,
@@ -2032,9 +2032,9 @@ def build_targets(
     run_post_render_sequence(EXTERNAL_CONFIG, docs_root)
 
     if publish:
-        from sdb.publish import get_publish_dir
+        from sdb.publish import get_publish_dir, run_publish_sequence as _run_pub_seq
         pub_dir = get_publish_dir(docs_root)
-        run_publish_sequence(
+        _run_pub_seq(
             EXTERNAL_CONFIG, docs_root,
             targets=succeeded,
             publish_dir=pub_dir,
