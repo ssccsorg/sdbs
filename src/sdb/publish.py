@@ -128,11 +128,15 @@ def _capture_artifact_tex(qmd_path: Path, bundle: Path, docs_root: Path) -> None
     cache_base = docs_root.parent / "_cached"
     if cache_base.exists():
         for ct in cache_base.iterdir():
-            if ct.is_dir():
-                for ch in ct.iterdir():
-                    cf = ch / f"{stem}_files"
-                    if cf.exists() and cf.is_dir():
-                        sources.append(cf)
+            if not ct.is_dir():
+                continue
+            for ch in ct.iterdir():
+                cf = ch / f"{stem}_files"
+                if cf.exists() and cf.is_dir():
+                    sources.append(cf)
+                    break
+            if sources and sources[-1] == cf:
+                break
 
     # 3) Copy first-found (deduplicated by resolved path)
     seen = set()
