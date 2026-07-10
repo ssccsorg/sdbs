@@ -10,7 +10,7 @@ PUBLISH_DIR_NAME = "_publish"
 
 
 def get_publish_dir(docs_root: Path) -> Path:
-    return docs_root.parent / PUBLISH_DIR_NAME
+    return docs_root / PUBLISH_DIR_NAME
 
 
 def run_publish_sequence(
