@@ -102,27 +102,42 @@ def _copy_source_context(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
 
 
 def _capture_artifact_tex(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
-    """Capture .tex file: keep-tex path first, fallback to --to latex."""
+    """Package .tex and all discoverable asset paths into the bundle.
+
+    Looks for:
+      1. ``{{stem}}.tex`` — from QMD dir or ``_freeze/{{stem}}/``
+      2. ``{{stem}}_files/`` — from QMD dir, ``_freeze/{{stem}}/``,
+         and ``_site/{{qmd_rel_dir}}/{{stem}}_files/`` (website output)
+    """
     stem = qmd_path.stem
     parent = qmd_path.parent
 
-    # Check for existing .tex (keep-tex: true or _freeze/)
-    tex_sources = [
+    # 1) .tex
+    for src in [
         parent / f"{stem}.tex",
         docs_root / "_freeze" / stem / f"{stem}.tex",
-    ]
-    for src in tex_sources:
+    ]:
         if src.exists() and src.stat().st_size > 0:
             shutil.copy2(src, bundle / f"{stem}.tex")
             logger.debug("  TeX from %s", src)
-            return
+            break
 
-    # Copy _files/ alongside QMD (generated figures, code output)
-    gf = parent / f"{stem}_files"
-    if gf.exists() and gf.is_dir():
-        shutil.copytree(gf, bundle / gf.name, dirs_exist_ok=True)
-        logger.debug("  _files/ copied to bundle")
+    # 2) ``_site/`` (website output — richest figure set)
+    site_path = None
+    try:
+        rel = qmd_path.relative_to(docs_root)
+        site_path = docs_root / "_site" / rel.parent / f"{stem}_files"
+    except ValueError:
+        pass
 
+    # 3) ``{{stem}}_files/`` from all possible sources
+    for src in [
+        parent / f"{stem}_files",
+        docs_root / "_freeze" / stem / f"{stem}_files",
+    ] + ([site_path] if site_path and site_path.exists() and site_path.is_dir() else []):
+        if src.exists() and src.is_dir():
+            shutil.copytree(src, bundle / src.name, dirs_exist_ok=True)
+            logger.debug("  %s → bundle", src.name)
 
 def _capture_artifact_md(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
     """Capture .md: from _llms/ or _site/ first, fallback to --to gfm."""
