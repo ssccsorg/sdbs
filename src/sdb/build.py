@@ -1797,6 +1797,18 @@ def build_targets(
                 f"Failed to remove existing _site directory: {e}"
             )
             return False
+    if publish:
+        pub_dir = docs_root / "_publish"
+        if pub_dir.exists():
+            logger.info(f"Cleaning existing _publish directory: {pub_dir}")
+            try:
+                shutil.rmtree(pub_dir)
+                logger.info("Removed existing _publish directory")
+            except Exception as e:
+                logger.error(
+                    f"Failed to remove existing _publish directory: {e}"
+                )
+                return False
 
     if website and (not sequence_mode) and (len(targets) > 1):
         logger.info(
