@@ -1,4 +1,10 @@
-"""SDBS publish — publishable artifact bundle generator."""
+"""SDBS publish — publishable artifact bundle generator.
+
+A thin orchestrator that copies already-rendered artifacts (PDF, TeX, MD)
+into ``_publish/{target}/`` bundles.  Re-renders only as fallback when
+Quarto did not persist the intermediate file (e.g. ``.tex`` without
+``keep-tex: true``).
+"""
 
 from __future__ import annotations
 import logging, shutil, subprocess
@@ -13,6 +19,10 @@ def get_publish_dir(docs_root: Path) -> Path:
     return docs_root / PUBLISH_DIR_NAME
 
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def run_publish_sequence(
     external_config: Dict[str, Any],
     docs_root: Path,
@@ -21,14 +31,13 @@ def run_publish_sequence(
     zenodo: bool = False,
     zenodo_sandbox: bool = False,
 ) -> None:
-    from sdb.build import EXTERNAL_CONFIG, TARGET_CONFIG
+    from sdb.build import TARGET_CONFIG
     if publish_dir is None:
         publish_dir = get_publish_dir(docs_root)
     if not targets:
         logger.info("No targets to publish.")
         return
-    publish_cfg = external_config.get("publish", {})
-    c2pa_enabled = publish_cfg.get("c2pa", {}).get("enabled", False)
+
     for target in targets:
         cfg = TARGET_CONFIG.get(target)
         if cfg is None:
@@ -41,94 +50,134 @@ def run_publish_sequence(
         if not qmd_path.exists():
             logger.warning("QMD not found: %s, skipping.", qmd_path)
             continue
+
         bundle = publish_dir / target
         bundle.mkdir(parents=True, exist_ok=True)
         logger.info("Publishing %r -> %s", target, bundle)
+
         _capture_tex(qmd_path, bundle / "source", docs_root)
         _capture_md(qmd_path, bundle / f"{target}.md", docs_root)
-        _copy_pdf(qmd_path, bundle / f"{target}.pdf", cfg, docs_root)
-        _gen_metadata(qmd_path, bundle / "metadata.yaml", docs_root, target, cfg)
-        if c2pa_enabled:
-            logger.info("C2PA for %r not yet implemented (Phase 3).", target)
+        _copy_pdf(qmd_path, bundle / f"{target}.pdf", docs_root)
+        _gen_metadata(qmd_path, bundle / "metadata.yaml", docs_root, target)
+
         nfiles = len(list(bundle.rglob("*")))
         logger.info("Bundle for %r assembled (%d files)", target, nfiles)
+
     if zenodo:
         logger.info("Zenodo upload not yet implemented (Phase 4).")
 
 
+# ---------------------------------------------------------------------------
+# TeX: already exists (keep-tex) or render --to latex
+# ---------------------------------------------------------------------------
+
 def _capture_tex(qmd_path: Path, dest: Path, docs_root: Path) -> None:
-    logger.info("  TeX source -> %s", dest)
-    try:
-        r = subprocess.run(
-            ["quarto", "render", str(qmd_path), "--to", "latex"],
-            cwd=docs_root, capture_output=True, text=True, timeout=120,
-        )
-        if r.returncode != 0:
-            logger.warning("  quarto render --to tex failed: %s", r.stderr[:300])
-            return
-    except Exception as e:
-        logger.warning("  quarto render --to tex error: %s", e)
-        return
     stem = qmd_path.stem
     parent = qmd_path.parent
     dest.mkdir(parents=True, exist_ok=True)
     copied = 0
-    for pat, is_dir in [
-        (f"{stem}.tex", False),
-        (f"{stem}_files", True),
-        ("*.bib", False),
-        ("*.png", False),
-        ("*.jpg", False),
-        ("*.jpeg", False),
-        ("*.svg", False),
-        ("*.pdf", False),
-    ]:
-        tgt = parent / pat
-        if is_dir:
-            if tgt.exists() and tgt.is_dir():
-                shutil.copytree(tgt, dest / pat, dirs_exist_ok=True)
-                copied += 1
-        elif "*" in pat:
-            for f in parent.glob(pat):
-                shutil.copy2(f, dest / f.name)
-                copied += 1
-        elif tgt.exists() and tgt.is_file():
-            shutil.copy2(tgt, dest / pat)
+
+    # 1) Look for existing .tex (keep-tex: true or _freeze/ cache)
+    tex_candidates = [
+        parent / f"{stem}.tex",
+        docs_root / "_freeze" / stem / f"{stem}.tex",
+    ]
+    tex_found = False
+    for src in tex_candidates:
+        if src.exists() and src.stat().st_size > 0:
+            shutil.copy2(src, dest / f"{stem}.tex")
+            tex_found = True
             copied += 1
-    freeze = docs_root / "_freeze" / stem
-    if freeze.exists():
-        for item in freeze.rglob("*"):
-            rel = item.relative_to(freeze)
-            (dest / "_freeze" / rel).parent.mkdir(parents=True, exist_ok=True)
-            if item.is_file():
-                shutil.copy2(item, dest / "_freeze" / rel)
+            logger.debug("  TeX found at %s", src)
+            break
+
+    if not tex_found:
+        # 2) Fallback: render --to latex
+        logger.info("  Rendering --to latex (no .tex found)")
+        try:
+            r = subprocess.run(
+                ["quarto", "render", str(qmd_path), "--to", "latex"],
+                cwd=docs_root, capture_output=True, text=True, timeout=120,
+            )
+            if r.returncode == 0:
+                gen = parent / f"{stem}.tex"
+                if gen.exists():
+                    shutil.copy2(gen, dest / f"{stem}.tex")
+                    gen.unlink(missing_ok=True)
+                    copied += 1
+            else:
+                logger.warning("  --to latex failed: %s", r.stderr[:200])
+        except Exception as e:
+            logger.warning("  --to latex error: %s", e)
+
+    # 3) Copy companion files (figures, bib, images)
+    for pat in ["*.bib", "*.png", "*.jpg", "*.jpeg", "*.svg"]:
+        for f in parent.glob(pat):
+            shutil.copy2(f, dest / f.name)
+            copied += 1
+
+    # 4) _files/ dir alongside QMD
+    files_dir = parent / f"{stem}_files"
+    if files_dir.exists() and files_dir.is_dir():
+        shutil.copytree(files_dir, dest / f"{stem}_files", dirs_exist_ok=True)
+
     logger.info("  Copied %d source item(s)", copied)
 
 
+# ---------------------------------------------------------------------------
+# MD: copy from _llms/ or _site/ or render --to gfm (last resort)
+# ---------------------------------------------------------------------------
+
 def _capture_md(qmd_path: Path, out: Path, docs_root: Path) -> None:
-    logger.info("  Markdown -> %s", out)
+    stem = qmd_path.stem
+
+    # 1) _llms/{stem}.llms.md  (generated by website mode + llms-txt)
+    src_llms = docs_root / "_llms" / f"{stem}.llms.md"
+    if src_llms.exists():
+        shutil.copy2(src_llms, out)
+        logger.info("  MD from _llms/")
+        return
+
+    # 2) _site/{stem}.llms.md
+    src_site = docs_root / "_site" / f"{stem}.llms.md"
+    if src_site.exists():
+        shutil.copy2(src_site, out)
+        logger.info("  MD from _site/")
+        return
+
+    # 3) Fallback: render --to gfm
+    logger.info("  Rendering --to gfm (no .llms.md found)")
+    _render_gfm(qmd_path, out, docs_root)
+
+
+def _render_gfm(qmd_path: Path, out: Path, docs_root: Path) -> None:
     try:
         r = subprocess.run(
             ["quarto", "render", str(qmd_path), "--to", "gfm"],
             cwd=docs_root, capture_output=True, text=True, timeout=120,
         )
-        if r.returncode != 0:
-            logger.warning("  quarto render --to gfm failed: %s", r.stderr[:300])
-            return
+        if r.returncode == 0:
+            stem = qmd_path.stem
+            gen = qmd_path.parent / f"{stem}.md"
+            if gen.exists():
+                shutil.copy2(gen, out)
+                gen.unlink(missing_ok=True)
+        else:
+            logger.warning("  --to gfm failed: %s", r.stderr[:200])
     except Exception as e:
-        logger.warning("  quarto render --to gfm error: %s", e)
-        return
-    stem = qmd_path.stem
-    gen = qmd_path.parent / f"{stem}.md"
-    if gen.exists():
-        shutil.copy2(gen, out)
-        gen.unlink(missing_ok=True)
-    gf = qmd_path.parent / f"{stem}_files"
+        logger.warning("  --to gfm error: %s", e)
+
+    # cleanup side-effect _files
+    gf = qmd_path.parent / f"{qmd_path.stem}_files"
     if gf.exists():
         shutil.rmtree(gf, ignore_errors=True)
 
 
-def _copy_pdf(qmd_path: Path, out: Path, cfg: Dict[str, Any], docs_root: Path) -> None:
+# ---------------------------------------------------------------------------
+# PDF: _site/ first, then QMD dir
+# ---------------------------------------------------------------------------
+
+def _copy_pdf(qmd_path: Path, out: Path, docs_root: Path) -> None:
     stem = qmd_path.stem
     cands = [
         docs_root / "_site" / f"{stem}.pdf",
@@ -137,20 +186,24 @@ def _copy_pdf(qmd_path: Path, out: Path, cfg: Dict[str, Any], docs_root: Path) -
     for c in cands:
         if c.exists() and c.stat().st_size > 0:
             shutil.copy2(c, out)
-            logger.info("  PDF %s -> %s", c.name, out)
+            logger.info("  PDF %s", c.name)
             return
-    logger.warning("  No PDF for %s (looked: %s)", stem, cands)
+    logger.debug("  No PDF (expected for HTML-only targets)")
 
 
-def _gen_metadata(
-    qmd_path: Path, out: Path, docs_root: Path, target: str, cfg: Dict
-) -> None:
+# ---------------------------------------------------------------------------
+# metadata.yaml: QMD frontmatter + build.yml publish.zenodo.metadata
+# ---------------------------------------------------------------------------
+
+def _gen_metadata(qmd_path: Path, out: Path, docs_root: Path, target: str) -> None:
     from sdb.build import EXTERNAL_CONFIG
     zm = EXTERNAL_CONFIG.get("publish", {}).get("zenodo", {}).get("metadata", {})
+
     title = target.capitalize()
     creators = [{"name": "SSCCS Foundation"}]
     desc = ""
     kw = ["sdbs", "ssccs"]
+
     try:
         text = qmd_path.read_text(encoding="utf-8")
         if text.startswith("---"):
@@ -168,17 +221,19 @@ def _gen_metadata(
                         desc = s.split(":", 1)[1].strip().strip("\"'")
     except Exception:
         pass
+
     meta = {
         "title": zm.get("title") or title,
         "creators": zm.get("creators") or creators,
-        "description": zm.get("description") or desc or f"SDBS publish bundle for {target}",
+        "description": zm.get("description") or desc or f"SDBS bundle: {target}",
         "access_right": zm.get("access_right", "open"),
         "license": zm.get("license", "CC-BY-4.0"),
         "keywords": zm.get("keywords") or kw,
     }
     if "upload_type" in zm:
         meta["upload_type"] = zm["upload_type"]
+
     import yaml
     with open(out, "w", encoding="utf-8") as f:
         yaml.dump(meta, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    logger.info("  metadata.yaml written for %r", target)
+    logger.info("  metadata.yaml")
