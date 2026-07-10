@@ -15,8 +15,6 @@ def run_publish_sequence(
     docs_root: Path,
     targets: Optional[List[str]] = None,
     publish_dir: Optional[Path] = None,
-    zenodo: bool = False,
-    zenodo_sandbox: bool = False,
 ) -> None:
     from sdb.build import TARGET_CONFIG
     if publish_dir is None:
@@ -56,9 +54,6 @@ def run_publish_sequence(
 
         nfiles = len(list(bundle.rglob("*")))
         logger.info("Bundle for %r assembled (%d files)", target, nfiles)
-
-    if zenodo:
-        logger.info("Zenodo upload not yet implemented (Phase 4).")
 
 
 def _copy_source_context(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
@@ -207,12 +202,12 @@ def _copy_artifact_html(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
 
 def _gen_metadata(qmd_path: Path, out: Path, docs_root: Path, target: str) -> None:
     from sdb.build import EXTERNAL_CONFIG
-    zm = EXTERNAL_CONFIG.get("publish", {}).get("zenodo", {}).get("metadata", {})
-
-    title = target.capitalize()
-    creators = [{"name": "SSCCS Foundation"}]
-    desc = ""
-    kw = ["sdbs", "ssccs"]
+    pub_cfg = EXTERNAL_CONFIG.get("publish", {})
+    md_cfg = pub_cfg.get("metadata", {})
+    title = md_cfg.get("title") or target.capitalize()
+    creators = md_cfg.get("creators") or [{"name": "SSCCS Foundation"}]
+    desc = md_cfg.get("description") or ""
+    kw = md_cfg.get("keywords") or ["sdbs", "ssccs"]
 
     try:
         text = qmd_path.read_text(encoding="utf-8")
@@ -233,15 +228,15 @@ def _gen_metadata(qmd_path: Path, out: Path, docs_root: Path, target: str) -> No
         pass
 
     meta = {
-        "title": zm.get("title") or title,
-        "creators": zm.get("creators") or creators,
-        "description": zm.get("description") or desc or f"SDBS bundle: {target}",
-        "access_right": zm.get("access_right", "open"),
-        "license": zm.get("license", "CC-BY-4.0"),
-        "keywords": zm.get("keywords") or kw,
+        "title": title,
+        "creators": creators,
+        "description": desc or f"SDBS bundle: {target}",
+        "access_right": md_cfg.get("access_right", "open"),
+        "license": md_cfg.get("license", "CC-BY-4.0"),
+        "keywords": kw,
     }
-    if "upload_type" in zm:
-        meta["upload_type"] = zm["upload_type"]
+    if "upload_type" in md_cfg:
+        meta["upload_type"] = md_cfg["upload_type"]
 
     import yaml
     with open(out, "w", encoding="utf-8") as f:

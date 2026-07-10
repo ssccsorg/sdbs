@@ -1751,8 +1751,6 @@ def build_targets(
     website: bool = False,
     docs_root: Optional[Path] = None,
     publish: bool = False,
-    zenodo: bool = False,
-    zenodo_sandbox: bool = False,
 ) -> bool:
     """
     Build multiple targets.
@@ -1954,8 +1952,6 @@ def build_targets(
                     EXTERNAL_CONFIG, docs_root,
                     targets=succeeded,
                     publish_dir=pub_dir,
-                    zenodo=zenodo,
-                    zenodo_sandbox=zenodo_sandbox,
                 )
 
             if failed:
@@ -2052,8 +2048,6 @@ def build_targets(
             EXTERNAL_CONFIG, docs_root,
             targets=succeeded,
             publish_dir=pub_dir,
-            zenodo=zenodo,
-            zenodo_sandbox=zenodo_sandbox,
         )
 
     if failed:

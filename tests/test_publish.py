@@ -83,20 +83,6 @@ def tex_file(qmd_file: Path) -> Path:
 
 
 @pytest.fixture
-def mock_external_config() -> dict:
-    return {
-        "publish": {
-            "zenodo": {
-                "metadata": {
-                    "license": "CC-BY-4.0",
-                    "keywords": ["test"],
-                }
-            }
-        }
-    }
-
-
-@pytest.fixture
 def mock_target_config() -> dict:
     return {
         "paper": {"qmd": "paper.qmd"},
@@ -406,16 +392,15 @@ class TestGenMetadata:
 
         # _gen_metadata reads EXTERNAL_CONFIG from sdb.build
         import sdb.build as build_mod
-        build_mod.EXTERNAL_CONFIG = {
+        build_mod.EXTERNAL_CONFIG.clear()
+        build_mod.EXTERNAL_CONFIG.update({
             "publish": {
-                "zenodo": {
-                    "metadata": {
-                        "license": "CC-BY-NC-4.0",
-                        "keywords": ["custom"],
-                    }
+                "metadata": {
+                    "license": "CC-BY-NC-4.0",
+                    "keywords": ["custom"],
                 }
             }
-        }
+        })
 
         _gen_metadata(qmd_file, out, docs_root, "paper")
 
@@ -540,7 +525,7 @@ class TestCaptureFilesForPublish:
 
 
 class TestBuildCliPublishFlag:
-    """Verify CLI --publish / --zenodo flags reach build_targets kwargs."""
+    """Verify CLI --publish flag reach build_targets kwargs."""
 
     def _run(self, argv):
         from sdb.cli import main
@@ -558,8 +543,6 @@ class TestBuildCliPublishFlag:
             self._run(["."])
             kw = mock_build.call_args.kwargs
             assert kw["publish"] is False
-            assert kw["zenodo"] is False
-            assert kw["zenodo_sandbox"] is False
 
     def test_publish_flag_true_when_passed(self) -> None:
         with (
@@ -571,14 +554,13 @@ class TestBuildCliPublishFlag:
             kw = mock_build.call_args.kwargs
             assert kw["publish"] is True
 
-    def test_zenodo_flags(self) -> None:
+    def test_publish_flag_only(self) -> None:
         with (
             patch("sdb.cli.build_module.build_targets") as mock_build,
             patch("sdb.cli.build_module.initialize_config"),
             patch("sdb.cli.build_module.BUILD_FUNCTIONS", {"doc": lambda: True}),
         ):
-            self._run([".", "--publish", "--zenodo", "--zenodo-sandbox"])
+            self._run([".", "--publish"])
             kw = mock_build.call_args.kwargs
             assert kw["publish"] is True
-            assert kw["zenodo"] is True
-            assert kw["zenodo_sandbox"] is True
+            

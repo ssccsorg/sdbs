@@ -22,7 +22,7 @@ The publish pipeline captures:
 2. The compiled PDF
 3. Clean markdown for machine readability
 4. C2PA signing (when configured)
-5. Zenodo-compatible metadata
+5. Structured metadata
 
 ## Methodology
 

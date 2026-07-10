@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> None:
         help=(
             "Generate publishable artifact bundle after build. "
             "Produces TeX sources, clean markdown, C2PA signing, and "
-            "Zenodo-compatible metadata in _publish/{target}/. "
+            "Bundle metadata in _publish/{target}/. "
             "Works with or without --website."
         ),
     )
@@ -143,14 +143,6 @@ def main(argv: list[str] | None = None) -> None:
     build_parser.add_argument(
         "--config", "-c", type=Path, default=None,
         help="Path to external YAML configuration file (default: build.yml in docs root)",
-    )
-    build_parser.add_argument(
-        "--zenodo", action="store_true",
-        help="Upload publish bundles to Zenodo and request DOI",
-    )
-    build_parser.add_argument(
-        "--zenodo-sandbox", action="store_true",
-        help="Use Zenodo Sandbox API (sandbox.zenodo.org) for testing",
     )
 
     # --- check ---
@@ -298,8 +290,6 @@ def main(argv: list[str] | None = None) -> None:
             website=args.website,
             docs_root=docs_root,
             publish=args.publish,
-            zenodo=args.zenodo,
-            zenodo_sandbox=args.zenodo_sandbox,
         )
         sys.exit(0 if success else 1)
 

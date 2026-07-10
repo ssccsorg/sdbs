@@ -28,15 +28,4 @@ The following targets are configured:
 
 ## Configuration
 
-The `build.yml` enables `publish` section with Zenodo sandbox metadata:
-
-```yaml
-publish:
-  zenodo:
-    sandbox: true
-    metadata:
-      creators:
-        - name: "Test Author"
-          affiliation: "SSCCS"
-      license: "CC-BY-4.0"
-```
+The `build.yml` enables `publish` section for artifact bundling.
