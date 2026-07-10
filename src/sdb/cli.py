@@ -120,6 +120,15 @@ def main(argv: list[str] | None = None) -> None:
         help="Use Quarto website profile (isolated parallel rendering)",
     )
     build_parser.add_argument(
+        "--publish", action="store_true",
+        help=(
+            "Generate publishable artifact bundle after build. "
+            "Produces TeX sources, clean markdown, C2PA signing, and "
+            "Zenodo-compatible metadata in _publish/{target}/. "
+            "Implies --website."
+        ),
+    )
+    build_parser.add_argument(
         "--sequence", "-s", action="store_true",
         help="Force sequential execution",
     )
@@ -134,6 +143,14 @@ def main(argv: list[str] | None = None) -> None:
     build_parser.add_argument(
         "--config", "-c", type=Path, default=None,
         help="Path to external YAML configuration file (default: build.yml in docs root)",
+    )
+    build_parser.add_argument(
+        "--zenodo", action="store_true",
+        help="Upload publish bundles to Zenodo and request DOI",
+    )
+    build_parser.add_argument(
+        "--zenodo-sandbox", action="store_true",
+        help="Use Zenodo Sandbox API (sandbox.zenodo.org) for testing",
     )
 
     # --- check ---
@@ -228,6 +245,10 @@ def main(argv: list[str] | None = None) -> None:
         _setup_logging()
         docs_root = args.docs_root.resolve()
 
+        # --publish implies --website
+        if args.publish:
+            args.website = True
+
         # Load config
         config_path = args.config
         if config_path is None:
@@ -280,6 +301,9 @@ def main(argv: list[str] | None = None) -> None:
             single_command=not args.parallel_formats,
             website=args.website,
             docs_root=docs_root,
+            publish=args.publish,
+            zenodo=args.zenodo,
+            zenodo_sandbox=args.zenodo_sandbox,
         )
         sys.exit(0 if success else 1)
 
