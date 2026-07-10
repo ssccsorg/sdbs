@@ -1,0 +1,4 @@
+        "**/*.c2pa",
+        "**/*.c2pa_identifier.svg",
+        "**/_publish",
+    ]
