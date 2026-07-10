@@ -1701,9 +1701,7 @@ def _capture_files_for_publish(target: str, docs_root: Path) -> None:
       1. ``_publish/.staging/{target}/{stem}_files/`` (for publish post-job)
       2. ``_cached/{target}/{qmd_hash}/{stem}_files/`` (for cache-hit restore)
     """
-    from sdb.build import TARGET_CONFIG
     from sdb.publish import get_publish_dir
-    from sdb.hash import HashManager
     cfg = TARGET_CONFIG.get(target)
     if not cfg:
         return

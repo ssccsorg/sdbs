@@ -125,7 +125,7 @@ def main(argv: list[str] | None = None) -> None:
             "Generate publishable artifact bundle after build. "
             "Produces TeX sources, clean markdown, C2PA signing, and "
             "Zenodo-compatible metadata in _publish/{target}/. "
-            "Implies --website."
+            "Works with or without --website."
         ),
     )
     build_parser.add_argument(
