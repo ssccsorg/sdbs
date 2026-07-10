@@ -137,10 +137,11 @@ def _capture_artifact_tex(qmd_path: Path, bundle: Path, docs_root: Path) -> None
     except Exception as e:
         logger.warning("  --to latex error: %s", e)
 
-    # Cleanup side-effect _files
+    # Copy _files/ alongside .tex (generated figures, code output)
     gf = parent / f"{stem}_files"
-    if gf.exists():
-        shutil.rmtree(gf, ignore_errors=True)
+    if gf.exists() and gf.is_dir():
+        shutil.copytree(gf, bundle / gf.name, dirs_exist_ok=True)
+        logger.debug("  _files/ copied to bundle")
 
 
 def _capture_artifact_md(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
