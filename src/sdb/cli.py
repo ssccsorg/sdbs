@@ -237,6 +237,14 @@ def main(argv: list[str] | None = None) -> None:
         _setup_logging()
         docs_root = args.docs_root.resolve()
 
+        # Clean _publish/ before target discovery (prevents stale _publish/ from
+        # being scanned as build targets when `build.yml` lacks an exclude pattern)
+        if args.publish:
+            pub_dir = docs_root / "_publish"
+            if pub_dir.exists():
+                import shutil
+                shutil.rmtree(pub_dir)
+
         # Load config
         config_path = args.config
         if config_path is None:
