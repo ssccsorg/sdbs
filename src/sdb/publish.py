@@ -74,11 +74,7 @@ def _copy_source_context(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
     parent = qmd_path.parent
     copied = 0
 
-    # 1) QMD source
-    shutil.copy2(qmd_path, bundle / qmd_path.name)
-    copied += 1
-
-    # 2) _include/ from docs_root (preserve relative path)
+    # 1) _include/ from docs_root (preserve relative path)
     inc_src = docs_root / "_include"
     if inc_src.exists():
         inc_dst = bundle / "_include"
