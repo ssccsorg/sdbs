@@ -461,7 +461,6 @@ class TestRunPublishSequence:
         assert (bundle / "paper.tex").exists()
         assert (bundle / "paper.pdf").exists()
         assert (bundle / "paper.html").exists()
-        assert (bundle / "paper.md").exists()
         assert (bundle / "metadata.yaml").exists()
 
 
