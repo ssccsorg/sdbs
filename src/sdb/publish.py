@@ -88,12 +88,14 @@ def _copy_source_context(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
 
 
 def _capture_artifact_tex(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
-    """Package .tex and all discoverable asset paths into the bundle.
+    """Package .tex and all discoverable figure assets into the bundle.
 
-    Looks for:
-      1. ``{{stem}}.tex`` — from QMD dir or ``_freeze/{{stem}}/``
-      2. ``{{stem}}_files/`` — from QMD dir, ``_freeze/{{stem}}/``,
-         and ``_site/{{qmd_rel_dir}}/{{stem}}_files/`` (website output)
+    Searches in priority order:
+      1. ``_publish/.staging/{target}/{stem}_files/`` (captured during build)
+      2. ``_cached/{target}/*/{stem}_files/`` (cache-hit restore)
+      3. ``{qmd_dir}/{stem}_files/`` (fresh render)
+      4. ``_freeze/{stem}/{stem}_files/`` (Quarto cache)
+      5. ``_site/{qmd_rel_dir}/{stem}_files/`` (website output)
     """
     stem = qmd_path.stem
     parent = qmd_path.parent
@@ -108,22 +110,35 @@ def _capture_artifact_tex(qmd_path: Path, bundle: Path, docs_root: Path) -> None
             logger.debug("  TeX from %s", src)
             break
 
-    # 2) ``_site/`` (website output — richest figure set)
-    site_path = None
+    # 2) Collect all possible _files/ sources
+    sources = [bundle.parent / ".staging" / f"{stem}_files",
+               parent / f"{stem}_files",
+               docs_root / "_freeze" / stem / f"{stem}_files"]
     try:
         rel = qmd_path.relative_to(docs_root)
-        site_path = docs_root / "_site" / rel.parent / f"{stem}_files"
+        sources.append(docs_root / "_site" / rel.parent / f"{stem}_files")
     except ValueError:
         pass
+    cache_base = docs_root.parent / "_cached"
+    if cache_base.exists():
+        for ct in cache_base.iterdir():
+            if ct.is_dir():
+                for ch in ct.iterdir():
+                    cf = ch / f"{stem}_files"
+                    if cf.exists() and cf.is_dir():
+                        sources.append(cf)
 
-    # 3) ``{{stem}}_files/`` from all possible sources
-    for src in [
-        parent / f"{stem}_files",
-        docs_root / "_freeze" / stem / f"{stem}_files",
-    ] + ([site_path] if site_path and site_path.exists() and site_path.is_dir() else []):
-        if src.exists() and src.is_dir():
-            shutil.copytree(src, bundle / src.name, dirs_exist_ok=True)
-            logger.debug("  %s → bundle", src.name)
+    # 3) Copy first-found (deduplicated by resolved path)
+    seen = set()
+    for src in sources:
+        if src is None or not src.exists() or not src.is_dir():
+            continue
+        resolved = str(src.resolve())
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        shutil.copytree(src, bundle / src.name, dirs_exist_ok=True)
+        logger.debug("  %s -> bundle", src.name)
 
 def _capture_artifact_md(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
     """Capture .md: from _llms/ or _site/ first, fallback to --to gfm."""
