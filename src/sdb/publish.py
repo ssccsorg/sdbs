@@ -45,6 +45,7 @@ def run_publish_sequence(
 
         # Capture generated artifacts (tex, pdf, md)
         _capture_artifact_tex(qmd_path, bundle, docs_root)
+        _capture_artifact_md(qmd_path, bundle, docs_root)
         _copy_artifact_pdf(qmd_path, bundle, docs_root)
         _copy_artifact_html(qmd_path, bundle, docs_root)
 
