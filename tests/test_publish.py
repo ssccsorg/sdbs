@@ -212,6 +212,30 @@ class TestCaptureArtifactTex:
         assert target_dir.exists()
         assert (target_dir / "figure-pdf" / "plot-1.pdf").exists()
 
+    def test_cached_scope_respects_target_boundary(
+        self, docs_root: Path, qmd_file: Path
+    ) -> None:
+        bundle = docs_root / "_publish" / "paper"
+        bundle.mkdir(parents=True)
+        # Create _cached/ for a DIFFERENT target with paper_files/
+        wrong_target_cache = docs_root.parent / "_cached" / "wrong-target" / "somehash"
+        wrong_target_cache.mkdir(parents=True)
+        (wrong_target_cache / "paper_files").mkdir()
+        (wrong_target_cache / "paper_files" / "wrong.pdf").write_bytes(b"WRONG")
+        # Create _cached/ for the CORRECT target without paper_files/
+        correct_cache = docs_root.parent / "_cached" / "paper" / "somehash"
+        correct_cache.mkdir(parents=True)
+        # Only a different _files dir in the correct target
+        (correct_cache / "other_files").mkdir()
+
+        _capture_artifact_tex(qmd_file, bundle, docs_root)
+
+        target_dir = bundle / "paper_files"
+        # Should NOT pick up from wrong-target
+        if target_dir.exists():
+            wrong = target_dir / "wrong.pdf"
+            assert not wrong.exists(), f"Picked up {wrong} from wrong target cache" 
+
 
 # ---------------------------------------------------------------------------
 # _capture_artifact_md
