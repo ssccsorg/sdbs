@@ -1,0 +1,31 @@
+---
+title: "Publish Test"
+author: "Test Author"
+date: last-modified
+bibliography: refs.bib
+abstract: |
+  This is a test document for the SDBS --publish mode.
+  It verifies that artifact bundles are correctly generated
+  with TeX sources, PDF, markdown, and metadata.
+---
+
+## Overview
+
+This example demonstrates the `sdb build --website --publish` pipeline.
+
+- It generates a full website via `--website`
+- Then produces publishable artifact bundles in `_publish/`
+- The bundle includes TeX sources, PDF, clean markdown, and metadata
+
+## Test Targets
+
+The following targets are configured:
+
+| Target | Format | Description |
+|--------|--------|-------------|
+| index  | html   | Landing page (website) |
+| paper  | pdf    | Academic paper (publish bundle) |
+
+## Configuration
+
+The `build.yml` enables `publish` section for artifact bundling.

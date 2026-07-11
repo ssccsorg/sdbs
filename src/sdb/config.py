@@ -303,7 +303,7 @@ class CleanupManager:
         "**/.jupyter_cache",
         "**/*.tex", "**/*.pdf", "**/*.html",
         "**/*.quarto_ipynb*", "**/*.quarto",
-        "**/*.c2pa", "**/*.c2pa_identifier.svg",
+        "**/*.c2pa", "**/*.c2pa_identifier.svg", "**/_publish",
     ]
 
     def __init__(self):

@@ -120,6 +120,15 @@ def main(argv: list[str] | None = None) -> None:
         help="Use Quarto website profile (isolated parallel rendering)",
     )
     build_parser.add_argument(
+        "--publish", action="store_true",
+        help=(
+            "Generate publishable artifact bundle after build. "
+            "Produces TeX sources, clean markdown, C2PA signing, and "
+            "Bundle metadata in _publish/{target}/. "
+            "Works with or without --website."
+        ),
+    )
+    build_parser.add_argument(
         "--sequence", "-s", action="store_true",
         help="Force sequential execution",
     )
@@ -228,6 +237,14 @@ def main(argv: list[str] | None = None) -> None:
         _setup_logging()
         docs_root = args.docs_root.resolve()
 
+        # Clean _publish/ before target discovery (prevents stale _publish/ from
+        # being scanned as build targets when `build.yml` lacks an exclude pattern)
+        if args.publish:
+            pub_dir = docs_root / "_publish"
+            if pub_dir.exists():
+                import shutil
+                shutil.rmtree(pub_dir)
+
         # Load config
         config_path = args.config
         if config_path is None:
@@ -280,6 +297,7 @@ def main(argv: list[str] | None = None) -> None:
             single_command=not args.parallel_formats,
             website=args.website,
             docs_root=docs_root,
+            publish=args.publish,
         )
         sys.exit(0 if success else 1)
 

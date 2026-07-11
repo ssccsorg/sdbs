@@ -1,0 +1,22 @@
+# SDBS Build Configuration — Publish Test
+target_config:
+  paper:
+    c2pa: false
+    copy_pdf: true
+    to: pdf
+
+pre_build:
+  _global: []
+
+post_render:
+  _global: []
+
+exclude:
+  - "**/README.md"
+  - "**/_include/"
+  - "**/*_output/"
+  - "**/*_files/"
+  - "**/*_cached/"
+  - "**/*_libs/"
+  - "**/.jupyter_cache"
+

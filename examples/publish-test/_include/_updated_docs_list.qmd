@@ -1,0 +1,10 @@
+
+::: {tbl-colwidths="[20, 80]"}
+
+| Updated | Document |
+|----------|---------|
+| 2026-07-10 | [Publish Test](/index.html) |
+| 2026-07-10 | [A Sample Paper for Publish Testing](/paper.html) |
+
+
+:::

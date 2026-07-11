@@ -1,5 +1,6 @@
 project:
   type: website
+  latex-clean: false
   resources:
     - "**/*.c2pa"
   post-render:

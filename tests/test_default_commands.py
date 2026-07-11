@@ -237,3 +237,124 @@ class TestBuildTargetsDefaultPrePost:
             f"Expected 1 default post-render call, got {len(post_calls)}"
         )
         assert post_calls[0]["steps"] is _DEFAULT_POST_RENDER
+
+
+class TestBuildTargetsPublishCleanup:
+    """_publish/ is cleaned at build start (same lifecycle as _site)."""
+
+    def test_publish_removes_existing_publish_dir(
+        self, docs_root: Path, mock_initialize: MagicMock
+    ) -> None:
+        pub_dir = docs_root / "_publish"
+        pub_dir.mkdir(parents=True, exist_ok=True)
+        old_file = pub_dir / "stale.md"
+        old_file.write_text("stale")
+
+        with (
+            patch("sdb.build.Path.cwd", return_value=docs_root),
+            patch("sdb.build.Path.mkdir"),
+            patch("sdb.build.shutil.rmtree") as mock_rmtree,
+            patch("sdb.build.shutil.copytree"),
+            patch("sdb.build.os.cpu_count", return_value=4),
+            patch("sdb.build._cleanup_orphaned_caches"),
+            patch("sdb.build._sync_llms_files"),
+            patch("sdb.build.run_pre_build_sequence"),
+            patch("sdb.build.run_post_render_sequence"),
+            patch("sdb.build._run_default_sequence"),
+            patch("sdb.build._run_config_commands"),
+            patch("sdb.build.generate_latest_docs"),
+            patch("sdb.build.resolve_all"),
+        ):
+            from sdb.build import build_targets
+            build_targets(
+                targets=["index"],
+                output_dir=None,
+                sequence_mode=True,
+                max_jobs=1,
+                single_command=True,
+                website=False,
+                docs_root=docs_root,
+                publish=True,
+            )
+
+        # rmtree should have been called for _publish
+        calls = [str(c) for c in mock_rmtree.call_args_list]
+        assert any("_publish" in c for c in calls), (
+            f"_publish not in rmtree calls: {calls}"
+        )
+
+    def test_no_publish_does_not_clean_publish(
+        self, docs_root: Path, mock_initialize: MagicMock
+    ) -> None:
+        pub_dir = docs_root / "_publish"
+        pub_dir.mkdir(parents=True, exist_ok=True)
+
+        with (
+            patch("sdb.build.Path.cwd", return_value=docs_root),
+            patch("sdb.build.Path.mkdir"),
+            patch("sdb.build.shutil.rmtree") as mock_rmtree,
+            patch("sdb.build.shutil.copytree"),
+            patch("sdb.build.os.cpu_count", return_value=4),
+            patch("sdb.build._cleanup_orphaned_caches"),
+            patch("sdb.build._sync_llms_files"),
+            patch("sdb.build.run_pre_build_sequence"),
+            patch("sdb.build.run_post_render_sequence"),
+            patch("sdb.build._run_default_sequence"),
+            patch("sdb.build._run_config_commands"),
+            patch("sdb.build.generate_latest_docs"),
+            patch("sdb.build.resolve_all"),
+        ):
+            from sdb.build import build_targets
+            build_targets(
+                targets=["index"],
+                output_dir=None,
+                sequence_mode=True,
+                max_jobs=1,
+                single_command=True,
+                website=False,
+                docs_root=docs_root,
+                publish=False,
+            )
+
+        calls = [str(c) for c in mock_rmtree.call_args_list]
+        assert not any("_publish" in c for c in calls), (
+            f"_publish unexpectedly in rmtree calls: {calls}"
+        )
+
+    def test_site_always_cleaned_regardless_of_publish(
+        self, docs_root: Path, mock_initialize: MagicMock
+    ) -> None:
+        site_dir = docs_root / "_site"
+        site_dir.mkdir(parents=True, exist_ok=True)
+
+        with (
+            patch("sdb.build.Path.cwd", return_value=docs_root),
+            patch("sdb.build.Path.mkdir"),
+            patch("sdb.build.shutil.rmtree") as mock_rmtree,
+            patch("sdb.build.shutil.copytree"),
+            patch("sdb.build.os.cpu_count", return_value=4),
+            patch("sdb.build._cleanup_orphaned_caches"),
+            patch("sdb.build._sync_llms_files"),
+            patch("sdb.build.run_pre_build_sequence"),
+            patch("sdb.build.run_post_render_sequence"),
+            patch("sdb.build._run_default_sequence"),
+            patch("sdb.build._run_config_commands"),
+            patch("sdb.build.generate_latest_docs"),
+            patch("sdb.build.resolve_all"),
+        ):
+            from sdb.build import build_targets
+            build_targets(
+                targets=["index"],
+                output_dir=None,
+                sequence_mode=True,
+                max_jobs=1,
+                single_command=True,
+                website=False,
+                docs_root=docs_root,
+                publish=False,
+            )
+
+        calls = [str(c) for c in mock_rmtree.call_args_list]
+        assert any("_site" in c for c in calls), (
+            f"_site not in rmtree calls: {calls}"
+        )

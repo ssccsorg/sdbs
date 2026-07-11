@@ -6,6 +6,7 @@
 # repository URLs before deploying.
 
 project:
+  latex-clean: false
   # Set the project type to "website" to enable website-specific
   # features: sidebar, page navigation, search, site rendering, etc.
   type: website
