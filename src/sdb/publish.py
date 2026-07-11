@@ -120,17 +120,13 @@ def _capture_artifact_tex(qmd_path: Path, bundle: Path, docs_root: Path) -> None
         sources.append(docs_root / "_site" / rel.parent / f"{stem}_files")
     except ValueError:
         pass
-    cache_base = docs_root.parent / "_cached"
+    # _cached/ only for this specific target (avoids cross-target pollution)
+    cache_base = docs_root.parent / "_cached" / bundle.name
     if cache_base.exists():
-        for ct in cache_base.iterdir():
-            if not ct.is_dir():
-                continue
-            for ch in ct.iterdir():
-                cf = ch / f"{stem}_files"
-                if cf.exists() and cf.is_dir():
-                    sources.append(cf)
-                    break
-            if sources and sources[-1] == cf:
+        for ch in cache_base.iterdir():
+            cf = ch / f"{stem}_files"
+            if cf.exists() and cf.is_dir():
+                sources.append(cf)
                 break
 
     # 3) Copy first-found (deduplicated by resolved path)
