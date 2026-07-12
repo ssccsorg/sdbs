@@ -52,10 +52,6 @@ post_render:
 #   - Directory patterns: **/_include/, **/*_libs/
 #   - Simple patterns: README.md, contributing.md
 exclude:
-  - "**/README.md"
-  - "**/*.llms.md"
-  - "**/llms.txt"
-
   # Directory patterns (trailing slash indicates directory)
   - "**/_include/"
   - "**/_extensions/"
@@ -66,3 +62,10 @@ exclude:
   - "**/*_libs/"
   - "**/*_pages/"
   - "**/.jupyter_cache"
+
+  # Generated build artifact directories (not source files).
+  - "**/_llms/"
+  - "**/_publish/"
+  - "**/README.md"
+  - "**/*.llms.md"
+  - "**/llms.txt"
