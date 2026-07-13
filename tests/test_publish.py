@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -595,8 +595,8 @@ class TestCliPublishCleanup:
 
     def test_clean_publish_before_init(self) -> None:
         with (
-            patch("sdb.cli.build_module.initialize_config") as mock_init,
-            patch("sdb.cli.build_module.build_targets") as mock_build,
+            patch("sdb.cli.build_module.initialize_config"),
+            patch("sdb.cli.build_module.build_targets"),
             patch("sdb.cli.build_module.BUILD_FUNCTIONS", {"doc": lambda: True}),
             patch("shutil.rmtree") as mock_rmtree,
         ):
@@ -624,8 +624,8 @@ class TestCliPublishCleanup:
 
     def test_no_clean_without_publish_flag(self) -> None:
         with (
-            patch("sdb.cli.build_module.initialize_config") as mock_init,
-            patch("sdb.cli.build_module.build_targets") as mock_build,
+            patch("sdb.cli.build_module.initialize_config"),
+            patch("sdb.cli.build_module.build_targets"),
             patch("sdb.cli.build_module.BUILD_FUNCTIONS", {"doc": lambda: True}),
             patch("shutil.rmtree") as mock_rmtree,
         ):
