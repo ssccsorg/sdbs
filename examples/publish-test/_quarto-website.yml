@@ -1,8 +1,6 @@
 project:
   type: website
   latex-clean: false
-  post-render:
-    - 'find . -type d -name "figure-beamer" -exec rm -rf {} +''
 
 website:
   site-url: https://example.org/publish-test

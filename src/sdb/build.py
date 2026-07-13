@@ -1756,6 +1756,24 @@ def _capture_files_for_publish(target: str, docs_root: Path) -> None:
             logger.warning("Failed to cache %s: %s", files_dir, e)
 
 
+def _clean_website_figures(site_dir: Path) -> None:
+    """Remove website-only intermediate figure directories from _site/.
+
+    Called after website build to delete figure-pdf/ and mediabag/ that
+    are only needed for PDF/LaTeX rendering, not for the website output.
+    HTML uses figure-html/ (SVG), so the PDF-only formats are wasteful.
+    """
+    for root, dirs, _ in os.walk(site_dir):
+        for d in dirs:
+            if d in ("figure-pdf", "mediabag", "figure-beamer"):
+                path = Path(root) / d
+                try:
+                    shutil.rmtree(path)
+                    logger.debug("Cleaned %s from _site", path)
+                except Exception as e:
+                    logger.warning("Failed to clean %s: %s", path, e)
+
+
 def build_targets(
     targets: List[str],
     output_dir: Optional[Path],
@@ -1789,7 +1807,7 @@ def build_targets(
     # publish implies website (publish bundles need website outputs)
     if publish and not website:
         website = True
-    # --publish: force latex-clean:false so .tex and figure-pdf/ survive
+    # --publish: force latex-clean:false (injected)
     _LATEX_CLEAN_BACKUP = None
     if publish:
         q_web = docs_root / "_quarto-website.yml"
@@ -1799,15 +1817,6 @@ def build_targets(
                 _patched = _orig.replace(
                     "project:\n  type: website",
                     "project:\n  type: website\n  latex-clean: false",
-                )
-                # Also remove figure-pdf/mediabag deletion from post-render
-                _patched = _patched.replace(
-                    "figure-pdf",
-                    "figure-pdf-DISABLED-FOR-PUBLISH",
-                )
-                _patched = _patched.replace(
-                    "mediabag",
-                    "mediabag-DISABLED-FOR-PUBLISH",
                 )
                 if _patched != _orig:
                     q_web.write_text(_patched, encoding="utf-8")
@@ -2028,6 +2037,9 @@ def build_targets(
                 f"{list(results.keys())}"
             )
 
+            # Built-in: clean intermediate figures from _site (website only, not publish)
+            if website and not publish:
+                _clean_website_figures(final_output)
             _sync_llms_files(final_output, docs_root)
             # Run user-configured post-render commands first (build.yml), then defaults
             run_post_render_sequence(EXTERNAL_CONFIG, docs_root)
@@ -2127,8 +2139,12 @@ def build_targets(
     )
 
     if website:
+        # Built-in: clean intermediate figures from _site (website only, not publish)
+        site_src = final_site if output_dir is None else output_dir
+        if not publish:
+            _clean_website_figures(site_src)
         _sync_llms_files(
-            source_dir=final_site if output_dir is None else output_dir,
+            source_dir=site_src,
             docs_root=docs_root,
         )
 
