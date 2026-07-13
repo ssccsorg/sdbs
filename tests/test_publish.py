@@ -201,7 +201,7 @@ class TestCaptureArtifactTex:
         bundle = docs_root / "_publish" / "paper"
         bundle.mkdir(parents=True)
         # Create staging with _files
-        staging = bundle.parent / ".staging" / "paper_files"
+        staging = bundle.parent / ".staging" / "paper" / "paper_files"
         staging.mkdir(parents=True)
         (staging / "figure-pdf").mkdir()
         (staging / "figure-pdf" / "plot-1.pdf").write_bytes(b"PDF")

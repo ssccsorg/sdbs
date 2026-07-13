@@ -3,8 +3,8 @@
 
 | Updated | Document |
 |----------|---------|
-| 2026-07-10 | [Publish Test](/index.html) |
-| 2026-07-10 | [A Sample Paper for Publish Testing](/paper.html) |
+| 2026-07-11 | [Publish Test](/index.html) |
+| 2026-07-11 | [A Sample Paper for Publish Testing](/paper.html) |
 
 
 :::

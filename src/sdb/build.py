@@ -1728,6 +1728,16 @@ def _capture_files_for_publish(target: str, docs_root: Path) -> None:
     except Exception as e:
         logger.warning("Failed to stage %s: %s", files_dir, e)
 
+    # Also capture .tex alongside _files/
+    tex_src = parent / f"{stem}.tex"
+    if tex_src.exists() and tex_src.stat().st_size > 0:
+        tex_staging = get_publish_dir(docs_root) / ".staging" / target / f"{stem}.tex"
+        try:
+            shutil.copy2(tex_src, tex_staging)
+            logger.debug("Captured %s (staging)", tex_src.name)
+        except Exception as e:
+            logger.warning("Failed to stage %s: %s", tex_src.name, e)
+
     # 2) Cache alongside artifact (for cache-hit restore)
     qmd_hash = HashManager.compute_quarto_file_hash_with_deps(qmd_path, docs_root)
     cache_dir = docs_root.parent / "_cached" / target / qmd_hash
@@ -1738,6 +1748,10 @@ def _capture_files_for_publish(target: str, docs_root: Path) -> None:
         try:
             shutil.copytree(files_dir, cache_files)
             logger.debug("Captured %s (cache)", files_dir)
+            # Also cache .tex
+            if tex_src.exists() and tex_src.stat().st_size > 0:
+                tex_cache = cache_dir / f"{stem}.tex"
+                shutil.copy2(tex_src, tex_cache)
         except Exception as e:
             logger.warning("Failed to cache %s: %s", files_dir, e)
 
@@ -1772,6 +1786,33 @@ def build_targets(
     """
     if docs_root is None:
         docs_root = Path.cwd()
+    # publish implies website (publish bundles need website outputs)
+    if publish and not website:
+        website = True
+    # --publish: force latex-clean:false so .tex and figure-pdf/ survive
+    _LATEX_CLEAN_BACKUP = None
+    if publish:
+        q_web = docs_root / "_quarto-website.yml"
+        if q_web.exists():
+            _orig = q_web.read_text(encoding="utf-8")
+            if "latex-clean:" not in _orig:
+                _patched = _orig.replace(
+                    "project:\n  type: website",
+                    "project:\n  type: website\n  latex-clean: false",
+                )
+                # Also remove figure-pdf/mediabag deletion from post-render
+                _patched = _patched.replace(
+                    "figure-pdf",
+                    "figure-pdf-DISABLED-FOR-PUBLISH",
+                )
+                _patched = _patched.replace(
+                    "mediabag",
+                    "mediabag-DISABLED-FOR-PUBLISH",
+                )
+                if _patched != _orig:
+                    q_web.write_text(_patched, encoding="utf-8")
+                    _LATEX_CLEAN_BACKUP = _orig
+                    logger.info("Injected latex-clean:false for publish")
 
     if not targets:
         logger.info("No targets specified. Nothing to build.")
@@ -2003,6 +2044,10 @@ def build_targets(
             return True
 
         finally:
+            if _LATEX_CLEAN_BACKUP:
+                _q = docs_root / "_quarto-website.yml"
+                _q.write_text(_LATEX_CLEAN_BACKUP, encoding="utf-8")
+                logger.debug("Restored _quarto-website.yml")
             logger.info(f"Cleaning up temp directory {base_temp}")
             try:
                 shutil.rmtree(base_temp)
@@ -2098,6 +2143,10 @@ def build_targets(
             targets=succeeded,
             publish_dir=pub_dir,
         )
+        if _LATEX_CLEAN_BACKUP:
+            _q = docs_root / "_quarto-website.yml"
+            _q.write_text(_LATEX_CLEAN_BACKUP, encoding="utf-8")
+            logger.debug("Restored _quarto-website.yml")
 
     return True
 

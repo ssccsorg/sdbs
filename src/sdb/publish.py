@@ -103,6 +103,7 @@ def _capture_artifact_tex(qmd_path: Path, bundle: Path, docs_root: Path) -> None
 
     # 1) .tex
     for src in [
+        bundle.parent / ".staging" / bundle.name / f"{stem}.tex",
         parent / f"{stem}.tex",
         docs_root / "_freeze" / stem / f"{stem}.tex",
     ]:
@@ -112,7 +113,7 @@ def _capture_artifact_tex(qmd_path: Path, bundle: Path, docs_root: Path) -> None
             break
 
     # 2) Collect all possible _files/ sources
-    sources = [bundle.parent / ".staging" / f"{stem}_files",
+    sources = [bundle.parent / ".staging" / bundle.name / f"{stem}_files",
                parent / f"{stem}_files",
                docs_root / "_freeze" / stem / f"{stem}_files"]
     try:
@@ -192,6 +193,11 @@ def _copy_artifact_html(qmd_path: Path, bundle: Path, docs_root: Path) -> None:
         if src.exists() and src.stat().st_size > 0:
             shutil.copy2(src, bundle / f"{stem}.html")
             logger.info("  HTML %s", src.name)
+            # Copy site_libs/ alongside HTML (CSS, JS required for rendering)
+            site_libs = docs_root / "_site" / "site_libs"
+            if site_libs.exists() and site_libs.is_dir():
+                shutil.copytree(site_libs, bundle / "site_libs", dirs_exist_ok=True)
+                logger.debug("  site_libs/ copied to bundle")
             return
     logger.debug("  No HTML (unexpected)")
 

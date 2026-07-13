@@ -177,6 +177,109 @@ run_phase "2 (warm)" "$BUILD_DIR/docs" "$LOG2" || { echo "[FAIL] Phase 2 build f
 verify_outputs "$BUILD_DIR/docs" "Phase 2" || { echo "[FAIL] Phase 2 output verification failed"; exit 1; }
 
 # ------------------------------------------------------------------
+# Phase 3 -- publish build (cold, fresh docs copy, no pre-existing cache)
+# ------------------------------------------------------------------
+PUBLISH_BUILD_DIR=$(mktemp -d /tmp/ssccs_publish.XXXXXX)
+echo "[INFO] Clean docs copy for publish: $PUBLISH_BUILD_DIR/docs"
+
+rsync -a --delete \
+  --exclude=_cached --exclude=_site --exclude=_docsbuild --exclude=_llms --exclude=_publish --exclude=.jupyter_cache --exclude='*_cached' --exclude='*_libs' --exclude='*_output' --exclude='*_pages' \
+  "$SSCCS_REPO/docs/" "$PUBLISH_BUILD_DIR/docs/"
+
+LOG3=$(mktemp /tmp/ssccs_phase3.XXXXXX)
+LABEL="3 (publish)"
+
+echo ""
+echo "========================================================"
+echo "  Phase $LABEL"
+echo "  sdb build docs --publish (cold, implies --website)"
+echo "========================================================"
+echo ""
+
+start=$(date +%s)
+
+cd "$SDBS_ROOT"
+PYTHONPATH="$SDBS_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"   python3 -m sdb.cli build "$PUBLISH_BUILD_DIR/docs" --publish 2>&1 | tee "$LOG3"
+ok=${PIPESTATUS[0]}
+
+end=$(date +%s)
+duration=$(( end - start ))
+
+echo ""
+echo "  --- Phase $LABEL finished (exit $ok, ${duration}s) ---"
+echo ""
+echo "$duration" > "$LOG3.dur"
+
+if [ "$ok" -ne 0 ]; then
+  echo "[FAIL] Phase $LABEL build failed"
+  exit 1
+fi
+
+# Phase 3 output verification
+PUBLISH_DIR="$PUBLISH_BUILD_DIR/docs/_publish"
+echo ""
+echo "  --- Phase $LABEL output verification ---"
+echo ""
+
+failed=0
+
+check_file   "$PUBLISH_DIR/whitepaper-whitepaper/whitepaper.tex"     "whitepaper -> .tex"      || failed=1
+check_file   "$PUBLISH_DIR/whitepaper-whitepaper/whitepaper.pdf"     "whitepaper -> .pdf"      || failed=1
+check_file   "$PUBLISH_DIR/whitepaper-whitepaper/whitepaper.html"    "whitepaper -> .html"     || failed=1
+check_file   "$PUBLISH_DIR/whitepaper-whitepaper/metadata.yaml"      "whitepaper -> metadata"  || failed=1
+
+FIG_PDF="$PUBLISH_DIR/whitepaper-whitepaper/whitepaper_files/figure-pdf"
+if [ -d "$FIG_PDF" ] && [ "$(ls -A "$FIG_PDF" 2>/dev/null | wc -l)" -gt 0 ]; then
+  count=$(ls "$FIG_PDF" | wc -l)
+  echo "    [OK]   whitepaper -> figure-pdf/  ($count files)"
+else
+  echo "    [FAIL] whitepaper -> figure-pdf/  (missing or empty)"
+  failed=1
+fi
+
+# _files/ metadata is QMD config-dependent; skip CI check
+check_file   "$PUBLISH_DIR/index/index.html"       "index -> .html"           || failed=1
+check_file   "$PUBLISH_DIR/index/metadata.yaml"    "index -> metadata"        || failed=1
+
+if [ -d "$PUBLISH_DIR/whitepaper-whitepaper/site_libs" ]; then
+  lib_count=$(find "$PUBLISH_DIR/whitepaper-whitepaper/site_libs" -type f 2>/dev/null | wc -l)
+  echo "    [OK]   whitepaper -> site_libs/  ($lib_count files)"
+else
+  echo "    [FAIL] whitepaper -> site_libs/  (missing)"
+  failed=1
+fi
+
+# Compile .tex with lualatex to verify it's valid
+TEX_FILE="$PUBLISH_DIR/whitepaper-whitepaper/whitepaper.tex"
+if [ -f "$TEX_FILE" ]; then
+  TEX_DIR=$(mktemp -d /tmp/tex_compile.XXXXXX)
+  cp -r "$PUBLISH_DIR/whitepaper-whitepaper"/* "$TEX_DIR/"
+  cd "$TEX_DIR"
+  if lualatex -interaction=nonstopmode whitepaper.tex 2>&1 | grep -q "Output written on whitepaper.pdf"; then
+    pages=$(strings whitepaper.pdf | grep -c "/Type /Page" 2>/dev/null || echo "?")
+    echo "    [OK]   whitepaper.tex -> lualatex -> PDF  (${pages:+$pages pages})"
+  else
+    echo "    [FAIL] whitepaper.tex -> lualatex failed"
+    grep -i "error" whitepaper.log 2>/dev/null | head -3
+    failed=1
+  fi
+  rm -rf "$TEX_DIR"
+  cd "$PUBLISH_DIR"
+else
+  echo "    [WARN] whitepaper.tex not found, skipping lualatex test"
+fi
+
+if [ "$failed" -ne 0 ]; then
+  echo ""
+  echo "  [FAIL] Phase $LABEL output verification failed"
+  exit 1
+else
+  echo ""
+  echo "    * All publish outputs verified *"
+fi
+echo ""
+
+# ------------------------------------------------------------------
 # Summary
 # ------------------------------------------------------------------
 echo ""
@@ -185,14 +288,16 @@ echo "  Summary"
 echo "========================================================"
 echo ""
 
-echo "  Phase 1 (cold):  $(cat "$LOG1.dur")s"
-echo "  Phase 2 (warm):  $(cat "$LOG2.dur")s"
+echo "  Phase 1 (cold):     $(cat "$LOG1.dur")s"
+echo "  Phase 2 (warm):     $(cat "$LOG2.dur")s"
+echo "  Phase 3 (publish):  $(cat "$LOG3.dur")s"
 echo ""
 
 # ------------------------------------------------------------------
 # Cleanup temporary logs and cloned repo
 # ------------------------------------------------------------------
-rm -f "$LOG1" "$LOG2" "$LOG1.dur" "$LOG2.dur"
+rm -f "$LOG1" "$LOG2" "$LOG3" "$LOG1.dur" "$LOG2.dur" "$LOG3.dur"
+  rm -rf "$PUBLISH_BUILD_DIR"
 if [ "${CLEANUP_CLONE:-0}" -eq 1 ]; then
   rm -rf "$CLONE_DIR"
 fi

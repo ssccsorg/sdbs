@@ -10,9 +10,6 @@ project:
   # Set the project type to "website" to enable website-specific
   # features: sidebar, page navigation, search, site rendering, etc.
   type: website
-  # Shell commands executed by Quarto after each page render.
-  post-render:
-    - 'find . -type d -name "figure-pdf" -exec rm -rf {} + -o -name "figure-beamer" -exec rm -rf {} + -o -name "mediabag" -exec rm -rf {} +'
 
 # Website-level metadata: URL, repository links, navigation.
 website:
