@@ -80,3 +80,5 @@ examples/**/.jupyter_cache/
 _jupyter_cache/
 mydoc/
 uv.lock
+_publish/
+.install.sh
