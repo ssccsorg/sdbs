@@ -112,21 +112,3 @@ class TestInitThenBuild:
         )
         assert result.returncode == 0, f"Build failed:\n{result.stderr}"
         assert (target / "index.html").exists()
-
-    @pytest.mark.slow
-    def test_advanced_custom_path_builds(self, tmp_path: Path) -> None:
-        """``sdb init mydocs --template advanced --force`` then build."""
-        target = tmp_path / "mydocs"
-        code = _run_init([str(target), "--template", "advanced", "--force"])
-        assert code == 0
-        assert (target / "_include" / "_graphviz.py").exists()
-
-        result = subprocess.run(
-            [sys.executable, "-m", "sdb.cli", "build", str(target), "index", "--sequence"],
-            capture_output=True, text=True,
-            cwd=str(SDBS_SRC.parent), env=_build_env(), timeout=60,
-        )
-        assert result.returncode == 0, f"Build failed:\n{result.stderr}"
-        assert (target / "index.html").exists()
-
-

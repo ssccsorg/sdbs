@@ -3,6 +3,8 @@ Generate _include/_updated_docs_list.qmd with the 10 most recently modified
 documents.
 
 Derived from docs/_utils/generate_latest_docs.py.
+Exclude patterns are loaded from ``build.yml`` (same source as build.py),
+so the latest-docs list automatically respects the same exclusion rules.
 """
 
 import fnmatch
@@ -20,7 +22,8 @@ logger = logging.getLogger(__name__)
 
 ITEM_LENGTH = 10
 
-# Mirror of build.yml exclude patterns (only those affecting .qmd/.md files)
+# Hardcoded baseline exclude patterns (always apply regardless of build.yml).
+# These mirror the default build.yml template patterns.
 EXCLUDE_PATTERNS = [
     "**/README.md",
     "**/*.llms.md",
@@ -34,41 +37,60 @@ EXCLUDE_PATTERNS = [
     "**/*_libs/",
 ]
 
-
-def _ensure_git_safe(docs_root: Path) -> None:
-    """Mark the repo root as safe (handles CI owner mismatch) without calling
-    git first."""
-    parent = str(docs_root.parent.resolve())
-    subprocess.run(
-        ["git", "config", "--global", "--add", "safe.directory", parent],
-        capture_output=True,
-        text=True,
-    )
-    candidate = docs_root.resolve()
-    for _ in range(5):
-        if (candidate / ".git").is_dir():
-            if str(candidate) != parent:
-                subprocess.run(
-                    [
-                        "git",
-                        "config",
-                        "--global",
-                        "--add",
-                        "safe.directory",
-                        str(candidate),
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-            break
-        candidate = candidate.parent
+# System-ignored directories that are always excluded regardless of build.yml.
+# These mirror the SYSTEM_IGNORED_DIRS in sdb/resolve.py.
+SYSTEM_IGNORED_DIRS = {
+    ".venv", ".git", ".quarto", "_site", "_llms",
+    "node_modules", "__pycache__", ".*",
+}
 
 
-def matches_exclude(rel_path: str) -> bool:
-    """Check whether a relative doc path matches any exclude pattern."""
+def _load_exclude_patterns(docs_root: Path) -> list[str]:
+    """Return the union of hardcoded EXCLUDE_PATTERNS and patterns from build.yml.
+
+    The hardcoded list is the baseline; additional patterns from ``build.yml``
+    ``exclude:`` are appended on top.  This mirrors how the build system
+    (build.py / config.py) uses the same ``exclude:`` field, keeping both
+    sources in sync without duplication.
+    """
+    patterns = list(EXCLUDE_PATTERNS)
+    config_path = docs_root / "build.yml"
+    if config_path.is_file():
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            extra = cfg.get("exclude", [])
+            if isinstance(extra, list):
+                for p in extra:
+                    if p not in patterns:
+                        patterns.append(p)
+        except Exception:
+            pass
+    return patterns
+
+
+def _is_system_ignored(rel_path: str) -> bool:
+    """Check whether any path component matches a system-ignored directory."""
     parts = rel_path.split("/")
-    for pattern in EXCLUDE_PATTERNS:
-        if pattern.endswith("/"):
+    for part in parts:
+        for pattern in SYSTEM_IGNORED_DIRS:
+            if fnmatch.fnmatch(part, pattern):
+                return True
+    return False
+
+
+def matches_exclude(rel_path: str, exclude_patterns: list[str]) -> bool:
+    """Check whether a relative doc path matches any exclude pattern."""
+    if _is_system_ignored(rel_path):
+        return True
+
+    parts = rel_path.split("/")
+    for pattern in exclude_patterns:
+        pattern = pattern.strip()
+        if not pattern:
+            continue
+        is_dir_only = pattern.endswith("/")
+        if is_dir_only:
             dir_pat = pattern.rstrip("/")
             if dir_pat.startswith("**/"):
                 dir_pat = dir_pat[3:]
@@ -138,7 +160,7 @@ def _is_timestamp_line(line: str) -> bool:
     )
 
 
-def _parse_git_log_nameonly(stdout: str) -> list[tuple[str, str]]:
+def _parse_git_log_nameonly(stdout: str, exclude_patterns: list[str]) -> list[tuple[str, str]]:
     """Parse ``git log --name-only`` output into (timestamp, rel_path) pairs."""
     entries: list[tuple[str, str]] = []
     current_ts: str | None = None
@@ -155,7 +177,7 @@ def _parse_git_log_nameonly(stdout: str) -> list[tuple[str, str]]:
         rel = _normalise_path(line)
         if rel is None:
             continue
-        if matches_exclude(rel):
+        if matches_exclude(rel, exclude_patterns):
             continue
         entries.append((current_ts, rel))
 
@@ -169,7 +191,7 @@ def _parse_git_log_nameonly(stdout: str) -> list[tuple[str, str]]:
     return deduped
 
 
-def _get_current_doc_paths(docs_root: Path) -> set[str]:
+def _get_current_doc_paths(docs_root: Path, exclude_patterns: list[str]) -> set[str]:
     """Return the set of doc-relative paths currently tracked by git."""
     _ensure_git_safe(docs_root)
     result = subprocess.run(
@@ -184,7 +206,7 @@ def _get_current_doc_paths(docs_root: Path) -> set[str]:
         if not line:
             continue
         rel = _normalise_path(line)
-        if rel and not matches_exclude(rel):
+        if rel and not matches_exclude(rel, exclude_patterns):
             paths.add(rel)
     return paths
 
@@ -216,7 +238,7 @@ def _resolve_to_current_paths(
     return deduped
 
 
-def get_tracked_doc_files(docs_root: Path) -> list[tuple[str, str]]:
+def get_tracked_doc_files(docs_root: Path, exclude_patterns: list[str]) -> list[tuple[str, str]]:
     """
     Return list of (iso_timestamp, relative_path) for every tracked
     .qmd / .md under docs/, newest first.
@@ -242,10 +264,39 @@ def get_tracked_doc_files(docs_root: Path) -> list[tuple[str, str]]:
         logger.error("git log failed (exit %s): %s", result.returncode, result.stderr)
         return []
 
-    current_paths = _get_current_doc_paths(docs_root)
+    current_paths = _get_current_doc_paths(docs_root, exclude_patterns)
     return _resolve_to_current_paths(
-        _parse_git_log_nameonly(result.stdout), current_paths
+        _parse_git_log_nameonly(result.stdout, exclude_patterns), current_paths
     )
+
+
+def _ensure_git_safe(docs_root: Path) -> None:
+    """Mark the repo root as safe (handles CI owner mismatch) without calling
+    git first."""
+    parent = str(docs_root.parent.resolve())
+    subprocess.run(
+        ["git", "config", "--global", "--add", "safe.directory", parent],
+        capture_output=True,
+        text=True,
+    )
+    candidate = docs_root.resolve()
+    for _ in range(5):
+        if (candidate / ".git").is_dir():
+            if str(candidate) != parent:
+                subprocess.run(
+                    [
+                        "git",
+                        "config",
+                        "--global",
+                        "--add",
+                        "safe.directory",
+                        str(candidate),
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+            break
+        candidate = candidate.parent
 
 
 def extract_title_from_file(abs_path: Path) -> str | None:
@@ -326,12 +377,12 @@ def breadcrumb(rel_path: str, title: str) -> str:
     return f"{crumbs} > "
 
 
-def get_creation_dates(docs_root: Path) -> dict[str, str]:
+def get_creation_dates(docs_root: Path, exclude_patterns: list[str]) -> dict[str, str]:
     """
     Return {rel_path: creation_date} for every current doc file.
     """
     _ensure_git_safe(docs_root)
-    current_paths = _get_current_doc_paths(docs_root)
+    current_paths = _get_current_doc_paths(docs_root, exclude_patterns)
     result = subprocess.run(
         [
             "git",
@@ -464,15 +515,20 @@ def generate_latest_docs(docs_root: Path) -> bool:
     """Generate _include/_updated_docs_list.qmd with the most recently
     modified documents.
 
+    Exclude patterns are loaded from ``docs_root / build.yml`` (the same
+    source used by the build system), so files matching ``exclude:`` in
+    ``build.yml`` are also excluded from the latest-docs list.
+
     The number of entries defaults to 10 and can be overridden via
     ``latest_count`` in ``build.yml``.
 
     Returns True on success.
     """
     count = _load_latest_count(docs_root)
+    exclude_patterns = _load_exclude_patterns(docs_root)
 
-    files = get_tracked_doc_files(docs_root)
-    creation_dates = get_creation_dates(docs_root)
+    files = get_tracked_doc_files(docs_root, exclude_patterns)
+    creation_dates = get_creation_dates(docs_root, exclude_patterns)
 
     new_files = [(ts, p) for ts, p in files if is_new_file(p, creation_dates, docs_root)]
     old_files = [(ts, p) for ts, p in files if not is_new_file(p, creation_dates, docs_root)]
