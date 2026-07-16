@@ -247,6 +247,7 @@ def main(argv: list[str] | None = None) -> None:
                 if "all" in snapshot_targets:
                     snapshot_targets = list(build_module.BUILD_FUNCTIONS.keys())
                 else:
+                    build_module.ensure_explicit_targets(docs_root, snapshot_targets)
                     snapshot_targets = build_module.validate_targets(snapshot_targets)
             success = True
             for target in snapshot_targets:
@@ -263,6 +264,7 @@ def main(argv: list[str] | None = None) -> None:
             targets = list(build_module.BUILD_FUNCTIONS.keys())
         else:
             targets = build_module.parse_targets(args.targets)
+            build_module.ensure_explicit_targets(docs_root, targets)
             targets = build_module.validate_targets(targets)
 
         # Compute default jobs

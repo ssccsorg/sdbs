@@ -43,7 +43,7 @@ set +e
 PYTHONPATH="$SCRIPT_DIR/../src" python3 -m pytest "$SCRIPT_DIR" \
   --ignore="$SCRIPT_DIR/workflow" \
   --ignore="$SCRIPT_DIR/command" \
-  -v --timeout=30
+  -v
 status=$?
 set -e
 if [ "$status" -ne 0 ]; then

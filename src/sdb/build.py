@@ -1424,6 +1424,17 @@ def _init_jupyter_db(cache_path: Path) -> None:
             db_path, e,
         )
 
+def _make_builder(tgt: str, cfg: dict) -> Callable:
+    def builder(
+        output_dir=None,
+        single_command=True,
+        website=False,
+        docs_root=None,
+        build_targets_set=None,
+    ) -> bool:
+        return build_generic(tgt, cfg, output_dir, single_command, website, docs_root, build_targets_set)
+    return builder
+
 
 def initialize_config(docs_root: Path, config_path: Optional[Path] = None) -> None:
     """Initialize global configuration for the given docs root.
@@ -1453,28 +1464,7 @@ def initialize_config(docs_root: Path, config_path: Optional[Path] = None) -> No
 
     BUILD_FUNCTIONS = {}
     for target, config in TARGET_CONFIG.items():
-
-        def make_builder(tgt, cfg):
-            def builder(
-                output_dir: Optional[Path] = None,
-                single_command: bool = True,
-                website: bool = False,
-                docs_root: Optional[Path] = None,
-                build_targets_set: Optional[set] = None,
-            ) -> bool:
-                return build_generic(
-                    tgt,
-                    cfg,
-                    output_dir,
-                    single_command,
-                    website,
-                    docs_root,
-                    build_targets_set,
-                )
-
-            return builder
-
-        BUILD_FUNCTIONS[target] = make_builder(target, config)
+        BUILD_FUNCTIONS[target] = _make_builder(target, config)
 
     OUTPUT_DIR_TARGETS = {
         t for t, cfg in TARGET_CONFIG.items() if cfg.get("output_dir")
@@ -1506,6 +1496,30 @@ def validate_targets(targets: List[str]) -> List[str]:
         )
         sys.exit(1)
     return targets
+
+
+def ensure_explicit_targets(docs_root: Path, explicit_targets: List[str]) -> None:
+    """Ensure explicitly requested targets are in TARGET_CONFIG / BUILD_FUNCTIONS
+    even if they match exclude patterns from build.yml.
+
+    This allows ``sdb build some-excluded-file.qmd`` to work: the exclude
+    patterns only affect auto-discovery (``all``), not explicit targets.
+    """
+    if not explicit_targets:
+        return
+
+    all_targets = ConfigManager.discover_quarto_targets(docs_root, [])
+
+    for name in explicit_targets:
+        if name in BUILD_FUNCTIONS:
+            continue
+        if name not in all_targets:
+            continue
+
+        cfg = all_targets[name]
+        TARGET_CONFIG[name] = cfg
+        BUILD_FUNCTIONS[name] = _make_builder(name, cfg)
+        logger.info("Forced include of excluded target: %s", name)
 
 
 def build_single_target(
