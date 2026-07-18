@@ -744,7 +744,7 @@ class TitleMetaResolver(_BaseResolver):
         block, or ``None`` if not found.
 
         Uses a two-step approach: first finds the full Python fenced code
-        block (opening ``\```{python}`` to closing ``\`````), then checks
+        block (opening \\```{python}`` to closing \\`````), then checks
         whether it contains ``title_meta_items``.  This correctly handles
         nested braces in the dict literal, unlike the previous single-regex
         approach that broke on the first inner ``}``.

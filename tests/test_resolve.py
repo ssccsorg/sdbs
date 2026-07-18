@@ -148,7 +148,7 @@ class TestTitleMetaResolver:
     def test_find_tmi_block_end_nested_braces(self, tmp_path: Path) -> None:
         """Finds the full Python block even with deeply nested dict braces.
 
-        Regression test: the old regex ``\{.*?\}`` broke on the first
+        Regression test: the old regex \\{.*?\\}`` broke on the first
         inner ``}``, causing ``_find_tmi_block_end`` to return ``None``
         for realistic ``title_meta_items`` with nested dicts.
         """
