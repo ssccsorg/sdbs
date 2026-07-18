@@ -741,13 +741,18 @@ class TitleMetaResolver(_BaseResolver):
     @staticmethod
     def _find_tmi_block_end(text: str, search_start: int = 0) -> int | None:
         """Return the end position of the ``title_meta_items`` Python code
-        block, or ``None`` if not found."""
-        m = re.search(
-            r"```\{python\}\n.*?title_meta_items\s*=\s*\{.*?\}\s*\n```",
-            text[search_start:], re.DOTALL,
-        )
-        if m:
-            return search_start + m.end()
+        block, or ``None`` if not found.
+
+        Uses a two-step approach: first finds the full Python fenced code
+        block (opening ``\```{python}`` to closing ``\`````), then checks
+        whether it contains ``title_meta_items``.  This correctly handles
+        nested braces in the dict literal, unlike the previous single-regex
+        approach that broke on the first inner ``}``.
+        """
+        rest = text[search_start:]
+        for m in re.finditer(r"```\{python\}\n(.*?)```", rest, re.DOTALL):
+            if "title_meta_items" in m.group(1):
+                return search_start + m.end()
         return None
 
     # ------------------------------------------------------------------

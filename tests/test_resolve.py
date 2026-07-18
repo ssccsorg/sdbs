@@ -144,3 +144,41 @@ class TestTitleMetaResolver:
         )
         result = self.resolver.fix_one_file(qmd, tmp_path, dry_run=True, verbose=False)
         assert result == 1
+
+    def test_find_tmi_block_end_nested_braces(self, tmp_path: Path) -> None:
+        """Finds the full Python block even with deeply nested dict braces.
+
+        Regression test: the old regex ``\{.*?\}`` broke on the first
+        inner ``}``, causing ``_find_tmi_block_end`` to return ``None``
+        for realistic ``title_meta_items`` with nested dicts.
+        """
+        inc_dir = tmp_path / "_include"
+        inc_dir.mkdir()
+        (inc_dir / "_title_meta_items.qmd").write_text("")
+        qmd = tmp_path / "sub" / "page.qmd"
+        qmd.parent.mkdir()
+        qmd.write_text(
+            "---\ntitle: Test\n---\n\n"
+            "```{python}\n"
+            'title_meta_items = {\n'
+            '    "html": [\n'
+            '        {"title": "A", "link": "#", "icon": "bi"},\n'
+            '        {"title": "B", "link": "#", "icon": "bi"},\n'
+            '    ],\n'
+            "}\n"
+            '%run ../../_include/_graphviz.py\n'
+            "```\n\n"
+            "{{< include ../_include/_title_meta_items.qmd >}}\n\n"
+            "Content\n"
+        )
+        r = TitleMetaResolver()
+        result = r.fix_one_file(qmd, tmp_path, dry_run=False, verbose=False)
+        assert result == 0, (
+            f"Expected no change (include already after tmi block), got {result}"
+        )
+        content = qmd.read_text()
+        tmi_pos = content.index("title_meta_items")
+        include_pos = content.index("_title_meta_items")
+        assert include_pos > tmi_pos, (
+            f"Include at {include_pos} should be after title_meta_items at {tmi_pos}"
+        )
