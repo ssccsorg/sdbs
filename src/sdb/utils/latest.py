@@ -478,7 +478,11 @@ def _site_path(p: Path, ext: str) -> str:
 
 
 def doc_to_html(rel_path: str, docs_root: Path) -> str:
-    """Map a .qmd/.md relative path to its absolute site path."""
+    """Map a .qmd/.md relative path to its absolute site path.
+
+    Prefers HTML; falls back to PDF if HTML is not configured in the
+    document's YAML frontmatter format section.
+    """
     p = Path(rel_path)
     abs_path = docs_root / rel_path
     if abs_path.suffix == ".qmd":
@@ -489,8 +493,9 @@ def doc_to_html(rel_path: str, docs_root: Path) -> str:
                 front = yaml.safe_load(fm.group(1)) or {}
                 fmt = front.get("format", {})
                 if isinstance(fmt, dict):
-                    if "beamer" in fmt and "html" not in fmt:
-                        return _site_path(p, "pdf")
+                    if "html" not in fmt:
+                        if "beamer" in fmt or "pdf" in fmt:
+                            return _site_path(p, "pdf")
         except Exception:
             pass
     return _site_path(p, "html")

@@ -11,6 +11,7 @@ from sdb.utils.latest import (
     _load_exclude_patterns,
     _load_latest_count,
     _is_system_ignored,
+    doc_to_html,
     matches_exclude,
 )
 
@@ -75,7 +76,7 @@ class TestMatchesExclude:
         assert matches_exclude("README.md", EXCLUDE_PATTERNS) is True
 
     def test_nested_readme_matches(self) -> None:
-        assert matches_exclude("projects/tagma/README.md", EXCLUDE_PATTERNS) is True
+        assert matches_exclude("projects/syntagma/README.md", EXCLUDE_PATTERNS) is True
 
     def test_llms_md_matches(self) -> None:
         assert matches_exclude("projects/nexus/foo.llms.md", EXCLUDE_PATTERNS) is True
@@ -87,30 +88,30 @@ class TestMatchesExclude:
         assert matches_exclude("_include/header.qmd", EXCLUDE_PATTERNS) is True
 
     def test_nested_include_dir_matches(self) -> None:
-        assert matches_exclude("projects/tagma/_include/author.yml", EXCLUDE_PATTERNS) is True
+        assert matches_exclude("projects/syntagma/_include/author.yml", EXCLUDE_PATTERNS) is True
 
     def test_utils_dir_matches(self) -> None:
         assert matches_exclude("_utils/build.py", EXCLUDE_PATTERNS) is True
 
     def test_output_files_dir_matches(self) -> None:
-        assert matches_exclude("paper/wp_files/figure.pdf", EXCLUDE_PATTERNS) is True
+        assert matches_exclude("tagma/wp_files/figure.pdf", EXCLUDE_PATTERNS) is True
 
     def test_cached_dir_matches(self) -> None:
-        assert matches_exclude("paper/wp_cached/cache.db", EXCLUDE_PATTERNS) is True
+        assert matches_exclude("tagma/wp_cached/cache.db", EXCLUDE_PATTERNS) is True
 
     def test_libs_dir_matches(self) -> None:
         assert matches_exclude("paper/_libs/vendor.js", EXCLUDE_PATTERNS) is True
 
     def test_normal_qmd_does_not_match(self) -> None:
-        assert matches_exclude("projects/tagma/paper/wp.qmd", EXCLUDE_PATTERNS) is False
+        assert matches_exclude("projects/syntagma/tagma/wp.qmd", EXCLUDE_PATTERNS) is False
 
     def test_normal_index_qmd_does_not_match(self) -> None:
-        assert matches_exclude("projects/tagma/index.qmd", EXCLUDE_PATTERNS) is False
+        assert matches_exclude("projects/syntagma/index.qmd", EXCLUDE_PATTERNS) is False
 
     def test_custom_pattern_appended(self) -> None:
         patterns = EXCLUDE_PATTERNS + ["**/_*.qmd"]
         assert matches_exclude("_updated_docs_list.qmd", patterns) is True
-        assert matches_exclude("projects/tagma/wp.qmd", patterns) is False
+        assert matches_exclude("projects/syntagma/wp.qmd", patterns) is False
 
 
 class TestIsSystemIgnored:
@@ -132,7 +133,53 @@ class TestIsSystemIgnored:
         assert _is_system_ignored("__pycache__/module.pyc") is True
 
     def test_normal_path_not_ignored(self) -> None:
-        assert _is_system_ignored("projects/tagma/paper/wp.qmd") is False
+        assert _is_system_ignored("projects/syntagma/tagma/wp.qmd") is False
+
+
+class TestDocToHtml:
+    """``doc_to_html`` resolves the correct output extension."""
+
+    def test_html_only(self, tmp_path: Path) -> None:
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text("---\ntitle: Test\nformat:\n  html: {}\n---\n", encoding="utf-8")
+        assert doc_to_html("doc.qmd", tmp_path) == "/doc.html"
+
+    def test_pdf_only(self, tmp_path: Path) -> None:
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text("---\ntitle: Test\nformat:\n  pdf:\n    pdf-engine: xelatex\n---\n", encoding="utf-8")
+        assert doc_to_html("doc.qmd", tmp_path) == "/doc.pdf"
+
+    def test_beamer_only(self, tmp_path: Path) -> None:
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text("---\ntitle: Test\nformat:\n  beamer: {}\n---\n", encoding="utf-8")
+        assert doc_to_html("doc.qmd", tmp_path) == "/doc.pdf"
+
+    def test_html_preferred_over_pdf(self, tmp_path: Path) -> None:
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text("---\ntitle: Test\nformat:\n  html: {}\n  pdf:\n    pdf-engine: xelatex\n---\n", encoding="utf-8")
+        assert doc_to_html("doc.qmd", tmp_path) == "/doc.html"
+
+    def test_html_preferred_over_beamer(self, tmp_path: Path) -> None:
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text("---\ntitle: Test\nformat:\n  html: {}\n  beamer: {}\n---\n", encoding="utf-8")
+        assert doc_to_html("doc.qmd", tmp_path) == "/doc.html"
+
+    def test_no_format_specified(self, tmp_path: Path) -> None:
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text("---\ntitle: Test\n---\n", encoding="utf-8")
+        assert doc_to_html("doc.qmd", tmp_path) == "/doc.html"
+
+    def test_md_file_defaults_to_html(self, tmp_path: Path) -> None:
+        md = tmp_path / "doc.md"
+        md.write_text("# Test\n", encoding="utf-8")
+        assert doc_to_html("doc.md", tmp_path) == "/doc.html"
+
+    def test_index_qmd_in_subdir(self, tmp_path: Path) -> None:
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        qmd = sub / "index.qmd"
+        qmd.write_text("---\ntitle: Test\n---\n", encoding="utf-8")
+        assert doc_to_html("sub/index.qmd", tmp_path) == "/sub/index.html"
 
 
 class TestLoadLatestCount:
