@@ -263,6 +263,77 @@ class TestRenderQmd:
 
 
 # ============================================================================
+# select_qmd_files
+# ============================================================================
+
+
+class TestSelectQmdFiles:
+    """Tests for the selection-only front-end."""
+
+    def test_no_match_returns_none(self, qmd_tree: Path) -> None:
+        """No matching .qmd files returns None."""
+        from sdb.utils.quick_render import select_qmd_files
+        result = select_qmd_files("nonexistent", root=qmd_tree)
+        assert result is None
+
+    def test_single_match_no_prompt(self, qmd_tree: Path) -> None:
+        """Single match returns list with one file even with prompt=True."""
+        from sdb.utils.quick_render import select_qmd_files
+        result = select_qmd_files("whitepaper", root=qmd_tree, prompt=True)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].name == "whitepaper.qmd"
+
+    def test_prompt_false_returns_all(self, qmd_tree: Path) -> None:
+        """With prompt=False, all matches are returned."""
+        from sdb.utils.quick_render import select_qmd_files
+        result = select_qmd_files("kv", root=qmd_tree, prompt=False)
+        assert result is not None
+        assert len(result) == 6  # exact 1 + suffix 1 + substring 4
+
+    @patch("builtins.input")
+    def test_prompt_enter_selects_first(
+        self, mock_input: MagicMock, qmd_tree: Path
+    ) -> None:
+        """Enter key selects the first match."""
+        from sdb.utils.quick_render import select_qmd_files
+        mock_input.return_value = ""
+        result = select_qmd_files("kv", root=qmd_tree, prompt=True)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].stem == "kv"
+
+    @patch("builtins.input")
+    def test_prompt_q_returns_none(
+        self, mock_input: MagicMock, qmd_tree: Path
+    ) -> None:
+        """.q' cancels and returns None."""
+        from sdb.utils.quick_render import select_qmd_files
+        mock_input.return_value = "q"
+        result = select_qmd_files("kv", root=qmd_tree, prompt=True)
+        assert result is None
+
+    @patch("builtins.input")
+    def test_prompt_a_returns_all(
+        self, mock_input: MagicMock, qmd_tree: Path
+    ) -> None:
+        """'a' selects all matches."""
+        from sdb.utils.quick_render import select_qmd_files
+        mock_input.return_value = "a"
+        result = select_qmd_files("kv", root=qmd_tree, prompt=True)
+        assert result is not None
+        assert len(result) == 6
+
+    def test_label_in_output(self, qmd_tree: Path, capsys) -> None:
+        """Label is printed in the prompt header when prompt=True and multi-match."""
+        from sdb.utils.quick_render import select_qmd_files
+        with patch("builtins.input", return_value=""):
+            select_qmd_files("kv", root=qmd_tree, prompt=True, label="2/4")
+        captured = capsys.readouterr()
+        assert "[2/4]" in captured.out
+
+
+# ============================================================================
 # quick_render (integration of find + render)
 # ============================================================================
 

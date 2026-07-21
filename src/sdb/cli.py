@@ -348,10 +348,19 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.command == "render":
         _setup_logging()
-        from .utils.quick_render import quick_render
+        from .utils.quick_render import (
+            render_qmd as _render_qmd,
+            select_qmd_files,
+        )
 
         patterns = args.patterns
         total = len(patterns)
+        prompt = not args.all
+        root = Path.cwd()
+
+        # --- Phase 1: resolve all patterns, collect selected files ----------
+        # Each entry tracks which pattern produced it, for dedup display.
+        all_selected: list[tuple[Path, str]] = []
         n_ok = 0
         n_fail = 0
 
@@ -359,24 +368,73 @@ def main(argv: list[str] | None = None) -> None:
             label = f"{i}/{total}" if total > 1 else None
             if label:
                 logging.info("[%s] Pattern: %s", label, pattern)
-            ok = quick_render(
-                pattern=pattern,
-                root=Path.cwd(),
-                format=args.format,
-                prompt=not args.all,
-                label=label,
-            )
-            if ok:
+            selected = select_qmd_files(pattern, root, prompt, label)
+            if selected is not None:
                 n_ok += 1
+                for p in selected:
+                    all_selected.append((p, pattern))
             else:
                 n_fail += 1
 
-        if total > 1:
-            logging.info(
-                "Summary: %d of %d pattern(s) succeeded, %d failed.",
-                n_ok, total, n_fail,
+        if not all_selected:
+            sys.exit(1 if n_fail > 0 else 0)
+
+        # --- Phase 2: cross-pattern deduplication ---------------------------
+        file_to_patterns: dict[Path, list[str]] = {}
+        file_order: list[Path] = []
+        for p, pat in all_selected:
+            if p not in file_to_patterns:
+                file_to_patterns[p] = []
+                file_order.append(p)
+            file_to_patterns[p].append(pat)
+
+        dup_map = {
+            p: pats
+            for p, pats in file_to_patterns.items()
+            if len(pats) > 1
+        }
+
+        if dup_map and total > 1 and prompt:
+            print(
+                "\nThe following files were matched by more than one pattern:"
             )
-        sys.exit(0 if n_fail == 0 else 1)
+            for p, pats in dup_map.items():
+                rel = p.relative_to(root)
+                print(f"  {rel}  ({', '.join(dict.fromkeys(pats))})")
+            print()
+            print("Choose how to handle duplicates:")
+            print("  1. Render each file only once (skip duplicates)")
+            print("  2. Render all (including duplicates)")
+            print("  q. Cancel")
+
+            while True:
+                choice = input("\nSelect [1]: ").strip().lower()
+                if not choice or choice == "1":
+                    all_selected = [(p, "") for p in file_order]
+                    break
+                if choice == "2":
+                    break
+                if choice == "q":
+                    logging.info("Cancelled.")
+                    sys.exit(1)
+                print("Invalid choice. Enter 1, 2, or q.")
+
+        # --- Phase 3: render -------------------------------------------------
+        success = True
+        for entry in all_selected:
+            qmd = entry[0] if isinstance(entry, tuple) else entry
+            if not _render_qmd(qmd, cwd=root, format=args.format):
+                success = False
+
+        if total > 1:
+            unique_count = len(file_order)
+            total_count = len(all_selected)
+            logging.info(
+                "Summary: %d of %d pattern(s) succeeded, %d failed. "
+                "(%d unique file(s), %d render(s))",
+                n_ok, total, n_fail, unique_count, total_count,
+            )
+        sys.exit(0 if success else 1)
 
     elif args.command == "clean":
         _setup_logging()

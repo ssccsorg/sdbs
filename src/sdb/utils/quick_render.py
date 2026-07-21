@@ -148,6 +148,81 @@ def render_qmd(
         return False
 
 
+def select_qmd_files(
+    pattern: str,
+    root: Optional[Path] = None,
+    prompt: bool = True,
+    label: Optional[str] = None,
+) -> Optional[List[Path]]:
+    """Locate .qmd files matching *pattern* and let the user select which to render.
+
+    This is the selection-only front-end used by the CLI handler to collect
+    files across multiple patterns before rendering.  ``quick_render`` calls
+    this internally.
+
+    Behaviour when multiple files match:
+
+    * If ``prompt=True`` (default) and more than one match is found, the
+      user is prompted to select which ones to render.
+    * If ``prompt=False``, all matches are returned without asking.
+
+    Args:
+        pattern: Short name or path fragment.
+        root:    Directory to search under.  Defaults to current directory.
+        prompt:  Whether to prompt on multiple matches.
+        label:   Optional progress label prepended to the prompt header
+                 (e.g. ``"1/3"``).  Ignored when *prompt* is ``False``.
+
+    Returns:
+        A list of selected ``Path`` objects, or ``None`` when no files
+        matched or the user cancelled the prompt.
+    """
+    if root is None:
+        root = Path.cwd()
+
+    matches = find_qmd_files(pattern, root)
+
+    if not matches:
+        logger.error(
+            "No .qmd files matching '%s' found under %s",
+            pattern, root,
+        )
+        return None
+
+    if len(matches) == 1:
+        return matches
+
+    if not prompt:
+        return matches
+
+    # --- interactive selection -----------------------------------------------
+    header = f"[{label}] " if label else ""
+    print(f"\n{header}Multiple files match '{pattern}':\n")
+    for i, p in enumerate(matches, 1):
+        rel = p.relative_to(root)
+        print(f"  {i}. {rel}")
+    print(f"  a. All ({len(matches)} files)")
+    hint = f"[{label}] " if label else ""
+    print(f"  ({hint}enter = first match, or q to cancel)\n")
+
+    while True:
+        choice = input("Select: ").strip().lower()
+        if not choice:
+            return [matches[0]]
+        if choice == "q":
+            logger.info("Cancelled.")
+            return None
+        if choice == "a":
+            return matches
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(matches):
+                return [matches[idx]]
+        except ValueError:
+            pass
+        print(f"Invalid choice. Enter 1-{len(matches)}, 'a', or 'q'.")
+
+
 def quick_render(
     pattern: str,
     root: Optional[Path] = None,
@@ -157,11 +232,10 @@ def quick_render(
 ) -> bool:
     """Locate .qmd files matching *pattern* and render them.
 
-    Behaviour when multiple files match:
-
-    * If ``prompt=True`` (default) and more than one match is found, the
-      user is prompted to select which ones to render.
-    * If ``prompt=False``, all matches are rendered without asking.
+    This is a convenience wrapper that combines ``select_qmd_files`` and
+    ``render_qmd`` into a single call.  For multi-pattern use (``sdb render
+    kv id``) the CLI handler calls ``select_qmd_files`` directly to enable
+    cross-pattern deduplication.
 
     Args:
         pattern: Short name or path fragment.
@@ -174,54 +248,10 @@ def quick_render(
     Returns:
         ``True`` if every selected file rendered successfully.
     """
-    if root is None:
-        root = Path.cwd()
-
-    matches = find_qmd_files(pattern, root)
-
-    if not matches:
-        logger.error(
-            "No .qmd files matching '%s' found under %s",
-            pattern, root,
-        )
+    selected = select_qmd_files(pattern, root, prompt, label)
+    if selected is None:
         return False
 
-    # --- determine which files to render ------------------------------------
-    if len(matches) == 1:
-        selected = matches
-    elif prompt:
-        header = f"[{label}] " if label else ""
-        print(f"\n{header}Multiple files match '{pattern}':\n")
-        for i, p in enumerate(matches, 1):
-            rel = p.relative_to(root)
-            print(f"  {i}. {rel}")
-        print(f"  a. All ({len(matches)} files)")
-        hint = f"[{label}] " if label else ""
-        print(f"  ({hint}enter = first match, or q to cancel)\n")
-
-        while True:
-            choice = input("Select: ").strip().lower()
-            if not choice:
-                selected = [matches[0]]
-                break
-            if choice == "q":
-                logger.info("Cancelled.")
-                return False
-            if choice == "a":
-                selected = matches
-                break
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(matches):
-                    selected = [matches[idx]]
-                    break
-            except ValueError:
-                pass
-            print(f"Invalid choice. Enter 1-{len(matches)}, 'a', or 'q'.")
-    else:
-        selected = matches
-
-    # --- render --------------------------------------------------------------
     success = True
     for qmd in selected:
         if not render_qmd(qmd, cwd=root, format=format):
