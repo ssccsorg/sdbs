@@ -153,6 +153,7 @@ def quick_render(
     root: Optional[Path] = None,
     format: Optional[str] = None,
     prompt: bool = True,
+    label: Optional[str] = None,
 ) -> bool:
     """Locate .qmd files matching *pattern* and render them.
 
@@ -167,6 +168,8 @@ def quick_render(
         root:    Directory to search under.  Defaults to current directory.
         format:  Optional output format passed to ``quarto render --to``.
         prompt:  Whether to prompt on multiple matches.
+        label:   Optional progress label prepended to the prompt header
+                 (e.g. ``"1/3"``).  Ignored when *prompt* is ``False``.
 
     Returns:
         ``True`` if every selected file rendered successfully.
@@ -187,12 +190,14 @@ def quick_render(
     if len(matches) == 1:
         selected = matches
     elif prompt:
-        print(f"\nMultiple files match '{pattern}':\n")
+        header = f"[{label}] " if label else ""
+        print(f"\n{header}Multiple files match '{pattern}':\n")
         for i, p in enumerate(matches, 1):
             rel = p.relative_to(root)
             print(f"  {i}. {rel}")
         print(f"  a. All ({len(matches)} files)")
-        print("  (enter = first match, or q to cancel)\n")
+        hint = f"[{label}] " if label else ""
+        print(f"  ({hint}enter = first match, or q to cancel)\n")
 
         while True:
             choice = input("Select: ").strip().lower()

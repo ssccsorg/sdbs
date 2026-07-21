@@ -404,3 +404,57 @@ class TestQuickRender:
         assert result is True
         mock_render.assert_called_once()
         assert mock_render.call_args[0][0].name == "kv.qmd"
+
+    # --- label (progress indicator) -----------------------------------------
+
+    @patch("sdb.utils.quick_render.render_qmd")
+    @patch("builtins.input")
+    def test_label_in_prompt_header(
+        self, mock_input: MagicMock, mock_render: MagicMock, qmd_tree: Path, capsys
+    ) -> None:
+        """When label is given, it appears in the prompt header."""
+        mock_render.return_value = True
+        mock_input.return_value = ""  # enter = first match
+        result = quick_render("kv", root=qmd_tree, prompt=True, label="1/3")
+        assert result is True
+        captured = capsys.readouterr()
+        assert "[1/3]" in captured.out
+
+    @patch("sdb.utils.quick_render.render_qmd")
+    @patch("builtins.input")
+    def test_label_in_hint(
+        self, mock_input: MagicMock, mock_render: MagicMock, qmd_tree: Path, capsys
+    ) -> None:
+        """When label is given, it appears in the selection hint."""
+        mock_render.return_value = True
+        mock_input.return_value = ""
+        result = quick_render("kv", root=qmd_tree, prompt=True, label="2/2")
+        assert result is True
+        captured = capsys.readouterr()
+        assert "[2/2]" in captured.out
+
+    @patch("sdb.utils.quick_render.render_qmd")
+    @patch("builtins.input")
+    def test_label_omitted_when_none(
+        self, mock_input: MagicMock, mock_render: MagicMock, qmd_tree: Path, capsys
+    ) -> None:
+        """When label is None, no bracket prefix is printed."""
+        mock_render.return_value = True
+        mock_input.return_value = ""
+        result = quick_render("kv", root=qmd_tree, prompt=True, label=None)
+        assert result is True
+        captured = capsys.readouterr()
+        assert "[None]" not in captured.out
+        assert "Multiple files match" in captured.out
+
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_label_ignored_when_prompt_false(
+        self, mock_render: MagicMock, qmd_tree: Path, capsys
+    ) -> None:
+        """Label has no effect when prompt is False (--all mode)."""
+        mock_render.return_value = True
+        result = quick_render("kv", root=qmd_tree, prompt=False, label="1/3")
+        assert result is True
+        captured = capsys.readouterr()
+        assert "[1/3]" not in captured.out
+        assert mock_render.call_count == 6

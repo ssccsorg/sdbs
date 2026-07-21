@@ -182,26 +182,29 @@ def main(argv: list[str] | None = None) -> None:
         "render",
         help="Locate .qmd files by short name and render them directly",
         description="Search the current directory tree for .qmd files whose stem "
-        "matches a short name (e.g. 'kv' → docs/projects/syntagma/tagma/kv.qmd) "
-        "and render them by calling the underlying tool directly, without the "
-        "full SDBS preprocessing pipeline (no include resolution, no metadata "
-        "generation, no pre-render steps).\n\n"
-        "Contrast this with 'sdb build', which runs the full SDBS pipeline before "
-        "rendering.  Use 'render' when you only need a quick preview or to verify "
-        "the document structure.\n\n"
+        "matches one or more short names (e.g. 'kv' → "
+        "docs/projects/syntagma/tagma/kv.qmd) and render them by calling the "
+        "underlying tool directly, without the full SDBS preprocessing pipeline "
+        "(no include resolution, no metadata generation, no pre-render steps).\n\n"
+        "Multiple patterns can be given to render several documents in sequence "
+        "(e.g. 'sdb render kv id').  Contrast this with 'sdb build', which runs "
+        "the full SDBS pipeline before rendering.  Use 'render' when you only "
+        "need a quick preview or to verify the document structure.\n\n"
         "When multiple files match, prompts for selection unless --all is given.",
         epilog=(
             "Examples:\n"
             "  sdb render kv\n"
             "  sdb render kv --to pdf\n"
             "  sdb render tagma/kv\n"
+            "  sdb render kv id wp\n"
         ),
     )
     render_parser.add_argument(
-        "pattern",
+        "patterns",
         type=str,
-        help="Short name or path fragment to match against .qmd file stems "
-        "(e.g. 'kv', 'whitepaper', 'tagma/kv')",
+        nargs="+",
+        help="One or more short names or path fragments to match against .qmd "
+        "file stems (e.g. 'kv', 'whitepaper', 'tagma/kv')",
     )
     render_parser.add_argument(
         "--to", "-t", dest="format", type=str, default=None,
@@ -347,13 +350,33 @@ def main(argv: list[str] | None = None) -> None:
         _setup_logging()
         from .utils.quick_render import quick_render
 
-        success = quick_render(
-            pattern=args.pattern,
-            root=Path.cwd(),
-            format=args.format,
-            prompt=not args.all,
-        )
-        sys.exit(0 if success else 1)
+        patterns = args.patterns
+        total = len(patterns)
+        n_ok = 0
+        n_fail = 0
+
+        for i, pattern in enumerate(patterns, 1):
+            label = f"{i}/{total}" if total > 1 else None
+            if label:
+                logging.info("[%s] Pattern: %s", label, pattern)
+            ok = quick_render(
+                pattern=pattern,
+                root=Path.cwd(),
+                format=args.format,
+                prompt=not args.all,
+                label=label,
+            )
+            if ok:
+                n_ok += 1
+            else:
+                n_fail += 1
+
+        if total > 1:
+            logging.info(
+                "Summary: %d of %d pattern(s) succeeded, %d failed.",
+                n_ok, total, n_fail,
+            )
+        sys.exit(0 if n_fail == 0 else 1)
 
     elif args.command == "clean":
         _setup_logging()
