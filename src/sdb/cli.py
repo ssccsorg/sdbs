@@ -6,6 +6,8 @@ Subcommands:
   build    Build one or more Quarto targets.
   check    Validate links, citations, and cross-references.
   pre      Run pre-render steps (latest docs, path resolution, formatting).
+  render   Locate .qmd files by short name and render them directly (no preprocessing).
+  clean    Remove Quarto build artifacts.
 """
 
 import argparse
@@ -175,6 +177,44 @@ def main(argv: list[str] | None = None) -> None:
         help="Path to the docs directory (default: current directory)",
     )
 
+    # --- render (quick render by short name) ---
+    render_parser = subparsers.add_parser(
+        "render",
+        help="Locate .qmd files by short name and render them directly",
+        description="Search the current directory tree for .qmd files whose stem "
+        "matches one or more short names (e.g. 'kv' → "
+        "docs/projects/syntagma/tagma/kv.qmd) and render them by calling the "
+        "underlying tool directly, without the full SDBS preprocessing pipeline "
+        "(no include resolution, no metadata generation, no pre-render steps).\n\n"
+        "Multiple patterns can be given to render several documents in sequence "
+        "(e.g. 'sdb render kv id').  Contrast this with 'sdb build', which runs "
+        "the full SDBS pipeline before rendering.  Use 'render' when you only "
+        "need a quick preview or to verify the document structure.\n\n"
+        "When multiple files match, prompts for selection unless --all is given.",
+        epilog=(
+            "Examples:\n"
+            "  sdb render kv\n"
+            "  sdb render kv --to pdf\n"
+            "  sdb render tagma/kv\n"
+            "  sdb render kv id wp\n"
+        ),
+    )
+    render_parser.add_argument(
+        "patterns",
+        type=str,
+        nargs="+",
+        help="One or more short names or path fragments to match against .qmd "
+        "file stems (e.g. 'kv', 'whitepaper', 'tagma/kv')",
+    )
+    render_parser.add_argument(
+        "--to", "-t", dest="format", type=str, default=None,
+        help="Output format passed to quarto render --to (e.g. html, pdf)",
+    )
+    render_parser.add_argument(
+        "--all", "-a", action="store_true",
+        help="Render all matching files without prompting",
+    )
+
     # --- clean ---
     clean_parser = subparsers.add_parser(
         "clean",
@@ -305,6 +345,96 @@ def main(argv: list[str] | None = None) -> None:
 
         build_module.run_pre_build_sequence(build_module.EXTERNAL_CONFIG, docs_root)
         sys.exit(0)
+
+    elif args.command == "render":
+        _setup_logging()
+        from .utils.quick_render import (
+            render_qmd as _render_qmd,
+            select_qmd_files,
+        )
+
+        patterns = args.patterns
+        total = len(patterns)
+        prompt = not args.all
+        root = Path.cwd()
+
+        # --- Phase 1: resolve all patterns, collect selected files ----------
+        # Each entry tracks which pattern produced it, for dedup display.
+        all_selected: list[tuple[Path, str]] = []
+        n_ok = 0
+        n_fail = 0
+
+        for i, pattern in enumerate(patterns, 1):
+            label = f"{i}/{total}" if total > 1 else None
+            if label:
+                logging.info("[%s] Pattern: %s", label, pattern)
+            selected = select_qmd_files(pattern, root, prompt, label)
+            if selected is not None:
+                n_ok += 1
+                for p in selected:
+                    all_selected.append((p, pattern))
+            else:
+                n_fail += 1
+
+        if not all_selected:
+            sys.exit(1 if n_fail > 0 else 0)
+
+        # --- Phase 2: cross-pattern deduplication ---------------------------
+        file_to_patterns: dict[Path, list[str]] = {}
+        file_order: list[Path] = []
+        for p, pat in all_selected:
+            if p not in file_to_patterns:
+                file_to_patterns[p] = []
+                file_order.append(p)
+            file_to_patterns[p].append(pat)
+
+        dup_map = {
+            p: pats
+            for p, pats in file_to_patterns.items()
+            if len(pats) > 1
+        }
+
+        if dup_map and total > 1 and prompt:
+            print(
+                "\nThe following files were matched by more than one pattern:"
+            )
+            for p, pats in dup_map.items():
+                rel = p.relative_to(root)
+                print(f"  {rel}  ({', '.join(dict.fromkeys(pats))})")
+            print()
+            print("Choose how to handle duplicates:")
+            print("  1. Render each file only once (skip duplicates)")
+            print("  2. Render all (including duplicates)")
+            print("  q. Cancel")
+
+            while True:
+                choice = input("\nSelect [1]: ").strip().lower()
+                if not choice or choice == "1":
+                    all_selected = [(p, "") for p in file_order]
+                    break
+                if choice == "2":
+                    break
+                if choice == "q":
+                    logging.info("Cancelled.")
+                    sys.exit(1)
+                print("Invalid choice. Enter 1, 2, or q.")
+
+        # --- Phase 3: render -------------------------------------------------
+        success = True
+        for entry in all_selected:
+            qmd = entry[0] if isinstance(entry, tuple) else entry
+            if not _render_qmd(qmd, cwd=root, format=args.format):
+                success = False
+
+        if total > 1:
+            unique_count = len(file_order)
+            total_count = len(all_selected)
+            logging.info(
+                "Summary: %d of %d pattern(s) succeeded, %d failed. "
+                "(%d unique file(s), %d render(s))",
+                n_ok, total, n_fail, unique_count, total_count,
+            )
+        sys.exit(0 if success else 1)
 
     elif args.command == "clean":
         _setup_logging()
