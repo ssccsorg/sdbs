@@ -6,6 +6,8 @@ Subcommands:
   build    Build one or more Quarto targets.
   check    Validate links, citations, and cross-references.
   pre      Run pre-render steps (latest docs, path resolution, formatting).
+  render   Locate .qmd files by short name and render them directly (no preprocessing).
+  clean    Remove Quarto build artifacts.
 """
 
 import argparse
@@ -175,6 +177,41 @@ def main(argv: list[str] | None = None) -> None:
         help="Path to the docs directory (default: current directory)",
     )
 
+    # --- render (quick render by short name) ---
+    render_parser = subparsers.add_parser(
+        "render",
+        help="Locate .qmd files by short name and render them directly",
+        description="Search the current directory tree for .qmd files whose stem "
+        "matches a short name (e.g. 'kv' → docs/projects/syntagma/tagma/kv.qmd) "
+        "and render them by calling the underlying tool directly, without the "
+        "full SDBS preprocessing pipeline (no include resolution, no metadata "
+        "generation, no pre-render steps).\n\n"
+        "Contrast this with 'sdb build', which runs the full SDBS pipeline before "
+        "rendering.  Use 'render' when you only need a quick preview or to verify "
+        "the document structure.\n\n"
+        "When multiple files match, prompts for selection unless --all is given.",
+        epilog=(
+            "Examples:\n"
+            "  sdb render kv\n"
+            "  sdb render kv --to pdf\n"
+            "  sdb render tagma/kv\n"
+        ),
+    )
+    render_parser.add_argument(
+        "pattern",
+        type=str,
+        help="Short name or path fragment to match against .qmd file stems "
+        "(e.g. 'kv', 'whitepaper', 'tagma/kv')",
+    )
+    render_parser.add_argument(
+        "--to", "-t", dest="format", type=str, default=None,
+        help="Output format passed to quarto render --to (e.g. html, pdf)",
+    )
+    render_parser.add_argument(
+        "--all", "-a", action="store_true",
+        help="Render all matching files without prompting",
+    )
+
     # --- clean ---
     clean_parser = subparsers.add_parser(
         "clean",
@@ -305,6 +342,18 @@ def main(argv: list[str] | None = None) -> None:
 
         build_module.run_pre_build_sequence(build_module.EXTERNAL_CONFIG, docs_root)
         sys.exit(0)
+
+    elif args.command == "render":
+        _setup_logging()
+        from .utils.quick_render import quick_render
+
+        success = quick_render(
+            pattern=args.pattern,
+            root=Path.cwd(),
+            format=args.format,
+            prompt=not args.all,
+        )
+        sys.exit(0 if success else 1)
 
     elif args.command == "clean":
         _setup_logging()
