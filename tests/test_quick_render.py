@@ -145,6 +145,123 @@ class TestFindQmdFiles:
         matches = find_qmd_files("file", root=tmp_path)
         assert len(matches) == 2
 
+    def test_exclude_patterns_excludes_files(self, tmp_path: Path) -> None:
+        """Files matching exclude patterns are omitted."""
+        (tmp_path / "visible.qmd").write_text("---\n")
+        inc = tmp_path / "_include"
+        inc.mkdir()
+        (inc / "hidden.qmd").write_text("---\n")
+        matches = find_qmd_files("hidden", root=tmp_path)
+        assert len(matches) == 1  # without exclude, found
+        matches_excluded = find_qmd_files(
+            "hidden", root=tmp_path, exclude_patterns=["**/_include/**"]
+        )
+        assert len(matches_excluded) == 0  # with exclude, hidden
+
+    def test_exclude_keeps_visible(self, tmp_path: Path) -> None:
+        """Exclude patterns do not affect non-matching files."""
+        (tmp_path / "main.qmd").write_text("---\n")
+        matches = find_qmd_files(
+            "main", root=tmp_path, exclude_patterns=["**/_include/**"]
+        )
+        assert len(matches) == 1
+        assert matches[0].name == "main.qmd"
+
+
+# ============================================================================
+# find_build_yml
+# ============================================================================
+
+
+class TestFindBuildYml:
+    """Tests for locating build.yml."""
+
+    def test_in_current_dir(self, tmp_path: Path) -> None:
+        """build.yml in the start directory is found."""
+        build_yml = tmp_path / "build.yml"
+        build_yml.write_text("exclude: []")
+        from sdb.utils.quick_render import find_build_yml
+        result = find_build_yml(tmp_path)
+        assert result == build_yml
+
+    def test_in_subdirectory(self, tmp_path: Path) -> None:
+        """build.yml in an immediate subdirectory is found."""
+        sub = tmp_path / "docs"
+        sub.mkdir()
+        build_yml = sub / "build.yml"
+        build_yml.write_text("exclude: []")
+        from sdb.utils.quick_render import find_build_yml
+        result = find_build_yml(tmp_path)
+        assert result == build_yml
+
+    def test_in_parent(self, tmp_path: Path) -> None:
+        """build.yml in a parent directory is found (walk up)."""
+        nested = tmp_path / "a" / "b" / "c"
+        nested.mkdir(parents=True)
+        build_yml = tmp_path / "build.yml"
+        build_yml.write_text("exclude: []")
+        from sdb.utils.quick_render import find_build_yml
+        result = find_build_yml(nested)
+        assert result == build_yml
+
+    def test_not_found(self, tmp_path: Path) -> None:
+        """No build.yml anywhere returns None."""
+        from sdb.utils.quick_render import find_build_yml
+        result = find_build_yml(tmp_path)
+        assert result is None
+
+    def test_prefers_current_over_subdirectory(self, tmp_path: Path) -> None:
+        """build.yml in start directory takes priority over subdirectory."""
+        current_build = tmp_path / "build.yml"
+        current_build.write_text("exclude: [\"current\"]")
+        sub = tmp_path / "docs"
+        sub.mkdir()
+        sub_build = sub / "build.yml"
+        sub_build.write_text("exclude: [\"sub\"]")
+        from sdb.utils.quick_render import find_build_yml
+        result = find_build_yml(tmp_path)
+        assert result == current_build
+
+
+# ============================================================================
+# load_exclude_patterns
+# ============================================================================
+
+
+class TestLoadExcludePatterns:
+    """Tests for loading exclude patterns from a build.yml path."""
+
+    def test_loads_patterns(self, tmp_path: Path) -> None:
+        """Exclude patterns from build.yml are loaded correctly."""
+        build_yml = tmp_path / "build.yml"
+        build_yml.write_text("exclude:\n  - \"**/_include\"\n  - \"*.bak\"")
+        from sdb.utils.quick_render import load_exclude_patterns
+        patterns = load_exclude_patterns(build_yml)
+        assert "**/_include" in patterns
+        assert "*.bak" in patterns
+
+    def test_no_exclude_key(self, tmp_path: Path) -> None:
+        """build.yml without exclude key returns empty list."""
+        build_yml = tmp_path / "build.yml"
+        build_yml.write_text("target_config:\n  test:\n    c2pa: true")
+        from sdb.utils.quick_render import load_exclude_patterns
+        patterns = load_exclude_patterns(build_yml)
+        assert patterns == []
+
+    def test_empty_file(self, tmp_path: Path) -> None:
+        """Empty build.yml returns empty list."""
+        build_yml = tmp_path / "build.yml"
+        build_yml.write_text("")
+        from sdb.utils.quick_render import load_exclude_patterns
+        patterns = load_exclude_patterns(build_yml)
+        assert patterns == []
+
+    def test_missing_file(self, tmp_path: Path) -> None:
+        """Non-existent build.yml returns empty list (error handled gracefully)."""
+        from sdb.utils.quick_render import load_exclude_patterns
+        patterns = load_exclude_patterns(tmp_path / "nonexistent.yml")
+        assert patterns == []
+
 
 # ============================================================================
 # render_qmd

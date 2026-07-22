@@ -11,9 +11,10 @@ from __future__ import annotations
 import logging
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
 
 
 def _stem(file_path: Path) -> str:
@@ -21,9 +22,71 @@ def _stem(file_path: Path) -> str:
     return file_path.stem
 
 
+def find_build_yml(start: Optional[Path] = None) -> Optional[Path]:
+    """Locate a ``build.yml`` starting from *start*.
+
+    Search order:
+      1. *start* itself.
+      2. Immediate subdirectories of *start* (common layout where config
+         lives in a ``docs/`` subdirectory).
+      3. Ancestors of *start* (walk up).
+
+    Returns the path to the first ``build.yml`` found, or ``None``.
+    """
+    if start is None:
+        start = Path.cwd()
+    start = start.resolve()
+
+    # 1. Check *start* itself
+    candidate = start / "build.yml"
+    if candidate.exists():
+        return candidate
+
+    # 2. Check immediate subdirectories
+    try:
+        for child in start.iterdir():
+            if child.is_dir():
+                candidate = child / "build.yml"
+                if candidate.exists():
+                    return candidate
+    except PermissionError:
+        pass
+
+    # 3. Walk up
+    current = start
+    while True:
+        parent = current.parent
+        if parent == current:
+            break
+        candidate = parent / "build.yml"
+        if candidate.exists():
+            return candidate
+        current = parent
+
+    return None
+
+
+def load_exclude_patterns(build_yml: Path) -> List[str]:
+    """Load exclude patterns from the given ``build.yml`` path.
+
+    Uses the same config loading and pattern resolution that ``sdb build``
+    uses, so that ``sdb render`` respects the same exclusions.
+    """
+    try:
+        from sdb.config import ConfigManager
+        cfg: Dict[str, Any] = ConfigManager.load_yaml_file(build_yml)
+        return ConfigManager.get_exclude_patterns(cfg)
+    except Exception as exc:
+        logger.warning(
+            "Failed to load exclusions from %s: %s", build_yml, exc
+        )
+        return []
+
+
 def find_qmd_files(
     pattern: str,
     root: Optional[Path] = None,
+    exclude_patterns: Optional[List[str]] = None,
 ) -> List[Path]:
     """Recursively search for .qmd files whose stem matches *pattern*.
 
@@ -35,11 +98,17 @@ def find_qmd_files(
     If *pattern* contains a slash it is treated as a relative path fragment:
     only files whose relative path contains that fragment are returned.
 
+    When *exclude_patterns* are provided (gitignore-style globs), files
+    matching any of them are omitted.  This is consistent with how
+    ``sdb build`` excludes files via ``build.yml``.
+
     Args:
-        pattern: Short name or path fragment to search for (e.g. ``"kv"``,
-                 or  ``"tagma/kv"``).
-        root:    Directory to search under.  Defaults to the current working
-                 directory.
+        pattern:          Short name or path fragment to search for
+                          (e.g. ``"kv"``, or ``"tagma/kv"``).
+        root:             Directory to search under.  Defaults to the current
+                          working directory.
+        exclude_patterns: Optional list of gitignore-style glob patterns to
+                          exclude.  Typically loaded from ``build.yml``.
 
     Returns:
         A list of matching ``Path`` objects, sorted by match quality (exact
@@ -49,6 +118,18 @@ def find_qmd_files(
         root = Path.cwd()
 
     candidates: List[Path] = list(root.rglob("*.qmd"))
+
+    # Apply exclude patterns (same mechanism as sdb build)
+    if exclude_patterns:
+        from sdb.config import ConfigManager
+        filtered: List[Path] = []
+        for p in candidates:
+            rel = p.relative_to(root)
+            if ConfigManager.matches_gitignore_pattern(rel, exclude_patterns):
+                logger.debug("Excluded %s (matches exclude pattern)", rel)
+                continue
+            filtered.append(p)
+        candidates = filtered
 
     if not candidates:
         logger.warning("No .qmd files found under %s", root)
@@ -153,6 +234,7 @@ def select_qmd_files(
     root: Optional[Path] = None,
     prompt: bool = True,
     label: Optional[str] = None,
+    exclude_patterns: Optional[List[str]] = None,
 ) -> Optional[List[Path]]:
     """Locate .qmd files matching *pattern* and let the user select which to render.
 
@@ -167,11 +249,15 @@ def select_qmd_files(
     * If ``prompt=False``, all matches are returned without asking.
 
     Args:
-        pattern: Short name or path fragment.
-        root:    Directory to search under.  Defaults to current directory.
-        prompt:  Whether to prompt on multiple matches.
-        label:   Optional progress label prepended to the prompt header
-                 (e.g. ``"1/3"``).  Ignored when *prompt* is ``False``.
+        pattern:          Short name or path fragment.
+        root:             Directory to search under.  Defaults to current
+                          directory.
+        prompt:           Whether to prompt on multiple matches.
+        label:            Optional progress label prepended to the prompt
+                          header (e.g. ``"1/3"``).  Ignored when *prompt*
+                          is ``False``.
+        exclude_patterns: Optional list of gitignore-style glob patterns
+                          to exclude (loaded from ``build.yml``).
 
     Returns:
         A list of selected ``Path`` objects, or ``None`` when no files
@@ -180,7 +266,7 @@ def select_qmd_files(
     if root is None:
         root = Path.cwd()
 
-    matches = find_qmd_files(pattern, root)
+    matches = find_qmd_files(pattern, root, exclude_patterns)
 
     if not matches:
         logger.error(
@@ -229,6 +315,7 @@ def quick_render(
     format: Optional[str] = None,
     prompt: bool = True,
     label: Optional[str] = None,
+    exclude_patterns: Optional[List[str]] = None,
 ) -> bool:
     """Locate .qmd files matching *pattern* and render them.
 
@@ -238,17 +325,22 @@ def quick_render(
     cross-pattern deduplication.
 
     Args:
-        pattern: Short name or path fragment.
-        root:    Directory to search under.  Defaults to current directory.
-        format:  Optional output format passed to ``quarto render --to``.
-        prompt:  Whether to prompt on multiple matches.
-        label:   Optional progress label prepended to the prompt header
-                 (e.g. ``"1/3"``).  Ignored when *prompt* is ``False``.
+        pattern:          Short name or path fragment.
+        root:             Directory to search under.  Defaults to current
+                          directory.
+        format:           Optional output format passed to
+                          ``quarto render --to``.
+        prompt:           Whether to prompt on multiple matches.
+        label:            Optional progress label prepended to the prompt
+                          header (e.g. ``"1/3"``).  Ignored when *prompt*
+                          is ``False``.
+        exclude_patterns: Optional list of gitignore-style glob patterns
+                          to exclude (loaded from ``build.yml``).
 
     Returns:
         ``True`` if every selected file rendered successfully.
     """
-    selected = select_qmd_files(pattern, root, prompt, label)
+    selected = select_qmd_files(pattern, root, prompt, label, exclude_patterns)
     if selected is None:
         return False
 

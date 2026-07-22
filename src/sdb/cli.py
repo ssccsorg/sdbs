@@ -349,6 +349,8 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "render":
         _setup_logging()
         from .utils.quick_render import (
+            find_build_yml,
+            load_exclude_patterns,
             render_qmd as _render_qmd,
             select_qmd_files,
         )
@@ -357,6 +359,12 @@ def main(argv: list[str] | None = None) -> None:
         total = len(patterns)
         prompt = not args.all
         root = Path.cwd()
+
+        # Locate build.yml from cwd to load exclude patterns
+        build_yml = find_build_yml()
+        exclude_patterns = (
+            load_exclude_patterns(build_yml) if build_yml else []
+        )
 
         # --- Phase 1: resolve all patterns, collect selected files ----------
         # Each entry tracks which pattern produced it, for dedup display.
@@ -368,7 +376,10 @@ def main(argv: list[str] | None = None) -> None:
             label = f"{i}/{total}" if total > 1 else None
             if label:
                 logging.info("[%s] Pattern: %s", label, pattern)
-            selected = select_qmd_files(pattern, root, prompt, label)
+            selected = select_qmd_files(
+                pattern, root, prompt, label,
+                exclude_patterns=exclude_patterns,
+            )
             if selected is not None:
                 n_ok += 1
                 for p in selected:
