@@ -82,3 +82,4 @@ mydoc/
 uv.lock
 _publish/
 .install.sh
+.coverage

@@ -350,3 +350,198 @@ def quick_render(
             success = False
 
     return success
+
+
+# ---------------------------------------------------------------------------
+# resolve_and_render — full multi-pattern resolve + dedup + render pipeline
+# ---------------------------------------------------------------------------
+
+
+def resolve_and_render(
+    patterns: list[str],
+    root: Path,
+    *,
+    prompt: bool,
+    exclude_patterns: Optional[list[str]] = None,
+    format: Optional[str] = None,
+) -> tuple[bool, list[Path]]:
+    """Resolve patterns, deduplicate, render, and return results.
+
+    This is the shared pipeline used by both ``sdb render`` and
+    ``sdb pub``.
+
+    Args:
+        patterns:        List of short name / path fragment patterns.
+        root:            Search root directory.
+        prompt:          Whether to prompt on multi-match or duplicate.
+        exclude_patterns: Patterns from ``build.yml``.
+        format:          Output format passed to ``quarto render --to``.
+
+    Returns:
+        A tuple of ``(success, rendered_qmd_paths)`` where
+        *rendered_qmd_paths* is the list of rendered QMD files
+        (in original order, duplicates removed).
+    """
+    total = len(patterns)
+    all_selected: list[tuple[Path, str]] = []
+    n_ok = 0
+    n_fail = 0
+
+    for i, pattern in enumerate(patterns, 1):
+        label = f"{i}/{total}" if total > 1 else None
+        if label:
+            logger.info("[%s] Pattern: %s", label, pattern)
+        selected = select_qmd_files(
+            pattern, root, prompt, label,
+            exclude_patterns=exclude_patterns,
+        )
+        if selected is not None:
+            n_ok += 1
+            for p in selected:
+                all_selected.append((p, pattern))
+        else:
+            n_fail += 1
+
+    if not all_selected:
+        return (False, [])
+
+    # Deduplication
+    file_to_patterns: dict[Path, list[str]] = {}
+    file_order: list[Path] = []
+    for p, pat in all_selected:
+        if p not in file_to_patterns:
+            file_to_patterns[p] = []
+            file_order.append(p)
+        file_to_patterns[p].append(pat)
+
+    dup_map = {
+        p: pats
+        for p, pats in file_to_patterns.items()
+        if len(pats) > 1
+    }
+
+    if dup_map and total > 1 and prompt:
+        print(
+            "\nThe following files were matched by more than one pattern:"
+        )
+        for p, pats in dup_map.items():
+            rel = p.relative_to(root)
+            print(f"  {rel}  ({', '.join(dict.fromkeys(pats))})")
+        print()
+        print("Choose how to handle duplicates:")
+        print("  1. Render each file only once (skip duplicates)")
+        print("  2. Render all (including duplicates)")
+        print("  q. Cancel")
+
+        while True:
+            choice = input("\nSelect [1]: ").strip().lower()
+            if not choice or choice == "1":
+                all_selected = [(p, "") for p in file_order]
+                break
+            if choice == "2":
+                break
+            if choice == "q":
+                logger.info("Cancelled.")
+                return (False, [])
+            print("Invalid choice. Enter 1, 2, or q.")
+
+    # Render
+    success = True
+    for entry in all_selected:
+        qmd = entry[0] if isinstance(entry, tuple) else entry
+        if not render_qmd(qmd, cwd=root, format=format):
+            success = False
+
+    rendered_paths = list(dict.fromkeys(
+        entry[0] if isinstance(entry, tuple) else entry
+        for entry in all_selected
+    ))
+
+    if total > 1:
+        logger.info(
+            "Summary: %d of %d pattern(s) succeeded, %d failed. "
+            "(%d unique file(s), %d render(s))",
+            n_ok, total, n_fail,
+            len(file_order), len(all_selected),
+        )
+
+    return (success, rendered_paths)
+
+
+# ---------------------------------------------------------------------------
+# publish_artifacts — collect PDF-related artifacts after rendering
+# ---------------------------------------------------------------------------
+
+
+def _collect_one(qmd_path: Path, dest: Path) -> list[Path]:
+    """Copy PDF-related artifacts for a single rendered QMD into *dest*.
+
+    Copies (when they exist):
+      {stem}_files/figure-pdf/
+      {stem}_files/mediabag/
+      _files/
+      {stem}.pdf
+      {stem}.tex
+
+    Returns the list of copied files/directories.
+    """
+    import shutil
+
+    src_dir = qmd_path.parent
+    stem = qmd_path.stem
+    copied: list[Path] = []
+
+    artifacts = [
+        (src_dir / f"{stem}.pdf", dest / f"{stem}.pdf"),
+    ]
+    tex_path = src_dir / f"{stem}.tex"
+    if tex_path.exists():
+        artifacts.append((tex_path, dest / f"{stem}.tex"))
+
+    dirs = [
+        (src_dir / f"{stem}_files" / "figure-pdf", dest / f"{stem}_files" / "figure-pdf"),
+        (src_dir / f"{stem}_files" / "mediabag", dest / f"{stem}_files" / "mediabag"),
+        (src_dir / "_files", dest / "_files"),
+    ]
+
+    for src, dst in artifacts:
+        if src.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            copied.append(dst)
+            logger.info("  Copied %s", dst)
+
+    for src, dst in dirs:
+        if src.exists() and src.is_dir():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+            copied.append(dst)
+            logger.info("  Copied %s", dst)
+
+    return copied
+
+
+def publish_artifacts(qmd_paths: list[Path]) -> int:
+    """Collect PDF-related artifacts for rendered QMD files.
+
+    For each rendered QMD, creates a folder named after the file's stem
+    alongside the QMD file itself (e.g. ``kv.qmd`` → ``kv/``) and copies
+    PDF-related artifacts into it preserving relative paths.
+
+    Returns the total number of items copied.
+    """
+    total = 0
+    for qmd in qmd_paths:
+        stem = qmd.stem
+        dest = qmd.parent / stem
+        dest.mkdir(parents=True, exist_ok=True)
+        logger.info("Publishing %s → %s", qmd, dest)
+        n = len(_collect_one(qmd, dest))
+        total += n
+        if n == 0:
+            logger.warning(
+                "No PDF artifacts found for %s (was --to pdf used?)", qmd
+            )
+    return total

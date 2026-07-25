@@ -7,6 +7,7 @@ Subcommands:
   check    Validate links, citations, and cross-references.
   pre      Run pre-render steps (latest docs, path resolution, formatting).
   render   Locate .qmd files by short name and render them directly (no preprocessing).
+  pub      Render and publish PDF artifacts for short name matches.
   clean    Remove Quarto build artifacts.
 """
 
@@ -215,6 +216,34 @@ def main(argv: list[str] | None = None) -> None:
         help="Render all matching files without prompting",
     )
 
+    # --- pub (render + collect PDF artifacts) ---
+    pub_parser = subparsers.add_parser(
+        "pub",
+        help="Render and publish PDF artifacts for short name matches",
+        description="Same as 'sdb render' but additionally collects PDF-related "
+        "artifacts after rendering: PDF, LaTeX source, figure-pdf, mediabag, "
+        "and shared _files/ into a folder named after each matched file.\n\n"
+        "Use this command when you need to distribute or archive the rendered "
+        "PDF along with its supporting files (figures, media, sources).\n\n"
+        "When multiple files match, prompts for selection unless --all is given.",
+        epilog=(
+            "Examples:\n"
+            "  sdb pub kv\n"
+            "  sdb pub kv id --all\n"
+        ),
+    )
+    pub_parser.add_argument(
+        "patterns",
+        type=str,
+        nargs="+",
+        help="One or more short names or path fragments to match against .qmd "
+        "file stems",
+    )
+    pub_parser.add_argument(
+        "--all", "-a", action="store_true",
+        help="Render all matching files without prompting",
+    )
+
     # --- clean ---
     clean_parser = subparsers.add_parser(
         "clean",
@@ -351,100 +380,47 @@ def main(argv: list[str] | None = None) -> None:
         from .utils.quick_render import (
             find_build_yml,
             load_exclude_patterns,
-            render_qmd as _render_qmd,
-            select_qmd_files,
+            resolve_and_render,
         )
 
-        patterns = args.patterns
-        total = len(patterns)
-        prompt = not args.all
-        root = Path.cwd()
-
-        # Locate build.yml from cwd to load exclude patterns
         build_yml = find_build_yml()
         exclude_patterns = (
             load_exclude_patterns(build_yml) if build_yml else []
         )
 
-        # --- Phase 1: resolve all patterns, collect selected files ----------
-        # Each entry tracks which pattern produced it, for dedup display.
-        all_selected: list[tuple[Path, str]] = []
-        n_ok = 0
-        n_fail = 0
+        success, _ = resolve_and_render(
+            args.patterns,
+            Path.cwd(),
+            prompt=not args.all,
+            exclude_patterns=exclude_patterns,
+            format=args.format,
+        )
+        sys.exit(0 if success else 1)
 
-        for i, pattern in enumerate(patterns, 1):
-            label = f"{i}/{total}" if total > 1 else None
-            if label:
-                logging.info("[%s] Pattern: %s", label, pattern)
-            selected = select_qmd_files(
-                pattern, root, prompt, label,
-                exclude_patterns=exclude_patterns,
-            )
-            if selected is not None:
-                n_ok += 1
-                for p in selected:
-                    all_selected.append((p, pattern))
-            else:
-                n_fail += 1
+    elif args.command == "pub":
+        _setup_logging()
+        from .utils.quick_render import (
+            find_build_yml,
+            load_exclude_patterns,
+            publish_artifacts,
+            resolve_and_render,
+        )
 
-        if not all_selected:
-            sys.exit(1 if n_fail > 0 else 0)
+        build_yml = find_build_yml()
+        exclude_patterns = (
+            load_exclude_patterns(build_yml) if build_yml else []
+        )
 
-        # --- Phase 2: cross-pattern deduplication ---------------------------
-        file_to_patterns: dict[Path, list[str]] = {}
-        file_order: list[Path] = []
-        for p, pat in all_selected:
-            if p not in file_to_patterns:
-                file_to_patterns[p] = []
-                file_order.append(p)
-            file_to_patterns[p].append(pat)
-
-        dup_map = {
-            p: pats
-            for p, pats in file_to_patterns.items()
-            if len(pats) > 1
-        }
-
-        if dup_map and total > 1 and prompt:
-            print(
-                "\nThe following files were matched by more than one pattern:"
-            )
-            for p, pats in dup_map.items():
-                rel = p.relative_to(root)
-                print(f"  {rel}  ({', '.join(dict.fromkeys(pats))})")
-            print()
-            print("Choose how to handle duplicates:")
-            print("  1. Render each file only once (skip duplicates)")
-            print("  2. Render all (including duplicates)")
-            print("  q. Cancel")
-
-            while True:
-                choice = input("\nSelect [1]: ").strip().lower()
-                if not choice or choice == "1":
-                    all_selected = [(p, "") for p in file_order]
-                    break
-                if choice == "2":
-                    break
-                if choice == "q":
-                    logging.info("Cancelled.")
-                    sys.exit(1)
-                print("Invalid choice. Enter 1, 2, or q.")
-
-        # --- Phase 3: render -------------------------------------------------
-        success = True
-        for entry in all_selected:
-            qmd = entry[0] if isinstance(entry, tuple) else entry
-            if not _render_qmd(qmd, cwd=root, format=args.format):
-                success = False
-
-        if total > 1:
-            unique_count = len(file_order)
-            total_count = len(all_selected)
-            logging.info(
-                "Summary: %d of %d pattern(s) succeeded, %d failed. "
-                "(%d unique file(s), %d render(s))",
-                n_ok, total, n_fail, unique_count, total_count,
-            )
+        success, rendered = resolve_and_render(
+            args.patterns,
+            Path.cwd(),
+            prompt=not args.all,
+            exclude_patterns=exclude_patterns,
+            format="pdf",
+        )
+        if rendered:
+            n = publish_artifacts(rendered)
+            logging.info("Published %d artifact(s) for %d file(s).", n, len(rendered))
         sys.exit(0 if success else 1)
 
     elif args.command == "clean":

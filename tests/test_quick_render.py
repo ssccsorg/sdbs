@@ -38,14 +38,14 @@ def qmd_tree(tmp_path: Path) -> Path:
               whitepaper.qmd
     """
     files = {
-        "docs/projects/syntagma/tagma/kv.qmd": "---\ntitle: KV\n---\n\nContent\n",
-        "docs/projects/syntagma/tagma/index.qmd": "---\ntitle: Tagma\n---\n\nContent\n",
-        "docs/projects/syntagma/_include/bench/fig-bench-kv-batch.qmd": "---\ntitle: KV Batch\n---\n",
-        "docs/projects/syntagma/_include/bench/fig-bench-kv-bridge.qmd": "---\ntitle: KV Bridge\n---\n",
-        "docs/projects/syntagma/_include/bench/fig-bench-kv-get.qmd": "---\ntitle: KV Get\n---\n",
-        "docs/projects/syntagma/_include/bench/fig-bench-kv-insert.qmd": "---\ntitle: KV Insert\n---\n",
-        "docs/whitepaper/whitepaper.qmd": "---\ntitle: Whitepaper\n---\n",
-        "docs/reference/smartkv.qmd": "---\ntitle: SmartKV\n---\n",
+        "docs/subject/alpha/beta.qmd": "---\ntitle: Beta\n---\n\nContent\n",
+        "docs/subject/alpha/index.qmd": "---\ntitle: Index\n---\n\nContent\n",
+        "docs/subject/alpha/_inc/chart-beta-data.qmd": "---\ntitle: Beta Data\n---\n",
+        "docs/subject/alpha/_inc/chart-beta-view.qmd": "---\ntitle: Beta View\n---\n",
+        "docs/subject/alpha/_inc/chart-beta-query.qmd": "---\ntitle: Beta Query\n---\n",
+        "docs/subject/alpha/_inc/chart-beta-export.qmd": "---\ntitle: Beta Export\n---\n",
+        "docs/report/report.qmd": "---\ntitle: Report\n---\n",
+        "docs/reference/prefix-beta.qmd": "---\ntitle: Prefix Beta\n---\n",
     }
     for rel, content in files.items():
         path = tmp_path / rel
@@ -68,39 +68,39 @@ class TestFindQmdFiles:
 
     def test_exact_match(self, qmd_tree: Path) -> None:
         """Stem exactly equals pattern."""
-        matches = find_qmd_files("kv", root=qmd_tree)
+        matches = find_qmd_files("beta", root=qmd_tree)
         assert len(matches) >= 1
-        assert matches[0].name == "kv.qmd"
+        assert matches[0].name == "beta.qmd"
 
     def test_exact_match_first_in_order(self, qmd_tree: Path) -> None:
         """Exact match is always first in the result list."""
-        matches = find_qmd_files("kv", root=qmd_tree)
-        assert matches[0].stem == "kv"
+        matches = find_qmd_files("beta", root=qmd_tree)
+        assert matches[0].stem == "beta"
 
     def test_suffix_match(self, qmd_tree: Path) -> None:
         """Stem ends with pattern (but is not exact)."""
-        matches = find_qmd_files("kv", root=qmd_tree)
-        suffix_matches = [m for m in matches if m.stem != "kv" and m.stem.endswith("kv")]
+        matches = find_qmd_files("beta", root=qmd_tree)
+        suffix_matches = [m for m in matches if m.stem != "beta" and m.stem.endswith("beta")]
         assert len(suffix_matches) == 1
-        assert suffix_matches[0].stem == "smartkv"
+        assert suffix_matches[0].stem == "prefix-beta"
 
     def test_substring_match(self, qmd_tree: Path) -> None:
         """Pattern appears anywhere in stem."""
-        matches = find_qmd_files("paper", root=qmd_tree)
+        matches = find_qmd_files("report", root=qmd_tree)
         assert len(matches) == 1
-        assert matches[0].stem == "whitepaper"
+        assert matches[0].stem == "report"
 
     def test_path_fragment(self, qmd_tree: Path) -> None:
         """Pattern with slash is treated as relative path fragment."""
-        matches = find_qmd_files("tagma/kv", root=qmd_tree)
+        matches = find_qmd_files("alpha/beta", root=qmd_tree)
         assert len(matches) == 1
-        assert matches[0].name == "kv.qmd"
+        assert matches[0].name == "beta.qmd"
 
     def test_path_fragment_nested(self, qmd_tree: Path) -> None:
         """Pattern with deeper slash finds nested match."""
-        matches = find_qmd_files("syntagma/tagma", root=qmd_tree)
-        assert len(matches) == 2
-        assert all("tagma" in str(m.relative_to(qmd_tree)) for m in matches)
+        matches = find_qmd_files("subject/alpha", root=qmd_tree)
+        assert len(matches) == 6  # all files under docs/subject/alpha/
+        assert all("alpha" in str(m.relative_to(qmd_tree)) for m in matches)
 
     def test_no_match(self, qmd_tree: Path) -> None:
         """Pattern that matches nothing returns empty list."""
@@ -108,17 +108,17 @@ class TestFindQmdFiles:
 
     def test_match_prioritization(self, qmd_tree: Path) -> None:
         """Result order: exact > suffix > substring."""
-        matches = find_qmd_files("kv", root=qmd_tree)
-        assert matches[0].stem == "kv"  # exact first
-        assert matches[1].stem == "smartkv"  # suffix second
-        # Remainder are substring matches (none ends with 'kv')
+        matches = find_qmd_files("beta", root=qmd_tree)
+        assert matches[0].stem == "beta"  # exact first
+        assert matches[1].stem == "prefix-beta"  # suffix second
+        # Remainder are substring matches (none ends with 'beta')
         for i in range(2, len(matches)):
-            assert not matches[i].stem.endswith("kv")
+            assert not matches[i].stem.endswith("beta")
 
     def test_case_sensitivity(self, qmd_tree: Path) -> None:
         """Pattern matching is case-sensitive (stem comparison)."""
-        matches_lower = find_qmd_files("kv", root=qmd_tree)
-        matches_upper = find_qmd_files("KV", root=qmd_tree)
+        matches_lower = find_qmd_files("beta", root=qmd_tree)
+        matches_upper = find_qmd_files("BETA", root=qmd_tree)
         assert len(matches_lower) > 0
         assert len(matches_upper) == 0
 
@@ -148,13 +148,13 @@ class TestFindQmdFiles:
     def test_exclude_patterns_excludes_files(self, tmp_path: Path) -> None:
         """Files matching exclude patterns are omitted."""
         (tmp_path / "visible.qmd").write_text("---\n")
-        inc = tmp_path / "_include"
+        inc = tmp_path / "_inc"
         inc.mkdir()
         (inc / "hidden.qmd").write_text("---\n")
         matches = find_qmd_files("hidden", root=tmp_path)
         assert len(matches) == 1  # without exclude, found
         matches_excluded = find_qmd_files(
-            "hidden", root=tmp_path, exclude_patterns=["**/_include/**"]
+            "hidden", root=tmp_path, exclude_patterns=["**/_inc/**"]
         )
         assert len(matches_excluded) == 0  # with exclude, hidden
 
@@ -162,7 +162,7 @@ class TestFindQmdFiles:
         """Exclude patterns do not affect non-matching files."""
         (tmp_path / "main.qmd").write_text("---\n")
         matches = find_qmd_files(
-            "main", root=tmp_path, exclude_patterns=["**/_include/**"]
+            "main", root=tmp_path, exclude_patterns=["**/_inc/**"]
         )
         assert len(matches) == 1
         assert matches[0].name == "main.qmd"
@@ -396,15 +396,15 @@ class TestSelectQmdFiles:
     def test_single_match_no_prompt(self, qmd_tree: Path) -> None:
         """Single match returns list with one file even with prompt=True."""
         from sdb.utils.quick_render import select_qmd_files
-        result = select_qmd_files("whitepaper", root=qmd_tree, prompt=True)
+        result = select_qmd_files("report", root=qmd_tree, prompt=True)
         assert result is not None
         assert len(result) == 1
-        assert result[0].name == "whitepaper.qmd"
+        assert result[0].name == "report.qmd"
 
     def test_prompt_false_returns_all(self, qmd_tree: Path) -> None:
         """With prompt=False, all matches are returned."""
         from sdb.utils.quick_render import select_qmd_files
-        result = select_qmd_files("kv", root=qmd_tree, prompt=False)
+        result = select_qmd_files("beta", root=qmd_tree, prompt=False)
         assert result is not None
         assert len(result) == 6  # exact 1 + suffix 1 + substring 4
 
@@ -415,10 +415,10 @@ class TestSelectQmdFiles:
         """Enter key selects the first match."""
         from sdb.utils.quick_render import select_qmd_files
         mock_input.return_value = ""
-        result = select_qmd_files("kv", root=qmd_tree, prompt=True)
+        result = select_qmd_files("beta", root=qmd_tree, prompt=True)
         assert result is not None
         assert len(result) == 1
-        assert result[0].stem == "kv"
+        assert result[0].stem == "beta"
 
     @patch("builtins.input")
     def test_prompt_q_returns_none(
@@ -427,7 +427,7 @@ class TestSelectQmdFiles:
         """.q' cancels and returns None."""
         from sdb.utils.quick_render import select_qmd_files
         mock_input.return_value = "q"
-        result = select_qmd_files("kv", root=qmd_tree, prompt=True)
+        result = select_qmd_files("beta", root=qmd_tree, prompt=True)
         assert result is None
 
     @patch("builtins.input")
@@ -437,7 +437,7 @@ class TestSelectQmdFiles:
         """'a' selects all matches."""
         from sdb.utils.quick_render import select_qmd_files
         mock_input.return_value = "a"
-        result = select_qmd_files("kv", root=qmd_tree, prompt=True)
+        result = select_qmd_files("beta", root=qmd_tree, prompt=True)
         assert result is not None
         assert len(result) == 6
 
@@ -445,7 +445,7 @@ class TestSelectQmdFiles:
         """Label is printed in the prompt header when prompt=True and multi-match."""
         from sdb.utils.quick_render import select_qmd_files
         with patch("builtins.input", return_value=""):
-            select_qmd_files("kv", root=qmd_tree, prompt=True, label="2/4")
+            select_qmd_files("beta", root=qmd_tree, prompt=True, label="2/4")
         captured = capsys.readouterr()
         assert "[2/4]" in captured.out
 
@@ -462,11 +462,11 @@ class TestQuickRender:
     def test_single_match_renders(self, mock_render: MagicMock, qmd_tree: Path) -> None:
         """Single match calls render_qmd once."""
         mock_render.return_value = True
-        result = quick_render("whitepaper", root=qmd_tree, prompt=False)
+        result = quick_render("report", root=qmd_tree, prompt=False)
         assert result is True
         mock_render.assert_called_once()
         args, _ = mock_render.call_args
-        assert args[0].name == "whitepaper.qmd"
+        assert args[0].name == "report.qmd"
 
     @patch("sdb.utils.quick_render.render_qmd")
     def test_no_match(self, mock_render: MagicMock, qmd_tree: Path) -> None:
@@ -488,7 +488,7 @@ class TestQuickRender:
     ) -> None:
         """With --all (prompt=False), all matches are rendered."""
         mock_render.return_value = True
-        result = quick_render("kv", root=qmd_tree, prompt=False)
+        result = quick_render("beta", root=qmd_tree, prompt=False)
         assert result is True
         assert mock_render.call_count == 6
 
@@ -498,7 +498,7 @@ class TestQuickRender:
     ) -> None:
         """Format argument is forwarded to render_qmd."""
         mock_render.return_value = True
-        quick_render("whitepaper", root=qmd_tree, format="pdf")
+        quick_render("report", root=qmd_tree, format="pdf")
         _, kwargs = mock_render.call_args
         assert kwargs["format"] == "pdf"
 
@@ -508,7 +508,7 @@ class TestQuickRender:
     ) -> None:
         """Root directory is passed as cwd to render_qmd."""
         mock_render.return_value = True
-        quick_render("whitepaper", root=qmd_tree)
+        quick_render("report", root=qmd_tree)
         _, kwargs = mock_render.call_args
         assert kwargs["cwd"] == qmd_tree
 
@@ -516,7 +516,7 @@ class TestQuickRender:
     def test_partial_failure(self, mock_render: MagicMock, qmd_tree: Path) -> None:
         """If one render fails, quick_render returns False but continues."""
         mock_render.side_effect = [True, False, True, True, True, True]
-        result = quick_render("kv", root=qmd_tree, prompt=False)
+        result = quick_render("beta", root=qmd_tree, prompt=False)
         assert result is False
         assert mock_render.call_count == 6
 
@@ -538,10 +538,10 @@ class TestQuickRender:
         """Pressing Enter (empty string) selects the first match."""
         mock_render.return_value = True
         mock_input.return_value = ""
-        result = quick_render("kv", root=qmd_tree, prompt=True)
+        result = quick_render("beta", root=qmd_tree, prompt=True)
         assert result is True
         mock_render.assert_called_once()
-        assert mock_render.call_args[0][0].name == "kv.qmd"
+        assert mock_render.call_args[0][0].name == "beta.qmd"
 
     @patch("sdb.utils.quick_render.render_qmd")
     @patch("builtins.input")
@@ -551,11 +551,11 @@ class TestQuickRender:
         """Typing a valid number selects that match."""
         mock_render.return_value = True
         mock_input.return_value = "3"
-        result = quick_render("kv", root=qmd_tree, prompt=True)
+        result = quick_render("beta", root=qmd_tree, prompt=True)
         assert result is True
         mock_render.assert_called_once()
         called_path = mock_render.call_args[0][0]
-        assert called_path.stem != "kv"
+        assert called_path.stem != "beta"
 
     @patch("sdb.utils.quick_render.render_qmd")
     @patch("builtins.input")
@@ -565,7 +565,7 @@ class TestQuickRender:
         """Typing 'a' selects all matches."""
         mock_render.return_value = True
         mock_input.return_value = "a"
-        result = quick_render("kv", root=qmd_tree, prompt=True)
+        result = quick_render("beta", root=qmd_tree, prompt=True)
         assert result is True
         assert mock_render.call_count == 6
 
@@ -576,7 +576,7 @@ class TestQuickRender:
     ) -> None:
         """Typing 'q' cancels without rendering."""
         mock_input.return_value = "q"
-        result = quick_render("kv", root=qmd_tree, prompt=True)
+        result = quick_render("beta", root=qmd_tree, prompt=True)
         assert result is False
         mock_render.assert_not_called()
 
@@ -588,10 +588,10 @@ class TestQuickRender:
         """Invalid input causes retry, then valid input succeeds."""
         mock_render.return_value = True
         mock_input.side_effect = ["99", "invalid", "1"]
-        result = quick_render("kv", root=qmd_tree, prompt=True)
+        result = quick_render("beta", root=qmd_tree, prompt=True)
         assert result is True
         mock_render.assert_called_once()
-        assert mock_render.call_args[0][0].name == "kv.qmd"
+        assert mock_render.call_args[0][0].name == "beta.qmd"
 
     # --- label (progress indicator) -----------------------------------------
 
@@ -603,7 +603,7 @@ class TestQuickRender:
         """When label is given, it appears in the prompt header."""
         mock_render.return_value = True
         mock_input.return_value = ""  # enter = first match
-        result = quick_render("kv", root=qmd_tree, prompt=True, label="1/3")
+        result = quick_render("beta", root=qmd_tree, prompt=True, label="1/3")
         assert result is True
         captured = capsys.readouterr()
         assert "[1/3]" in captured.out
@@ -616,7 +616,7 @@ class TestQuickRender:
         """When label is given, it appears in the selection hint."""
         mock_render.return_value = True
         mock_input.return_value = ""
-        result = quick_render("kv", root=qmd_tree, prompt=True, label="2/2")
+        result = quick_render("beta", root=qmd_tree, prompt=True, label="2/2")
         assert result is True
         captured = capsys.readouterr()
         assert "[2/2]" in captured.out
@@ -629,7 +629,7 @@ class TestQuickRender:
         """When label is None, no bracket prefix is printed."""
         mock_render.return_value = True
         mock_input.return_value = ""
-        result = quick_render("kv", root=qmd_tree, prompt=True, label=None)
+        result = quick_render("beta", root=qmd_tree, prompt=True, label=None)
         assert result is True
         captured = capsys.readouterr()
         assert "[None]" not in captured.out
@@ -641,8 +641,205 @@ class TestQuickRender:
     ) -> None:
         """Label has no effect when prompt is False (--all mode)."""
         mock_render.return_value = True
-        result = quick_render("kv", root=qmd_tree, prompt=False, label="1/3")
+        result = quick_render("beta", root=qmd_tree, prompt=False, label="1/3")
         assert result is True
         captured = capsys.readouterr()
         assert "[1/3]" not in captured.out
         assert mock_render.call_count == 6
+
+
+# ============================================================================
+# resolve_and_render
+# ============================================================================
+
+
+class TestResolveAndRender:
+    """Tests for the shared multi-pattern pipeline."""
+
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_single_pattern_success(
+        self, mock_render: MagicMock, qmd_tree: Path
+    ) -> None:
+        """Single pattern renders and returns success."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_render.return_value = True
+        success, paths = resolve_and_render(
+            ["report"], qmd_tree, prompt=False,
+        )
+        assert success is True
+        assert len(paths) == 1
+        assert paths[0].name == "report.qmd"
+
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_no_match(self, mock_render: MagicMock, qmd_tree: Path) -> None:
+        """No matches returns (False, [])."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_render.return_value = True
+        success, paths = resolve_and_render(
+            ["nonexistent"], qmd_tree, prompt=False,
+        )
+        assert success is False
+        assert paths == []
+
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_partial_failure(
+        self, mock_render: MagicMock, qmd_tree: Path
+    ) -> None:
+        """When one render fails, success is False but paths are returned."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_render.side_effect = [True, False]
+        success, paths = resolve_and_render(
+            ["report", "index"], qmd_tree, prompt=False,
+        )
+        assert success is False
+        assert len(paths) == 2
+
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_multi_pattern_dedup_skip(
+        self, mock_render: MagicMock, qmd_tree: Path
+    ) -> None:
+        """Duplicates prompt option 1: skip duplicates, keep unique."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_render.return_value = True
+        with patch("builtins.input", return_value="1"):
+            success, paths = resolve_and_render(
+                # Both match "beta.qmd" (exact match for both)
+                ["beta", "beta"], qmd_tree, prompt=True,
+            )
+        assert success is True
+        assert len(paths) == 1  # deduped to 1 unique file
+
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_multi_pattern_dedup_keep_all(
+        self, mock_render: MagicMock, qmd_tree: Path
+    ) -> None:
+        """Duplicates prompt option 2: keep all including duplicates."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_render.return_value = True
+        with patch("builtins.input", return_value="2"):
+            success, paths = resolve_and_render(
+                ["beta", "beta"], qmd_tree, prompt=True,
+            )
+        assert success is True
+        assert len(paths) == 1  # unique files, not render count
+
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_multi_pattern_dedup_cancel(
+        self, mock_render: MagicMock, qmd_tree: Path
+    ) -> None:
+        """Duplicates prompt 'q': cancel, returns (False, [])."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_render.return_value = True
+        with patch("builtins.input", return_value="q"):
+            success, paths = resolve_and_render(
+                ["beta", "beta"], qmd_tree, prompt=True,
+            )
+        assert success is False
+        assert paths == []
+
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_multi_pattern_no_prompt(
+        self, mock_render: MagicMock, qmd_tree: Path
+    ) -> None:
+        """With prompt=False, dedup prompt is skipped."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_render.return_value = True
+        success, paths = resolve_and_render(
+            ["beta"], qmd_tree, prompt=False,
+        )
+        assert success is True
+        assert len(paths) >= 1
+
+
+# ============================================================================
+# publish_artifacts / _collect_one
+# ============================================================================
+
+
+class TestPublishArtifacts:
+    """Tests for PDF artifact collection."""
+
+    def test_collect_one_copies_pdf(self, tmp_path: Path) -> None:
+        """PDF file is copied into the publish folder."""
+        from sdb.utils.quick_render import _collect_one
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text("---\n")
+        pdf = tmp_path / "doc.pdf"
+        pdf.write_text("%PDF-1.4")
+        dest = tmp_path / "doc"
+        dest.mkdir()
+        copied = _collect_one(qmd, dest)
+        assert (dest / "doc.pdf").exists()
+        assert any("doc.pdf" in str(c) for c in copied)
+
+    def test_collect_one_copies_tex(self, tmp_path: Path) -> None:
+        """TeX file is copied when it exists."""
+        from sdb.utils.quick_render import _collect_one
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text("---\n")
+        pdf = tmp_path / "doc.pdf"
+        pdf.write_text("%PDF")
+        tex = tmp_path / "doc.tex"
+        tex.write_text("\\documentclass")
+        dest = tmp_path / "doc"
+        dest.mkdir()
+        _collect_one(qmd, dest)
+        assert (dest / "doc.tex").exists()
+
+    def test_collect_one_copies_dirs(self, tmp_path: Path) -> None:
+        """_files/ and {stem}_files/figure-pdf/ are copied recursively."""
+        from sdb.utils.quick_render import _collect_one
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text("---\n")
+        pdf = tmp_path / "doc.pdf"
+        pdf.write_text("%PDF")
+        figures = tmp_path / "doc_files" / "figure-pdf"
+        figures.mkdir(parents=True)
+        (figures / "fig1.pdf").write_text("fig")
+        shared = tmp_path / "_files"
+        shared.mkdir()
+        (shared / "style.css").write_text("css")
+        dest = tmp_path / "doc"
+        dest.mkdir()
+        _collect_one(qmd, dest)
+        assert (dest / "doc_files" / "figure-pdf" / "fig1.pdf").exists()
+        assert (dest / "_files" / "style.css").exists()
+
+    def test_publish_artifacts_creates_folder(self, tmp_path: Path) -> None:
+        """publish_artifacts creates folder alongside the QMD."""
+        from sdb.utils.quick_render import publish_artifacts
+        qmd = tmp_path / "report.qmd"
+        qmd.write_text("---\n")
+        pdf = tmp_path / "report.pdf"
+        pdf.write_text("%PDF")
+        result = publish_artifacts([qmd])
+        assert result >= 1
+        assert (tmp_path / "report" / "report.pdf").exists()
+
+    def test_publish_no_artifacts_warns(self, tmp_path: Path) -> None:
+        """publish_artifacts warns when no artifacts are found."""
+        from sdb.utils.quick_render import publish_artifacts
+        qmd = tmp_path / "orphan.qmd"
+        qmd.write_text("---\n")
+        result = publish_artifacts([qmd])
+        assert result == 0
+
+
+class TestLoadExcludePatternsEdgeCases:
+    """Edge cases for load_exclude_patterns."""
+
+    def test_malformed_yaml(self, tmp_path: Path) -> None:
+        """Malformed build.yml returns empty list gracefully."""
+        from sdb.utils.quick_render import load_exclude_patterns
+        build_yml = tmp_path / "build.yml"
+        build_yml.write_text("exclude: [unclosed")
+        patterns = load_exclude_patterns(build_yml)
+        assert patterns == []
+
+    def test_not_a_yaml_file(self, tmp_path: Path) -> None:
+        """Non-YAML content returns empty list gracefully."""
+        from sdb.utils.quick_render import load_exclude_patterns
+        build_yml = tmp_path / "build.yml"
+        build_yml.write_bytes(b"\x00\x01\x02")
+        patterns = load_exclude_patterns(build_yml)
+        assert patterns == []
