@@ -140,13 +140,40 @@ def find_qmd_files(
     suffix: List[Path] = []
     substring: List[Path] = []
 
+    # If pattern contains a path separator, extract the directory prefix
+    # and search only within that subtree first. On first match, return
+    # immediately without scanning the full tree.
+    _prio_dir_checked = False
+    if "/" in pattern:
+        dir_prefix = "/".join(pattern.split("/")[:-1])
+        prio_dir = root / dir_prefix
+        if prio_dir.exists():
+            prio_candidates = sorted(prio_dir.rglob("*.qmd"))
+            if exclude_patterns:
+                from sdb.config import ConfigManager
+                prio_candidates = [
+                    p for p in prio_candidates
+                    if not ConfigManager.matches_gitignore_pattern(
+                        p.relative_to(root), exclude_patterns
+                    )
+                ]
+            for p in prio_candidates:
+                rel_str = str(p.relative_to(root).as_posix())
+                if pattern in rel_str:
+                    return [p]
+            _prio_dir_checked = True
+
     for p in candidates:
         stem = _stem(p)
 
         if "/" in pattern:
-            # Relative path fragment mode
             rel = p.relative_to(root)
             rel_str = str(rel.as_posix())
+            # Skip if already checked under the prioritized directory
+            if _prio_dir_checked:
+                dir_prefix = "/".join(pattern.split("/")[:-1])
+                if rel_str.startswith(dir_prefix + "/"):
+                    continue
             if pattern in rel_str:
                 exact.append(p)
             continue
