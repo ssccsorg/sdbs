@@ -173,8 +173,37 @@ class TestFindQmdFiles:
 # ============================================================================
 
 
-class TestFindBuildYml:
-    """Tests for locating build.yml."""
+    def test_path_fragment_prioritized_dir_only(self, qmd_tree: Path) -> None:
+        """Pattern with path separator searches only the prioritized directory
+        and returns on first match without scanning the full tree."""
+        matches = find_qmd_files("alpha/beta", root=qmd_tree)
+        assert len(matches) == 1
+        # Must find beta.qmd under alpha/, not any other beta.qmd elsewhere
+        rel = matches[0].relative_to(qmd_tree)
+        assert "alpha" in str(rel)
+        assert matches[0].name == "beta.qmd"
+
+    def test_path_fragment_prio_dir_not_found_falls_back(self, tmp_path: Path) -> None:
+        target = tmp_path / "other" / "target.qmd"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("---")
+        matches = find_qmd_files("nonexistent/target", root=tmp_path)
+        assert len(matches) == 0
+
+    def test_path_fragment_prio_dir_no_match_fallback_finds_elsewhere(self, tmp_path: Path) -> None:
+        """Prioritized dir has no match, but a file elsewhere matches the pattern."""
+        # prio/sub/ exists but contains no match for "sub/target"
+        prio_file = tmp_path / "prio" / "sub" / "other.qmd"
+        prio_file.parent.mkdir(parents=True, exist_ok=True)
+        prio_file.write_text("---")
+        # A file elsewhere matches "sub/target" via substring
+        # e.g. root/target/sub/target.qmd
+        fallback_file = tmp_path / "target" / "sub" / "target.qmd"
+        fallback_file.parent.mkdir(parents=True, exist_ok=True)
+        fallback_file.write_text("---")
+        matches = find_qmd_files("sub/target", root=tmp_path)
+        assert len(matches) == 1
+        assert "target.qmd" in matches[0].name
 
     def test_in_current_dir(self, tmp_path: Path) -> None:
         """build.yml in the start directory is found."""
