@@ -544,16 +544,15 @@ def generate_latest_docs(docs_root: Path) -> bool:
 
     new_content = ""
     if sorted_items:
-        new_content += '\n::: {tbl-colwidths="[20, 80]"}\n'
-        new_content += "\n| Updated | Document |\n"
-        new_content += "|----------|---------|\n"
-        for ts, rel_path in sorted_items:
-            date = ts.split()[0]
+        new_content += '\n::: {tbl-colwidths="[100]"}\n'
+        new_content += "\n| Updated Documents |\n"
+        new_content += "|-------------------|\n"
+        for _, rel_path in sorted_items:
             title = format_title(rel_path, docs_root)
             path_prefix = breadcrumb(rel_path, title)
             html = doc_to_html(rel_path, docs_root)
             badge = f" {badge_new()}" if is_new_file(rel_path, creation_dates, docs_root) else ""
-            new_content += f"| {date} | {path_prefix}[{title}]({html}){badge} |\n"
+            new_content += f"| {path_prefix}[{title}]({html}){badge} |\n"
         new_content += "\n\n:::"
 
     include_dir = docs_root / "_include"
