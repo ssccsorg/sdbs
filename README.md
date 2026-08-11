@@ -50,10 +50,23 @@ sdb pre docs
 # Validate links and citations
 sdb check .
 
+# Render a single document by short name for quick preview
+sdb render kv
+sdb render kv --to pdf            # render to a specific format
+
+# Render and collect PDF artifacts (PDF, LaTeX, figures, media)
+sdb pub kv
+sdb pub kv --all                  # render all matches without prompting
+
 # Remove Quarto build artifacts (_cached/, _files/, html, pdf...)
 sdb clean docs
 ```
 
+## Documentation
+
+- [SDBS](https://docs.ssccs.org/projects/sdbs/index.html): the project index, covering the build architecture, the parallel build model, and the LLMs pipeline.
+- [Single-Path Artifact Pipeline](https://docs.ssccs.org/projects/sdbs/ci_observations.html): one container image carrying emulation, RTL verification, and documentation, with the agent knowledge base extracted from the same build.
+- [The Living Corpus](https://docs.ssccs.org/projects/sdbs/knowledge_base_vision.html): SDBS as the knowledge-ization engine, from document corpus to living knowledge.
 
 ## Development
 

@@ -1,6 +1,6 @@
 # AI Agent Instructions
 
-All code, text content, output, and comments must be written in English.
+- Except chat threads, all artifects, code, text content, output, and comments must be written in English.
 
 ## Reasoning Constraints
 
