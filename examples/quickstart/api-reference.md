@@ -1,6 +1,5 @@
 ---
 title: "API Reference"
-date: last-modified
 ---
 
 ## Core Functions

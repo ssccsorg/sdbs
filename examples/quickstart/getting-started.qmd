@@ -1,6 +1,5 @@
 ---
 title: "Getting Started"
-date: last-modified
 ---
 
 ## Installation

@@ -4,7 +4,6 @@ title: "My Documentation"
 # Subtitle shown below the title.
 subtitle: "SDBS-managed Quarto project"
 # Automatically updated to the last-modified date from git.
-date: last-modified
 # Default output format for this document.
 # Supported values: html, pdf, docx, beamer, revealjs, etc.
 # Multiple formats can be specified as a list: [html, pdf]

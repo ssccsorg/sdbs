@@ -1,7 +1,6 @@
 ---
 title: "TinyLib Documentation"
 subtitle: "A minimal library for maximum productivity"
-date: last-modified
 metadata-files:
   - _include/author.yml
 abstract: |
