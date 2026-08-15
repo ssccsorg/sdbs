@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Generate LaTeX metadata file for Quarto(.qmd) input.
-Usage: python generate_metadata.py [--input index.qmd] [--output ./_include/_metadata.tex] [--version_prefix 0.1]
+Usage: python generate_metadata.py [--input index.qmd] [--output ./_include/_metadata.tex] [--version_prefix 0.1] [--license CC-BY-4.0] [--license_mark]
 If --input is omitted, uses QUARTO_PROJECT_INPUT_FILE or the first valid .qmd file in current directory.
 """
 
@@ -10,7 +10,6 @@ import hashlib
 import os
 import re
 import sys
-import textwrap
 from datetime import datetime
 from pathlib import Path
 
@@ -100,6 +99,72 @@ def _resolve_metadata_files(front: dict, qmd_path: str) -> dict:
     return merged
 
 
+def _watermark_setup(version_mark: bool, license_mark: bool, license_text: str) -> str:
+    """Build LaTeX backgroundsetup code for enabled page watermarks.
+
+    The version mark sits on the right edge (current page.east) and the
+    license mark on the left edge (current page.west), both styled
+    identically (rotated 90 degrees, ttfamily, lightgray). The LaTeX
+    background package accepts a single backgroundsetup per document, so
+    when both marks are enabled they share one block that places each
+    mark with a zero-size picture environment.
+    """
+    license_mark = license_mark and bool(license_text.strip())
+    if not version_mark and not license_mark:
+        return ""
+    if version_mark and license_mark:
+        contents = (
+            "    contents={\\begin{picture}(0,0)\n"
+            "        \\put(\\strip@pt\\dimexpr0.5\\paperwidth-20pt\\relax,0){\\makebox(0,0)[c]{\\rotatebox{90}{\\ttfamily\\color{lightgray}\\version}}}\n"
+            "        \\put(-\\strip@pt\\dimexpr0.5\\paperwidth-20pt\\relax,0){\\makebox(0,0)[c]{\\rotatebox{90}{\\ttfamily\\color{lightgray}\\license}}}\n"
+            "    \\end{picture}},\n"
+            "        angle=0,\n"
+            "        scale=1,\n"
+            "        opacity=1,\n"
+            "        position=current page.center,\n"
+            "        vshift=0pt,\n"
+            "        hshift=0pt"
+        )
+        return (
+            "\\usepackage{xcolor}\n"
+            "\\usepackage{graphicx}\n"
+            "\\usepackage{background}\n"
+            "\\makeatletter\n"
+            "\\backgroundsetup{\n"
+            f"{contents}\n"
+            "}\n"
+            "\\makeatother\n"
+        )
+    elif version_mark:
+        contents = (
+            "    contents={\\rotatebox{90}{\\ttfamily\\color{lightgray}\\version}},\n"
+            "        angle=0,\n"
+            "        scale=1,\n"
+            "        opacity=1,\n"
+            "        position=current page.east,\n"
+            "        vshift=0pt,\n"
+            "        hshift=-20pt"
+        )
+    else:
+        contents = (
+            "    contents={\\rotatebox{90}{\\ttfamily\\color{lightgray}\\license}},\n"
+            "        angle=0,\n"
+            "        scale=1,\n"
+            "        opacity=1,\n"
+            "        position=current page.west,\n"
+            "        vshift=0pt,\n"
+            "        hshift=20pt"
+        )
+    return (
+        "\\usepackage{xcolor}\n"
+        "\\usepackage{graphicx}\n"
+        "\\usepackage{background}\n"
+        "\\backgroundsetup{\n"
+        f"{contents}\n"
+        "}\n"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate LaTeX metadata for SSCCS")
     parser.add_argument(
@@ -117,6 +182,14 @@ def main():
     parser.add_argument(
         "--version_mark", action="store_true",
         help="Include background version watermark in PDF",
+    )
+    parser.add_argument(
+        "--license", "-l", default=None,
+        help="License text (e.g., CC BY 4.0)",
+    )
+    parser.add_argument(
+        "--license_mark", action="store_true",
+        help="Include background license watermark in PDF",
     )
     args = parser.parse_args()
 
@@ -190,6 +263,8 @@ def main():
 
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
 
+    license_text = args.license if args.license is not None else ""
+
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(f"\\newcommand{{\\version}}{{{latex_escape(version_str)}}}\n")
         f.write(f"\\newcommand{{\\timestamp}}{{{datetime.now()}}}\n")
@@ -201,23 +276,8 @@ def main():
         f.write(f"\\newcommand{{\\authorrole}}{{{latex_escape(author_role)}}}\n")
         f.write(f"\\newcommand{{\\orcid}}{{{latex_escape(orcid)}}}\n")
         f.write(f"\\newcommand{{\\filehash}}{{{file_hash}}}\n")
-        if args.version_mark:
-            f.write(
-                textwrap.dedent("""
-                \\usepackage{xcolor}
-                \\usepackage{graphicx}
-                \\usepackage{background}
-                \\backgroundsetup{
-                    contents={\\rotatebox{90}{\\ttfamily\\color{lightgray}\\version}},
-                        angle=0,
-                        scale=1,
-                        opacity=1,
-                        position=current page.east,
-                        vshift=0pt,
-                        hshift=-20pt
-                }
-            \n""")
-            )
+        f.write(f"\\newcommand{{\\license}}{{{latex_escape(license_text)}}}\n")
+        f.write(_watermark_setup(args.version_mark, args.license_mark, license_text))
 
     print(f"Metadata written to {args.output}")
 

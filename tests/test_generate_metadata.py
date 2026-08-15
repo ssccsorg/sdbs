@@ -191,3 +191,117 @@ author:
             capture_output=True, text=True,
         )
         assert result.returncode != 0
+
+    def _run_generator(
+        self,
+        generator_path: Path,
+        qmd_path: Path,
+        out_file: Path,
+        extra_args: list[str] | None = None,
+    ) -> subprocess.CompletedProcess:
+        cmd = [
+            sys.executable, str(generator_path),
+            "--input", str(qmd_path),
+            "--output", str(out_file),
+        ]
+        if extra_args:
+            cmd += extra_args
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    def test_generator_writes_license_macro(
+        self, temp_dir: Path, generator_path: Path
+    ) -> None:
+        """--license value is written as an escaped \\license macro."""
+        qmd_path = self._create_test_qmd(temp_dir)
+        out_file = temp_dir / "_files" / "license_metadata.tex"
+        result = self._run_generator(
+            generator_path, qmd_path, out_file,
+            ["--license", "CC BY-NC 4.0 & ND"],
+        )
+        assert result.returncode == 0, f"Generator failed: {result.stderr}"
+        tex_content = out_file.read_text()
+        assert "\\newcommand{\\license}{CC BY-NC 4.0 \\& ND}" in tex_content
+
+    def test_license_mark_uses_left_edge(
+        self, temp_dir: Path, generator_path: Path
+    ) -> None:
+        """license-mark emits a background watermark on the left edge."""
+        qmd_path = self._create_test_qmd(temp_dir)
+        out_file = temp_dir / "_files" / "license_mark_metadata.tex"
+        result = self._run_generator(
+            generator_path, qmd_path, out_file,
+            ["--license", "CC BY 4.0", "--license_mark"],
+        )
+        assert result.returncode == 0, f"Generator failed: {result.stderr}"
+        tex_content = out_file.read_text()
+        assert "\\backgroundsetup{" in tex_content
+        assert "position=current page.west" in tex_content
+        assert "hshift=20pt" in tex_content
+        assert "\\license" in tex_content
+        assert "current page.east" not in tex_content
+
+    def test_version_mark_uses_right_edge(
+        self, temp_dir: Path, generator_path: Path
+    ) -> None:
+        """version-mark keeps its right-edge watermark behavior."""
+        qmd_path = self._create_test_qmd(temp_dir)
+        out_file = temp_dir / "_files" / "version_mark_metadata.tex"
+        result = self._run_generator(
+            generator_path, qmd_path, out_file,
+            ["--version_prefix", "tagma-kv", "--version_mark"],
+        )
+        assert result.returncode == 0, f"Generator failed: {result.stderr}"
+        tex_content = out_file.read_text()
+        assert "position=current page.east" in tex_content
+        assert "hshift=-20pt" in tex_content
+        assert "\\version" in tex_content
+        assert "current page.west" not in tex_content
+
+    def test_both_marks_share_one_backgroundsetup(
+        self, temp_dir: Path, generator_path: Path
+    ) -> None:
+        """Both marks render in a single backgroundsetup block."""
+        qmd_path = self._create_test_qmd(temp_dir)
+        out_file = temp_dir / "_files" / "both_metadata.tex"
+        result = self._run_generator(
+            generator_path, qmd_path, out_file,
+            [
+                "--version_prefix", "tagma-kv", "--version_mark",
+                "--license", "CC BY 4.0", "--license_mark",
+            ],
+        )
+        assert result.returncode == 0, f"Generator failed: {result.stderr}"
+        tex_content = out_file.read_text()
+        assert tex_content.count("\\backgroundsetup{") == 1
+        assert "current page.center" in tex_content
+        assert "\\strip@pt" in tex_content
+        assert "\\makeatletter" in tex_content
+        assert "\\version" in tex_content
+        assert "\\license" in tex_content
+
+    def test_empty_license_skips_watermark(
+        self, temp_dir: Path, generator_path: Path
+    ) -> None:
+        """license-mark with empty license text emits no watermark block."""
+        qmd_path = self._create_test_qmd(temp_dir)
+        out_file = temp_dir / "_files" / "empty_license_metadata.tex"
+        result = self._run_generator(
+            generator_path, qmd_path, out_file,
+            ["--license", "", "--license_mark"],
+        )
+        assert result.returncode == 0, f"Generator failed: {result.stderr}"
+        tex_content = out_file.read_text()
+        assert "\\newcommand{\\license}{}" in tex_content
+        assert "\\backgroundsetup{" not in tex_content
+
+    def test_no_license_arg_writes_empty_macro(
+        self, temp_dir: Path, generator_path: Path
+    ) -> None:
+        """Without --license the macro is present but empty."""
+        qmd_path = self._create_test_qmd(temp_dir)
+        out_file = temp_dir / "_files" / "no_license_metadata.tex"
+        result = self._run_generator(generator_path, qmd_path, out_file)
+        assert result.returncode == 0, f"Generator failed: {result.stderr}"
+        tex_content = out_file.read_text()
+        assert "\\newcommand{\\license}{}" in tex_content
+        assert "\\backgroundsetup{" not in tex_content

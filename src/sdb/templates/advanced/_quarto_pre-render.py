@@ -50,6 +50,8 @@ def main():
         front = get_front_matter(qmd_path)
         vpre = front.get('version-prefix', None)
         vmark = front.get('version-mark', False)
+        lic = front.get('license', None)
+        lmark = front.get('license-mark', False)
 
         # 4. Build command – only add --version_prefix if vpre is not None
         cmd = [sys.executable, str(generator), "--input", str(qmd_path), "--output", str(out_file)]
@@ -57,6 +59,10 @@ def main():
             cmd += ["--version_prefix", str(vpre)]
         if vmark:
             cmd.append("--version_mark")
+        if isinstance(lic, str):
+            cmd += ["--license", lic]
+        if lmark:
+            cmd.append("--license_mark")
 
         print(f"Generating {out_file} from {qmd_path.name}")
         subprocess.run(cmd, check=True)
