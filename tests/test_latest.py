@@ -94,10 +94,10 @@ class TestMatchesExclude:
         assert matches_exclude("_utils/build.py", EXCLUDE_PATTERNS) is True
 
     def test_output_files_dir_matches(self) -> None:
-        assert matches_exclude("tagma/wp_files/figure.pdf", EXCLUDE_PATTERNS) is True
+        assert matches_exclude("tagma/index_files/figure.pdf", EXCLUDE_PATTERNS) is True
 
     def test_cached_dir_matches(self) -> None:
-        assert matches_exclude("tagma/wp_cached/cache.db", EXCLUDE_PATTERNS) is True
+        assert matches_exclude("tagma/index_cached/cache.db", EXCLUDE_PATTERNS) is True
 
     def test_libs_dir_matches(self) -> None:
         assert matches_exclude("paper/_libs/vendor.js", EXCLUDE_PATTERNS) is True
@@ -111,7 +111,7 @@ class TestMatchesExclude:
     def test_custom_pattern_appended(self) -> None:
         patterns = EXCLUDE_PATTERNS + ["**/_*.qmd"]
         assert matches_exclude("_updated_docs_list.qmd", patterns) is True
-        assert matches_exclude("projects/syntagma/wp.qmd", patterns) is False
+        assert matches_exclude("projects/syntagma/index.qmd", patterns) is False
 
 
 class TestIsSystemIgnored:
