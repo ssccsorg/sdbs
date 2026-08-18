@@ -26,14 +26,15 @@ def qmd_tree(tmp_path: Path) -> Path:
             projects/
               syntagma/
                 tagma/
-                  kv.qmd
+                  map/
+                    index.qmd
                   index.qmd
                 _include/
                   bench/
-                    fig-bench-kv-batch.qmd
-                    fig-bench-kv-bridge.qmd
-                    fig-bench-kv-get.qmd
-                    fig-bench-kv-insert.qmd
+                    fig-bench-map-batch.qmd
+                    fig-bench-map-bridge.qmd
+                    fig-bench-map-get.qmd
+                    fig-bench-map-insert.qmd
             whitepaper/
               whitepaper.qmd
     """

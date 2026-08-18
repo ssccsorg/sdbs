@@ -183,21 +183,21 @@ def main(argv: list[str] | None = None) -> None:
         "render",
         help="Locate .qmd files by short name and render them directly",
         description="Search the current directory tree for .qmd files whose stem "
-        "matches one or more short names (e.g. 'kv' → "
-        "docs/projects/syntagma/tagma/kv.qmd) and render them by calling the "
+        "matches one or more short names (e.g. 'map' → "
+        "docs/projects/syntagma/tagma/map/index.qmd) and render them by calling the "
         "underlying tool directly, without the full SDBS preprocessing pipeline "
         "(no include resolution, no metadata generation, no pre-render steps).\n\n"
         "Multiple patterns can be given to render several documents in sequence "
-        "(e.g. 'sdb render kv id').  Contrast this with 'sdb build', which runs "
+        "(e.g. 'sdb render map id').  Contrast this with 'sdb build', which runs "
         "the full SDBS pipeline before rendering.  Use 'render' when you only "
         "need a quick preview or to verify the document structure.\n\n"
         "When multiple files match, prompts for selection unless --all is given.",
         epilog=(
             "Examples:\n"
-            "  sdb render kv\n"
-            "  sdb render kv --to pdf\n"
-            "  sdb render tagma/kv\n"
-            "  sdb render kv id wp\n"
+            "  sdb render map\n"
+            "  sdb render map --to pdf\n"
+            "  sdb render tagma/map\n"
+            "  sdb render map id wp\n"
         ),
     )
     render_parser.add_argument(
@@ -205,7 +205,7 @@ def main(argv: list[str] | None = None) -> None:
         type=str,
         nargs="+",
         help="One or more short names or path fragments to match against .qmd "
-        "file stems (e.g. 'kv', 'whitepaper', 'tagma/kv')",
+        "file stems (e.g. 'map', 'whitepaper', 'tagma/map')",
     )
     render_parser.add_argument(
         "--to", "-t", dest="format", type=str, default=None,
@@ -228,8 +228,8 @@ def main(argv: list[str] | None = None) -> None:
         "When multiple files match, prompts for selection unless --all is given.",
         epilog=(
             "Examples:\n"
-            "  sdb pub kv\n"
-            "  sdb pub kv id --all\n"
+            "  sdb pub map\n"
+            "  sdb pub map id --all\n"
         ),
     )
     pub_parser.add_argument(

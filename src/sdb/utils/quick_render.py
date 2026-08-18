@@ -2,7 +2,7 @@
 Quick render: locate one or more .qmd files by short name and render them.
 
 Provides a convenience subcommand ``sdb render <name>`` so that, for example,
-``sdb render kv`` finds ``docs/projects/syntagma/tagma/kv.qmd`` and runs
+``sdb render map`` finds ``docs/projects/syntagma/tagma/map.qmd`` and runs
 ``quarto render`` on it automatically.
 """
 
@@ -104,7 +104,7 @@ def find_qmd_files(
 
     Args:
         pattern:          Short name or path fragment to search for
-                          (e.g. ``"kv"``, or ``"tagma/kv"``).
+                          (e.g. ``"map"``, or ``"tagma/map"``).
         root:             Directory to search under.  Defaults to the current
                           working directory.
         exclude_patterns: Optional list of gitignore-style glob patterns to
@@ -345,7 +345,7 @@ def quick_render(
 
     This is a convenience wrapper that combines ``select_qmd_files`` and
     ``render_qmd`` into a single call.  For multi-pattern use (``sdb render
-    kv id``) the CLI handler calls ``select_qmd_files`` directly to enable
+    map id``) the CLI handler calls ``select_qmd_files`` directly to enable
     cross-pattern deduplication.
 
     Args:
@@ -551,7 +551,7 @@ def publish_artifacts(qmd_paths: list[Path]) -> int:
     """Collect PDF-related artifacts for rendered QMD files.
 
     For each rendered QMD, creates a folder named after the file's stem
-    alongside the QMD file itself (e.g. ``kv.qmd`` → ``kv/``) and copies
+    alongside the QMD file itself (e.g. ``map.qmd`` → ``map/``) and copies
     PDF-related artifacts into it preserving relative paths.
 
     Returns the total number of items copied.

@@ -51,12 +51,12 @@ sdb pre docs
 sdb check .
 
 # Render a single document by short name for quick preview
-sdb render kv
-sdb render kv --to pdf            # render to a specific format
+sdb render map
+sdb render map --to pdf            # render to a specific format
 
 # Render and collect PDF artifacts (PDF, LaTeX, figures, media)
-sdb pub kv
-sdb pub kv --all                  # render all matches without prompting
+sdb pub map
+sdb pub map --all                  # render all matches without prompting
 
 # Remove Quarto build artifacts (_cached/, _files/, html, pdf...)
 sdb clean docs

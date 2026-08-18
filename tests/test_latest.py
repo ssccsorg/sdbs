@@ -103,7 +103,7 @@ class TestMatchesExclude:
         assert matches_exclude("paper/_libs/vendor.js", EXCLUDE_PATTERNS) is True
 
     def test_normal_qmd_does_not_match(self) -> None:
-        assert matches_exclude("projects/syntagma/tagma/wp.qmd", EXCLUDE_PATTERNS) is False
+        assert matches_exclude("projects/syntagma/tagma/index.qmd", EXCLUDE_PATTERNS) is False
 
     def test_normal_index_qmd_does_not_match(self) -> None:
         assert matches_exclude("projects/syntagma/index.qmd", EXCLUDE_PATTERNS) is False
@@ -133,7 +133,7 @@ class TestIsSystemIgnored:
         assert _is_system_ignored("__pycache__/module.pyc") is True
 
     def test_normal_path_not_ignored(self) -> None:
-        assert _is_system_ignored("projects/syntagma/tagma/wp.qmd") is False
+        assert _is_system_ignored("projects/syntagma/tagma/index.qmd") is False
 
 
 class TestDocToHtml:
