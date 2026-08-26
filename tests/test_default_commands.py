@@ -29,6 +29,10 @@ class TestDefaultCommandConstants:
         from sdb.resolve import resolve_all
         assert resolve_all in _DEFAULT_PRE_BUILD
 
+    def test_pre_build_has_callable_clean_duplicate_footnotes(self) -> None:
+        from sdb.utils.footnotes import clean_duplicate_footnotes
+        assert clean_duplicate_footnotes in _DEFAULT_PRE_BUILD
+
     def test_pre_build_has_rumdl(self) -> None:
         assert ["rumdl", "fmt", ".", "--silent", "--disable", "MD036"] in _DEFAULT_PRE_BUILD
 
