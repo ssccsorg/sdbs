@@ -167,7 +167,8 @@ def main(argv: list[str] | None = None) -> None:
         "pre",
         help="Run pre-render steps (latest docs, path resolution, formatting)",
         description="Execute the default pre-build sequence: generate latest docs, "
-        "resolve relative paths and includes, and format QMD/MD files. "
+        "resolve relative paths and includes, dedupe footnote references, "
+        "and format QMD/MD files. "
         "These same steps run automatically before every build.",
     )
     pre_parser.add_argument(
