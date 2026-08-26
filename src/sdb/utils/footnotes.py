@@ -1,5 +1,4 @@
-"""
-Clean duplicate footnote reference tags in .qmd files.
+r"""Clean duplicate footnote reference tags in .qmd files.
 
 Pandoc/Quarto markdown expects each footnote label to be referenced once
 in the body.  Repeated uses of the same tag (for example ``[^tagma]``)
@@ -90,11 +89,13 @@ def _apply_removals(line: str, removals: List[Tuple[int, int]]) -> str:
     """
     spans: List[Tuple[int, int]] = []
     for start, end in sorted(removals):
-        following = line[end] if end < len(line) else ""
+        following = ""
+        if end < len(line) and line[end] not in "\r\n":
+            following = line[end]
         if (
             start > 0
             and line[start - 1] == " "
-            and (end == len(line) or following in _SENTENCE_PUNCT or following == " ")
+            and (following in _SENTENCE_PUNCT or following in ("", " "))
         ):
             new_start = start
             while new_start > 0 and line[new_start - 1] == " ":
