@@ -44,7 +44,7 @@ sdb init docs --template ssccs     # with SSCCS-specific templates
 sdb build .
 sdb build . --website -j 4         # parallel website build
 
-# Pre-render steps (latest docs, path resolution, formatting)
+# Pre-render steps (latest docs, path resolution, footnote cleanup, formatting)
 sdb pre docs
 
 # Validate links and citations
@@ -61,6 +61,17 @@ sdb pub map --all                  # render all matches without prompting
 # Remove Quarto build artifacts (_cached/, _files/, html, pdf...)
 sdb clean docs
 ```
+
+## Pre-build Sequence
+
+`pre` and every `build` invoke the same built-in pre-build sequence before rendering. The sequence runs in four phases.
+
+- Latest docs: regenerate `_include/_updated_docs_list.qmd` from git-tracked documents.
+- Path resolution: resolve relative asset paths and includes across QMD and MD files.
+- Footnote deduplication: in each `.qmd`, remove every use of a footnote tag after the first. Footnote definitions, YAML front matter, fenced code blocks, inline code spans, and escaped references are preserved.
+- Formatting: run `rumdl fmt` with MD036 disabled.
+
+The sequence is idempotent. Running `sdb pre docs` on an already-clean tree changes nothing. Documents rendered through `sdb render` or `sdb pub` skip this sequence, since those commands call the underlying renderer directly without preprocessing.
 
 ## Documentation
 
