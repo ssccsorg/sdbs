@@ -153,7 +153,9 @@ def strip_duplicate_footnote_refs(text: str) -> Tuple[str, int]:
     removed = 0
     lines = text.splitlines(keepends=True)
 
-    in_front_matter = bool(lines and lines[0].strip() == "---")
+    in_front_matter = bool(
+        lines and lines[0].lstrip("\ufeff").strip() == "---"
+    )
     fence_char: str | None = None
     out_lines: List[str] = []
 
@@ -229,7 +231,7 @@ def clean_duplicate_footnotes(docs_root: Path) -> bool:
     for qmd in files:
         try:
             original = qmd.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             logger.warning("Footnote cleanup: could not read %s: %s", qmd, exc)
             continue
         cleaned, removed = strip_duplicate_footnote_refs(original)

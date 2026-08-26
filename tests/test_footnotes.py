@@ -200,6 +200,12 @@ class TestStripDuplicateFootnoteRefs:
         assert cleaned.count("[^tagma]") == 3
         assert removed == 1
 
+    def test_bom_front_matter_untouched(self) -> None:
+        text = "\ufeff---\ntitle: [^a]\n---\n\nText[^a] and[^a].\n"
+        cleaned, removed = strip_duplicate_footnote_refs(text)
+        assert cleaned == "\ufeff---\ntitle: [^a]\n---\n\nText[^a] and.\n"
+        assert removed == 1
+
 
 class TestCleanDuplicateFootnotes:
     """File-level behavior over a docs tree."""
@@ -247,6 +253,12 @@ class TestCleanDuplicateFootnotes:
     def test_no_qmd_files_returns_true(self, tmp_path: Path) -> None:
         self._write(tmp_path, "readme.md", "Text[^a] and[^a].\n")
         assert clean_duplicate_footnotes(tmp_path) is True
+
+    def test_invalid_utf8_file_skipped(self, tmp_path: Path) -> None:
+        path = tmp_path / "bad.qmd"
+        path.write_bytes(b"\xff\xfe\x00[^a] and[^a].\n")
+        assert clean_duplicate_footnotes(tmp_path) is True
+        assert path.read_bytes() == b"\xff\xfe\x00[^a] and[^a].\n"
 
     def test_build_yml_excludes_honored(self, tmp_path: Path) -> None:
         self._write(tmp_path, "build.yml", "exclude:\n  - 'skip/'\n")
