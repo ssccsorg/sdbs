@@ -88,3 +88,14 @@ RUN uv pip install --system --break-system-packages \
 COPY . /tmp/sdb
 RUN uv pip install --system --break-system-packages /tmp/sdb \
     && rm -rf /tmp/sdb
+
+# Install third-party license notices for components redistributed in this image
+COPY NOTICE.md /usr/local/share/licenses/NOTICE.md
+RUN mkdir -p /usr/local/share/licenses/pandoc \
+    && cd /opt \
+    && find quarto tinytex uv-tools -type f \( -iname 'license*' -o -iname 'copying*' -o -iname 'gpl*' -o -iname 'lppl*' \) -exec cp --parents -t /usr/local/share/licenses {} + \
+    && if [ -f /usr/share/common-licenses/GPL-2 ]; then \
+         cp /usr/share/common-licenses/GPL-2 /usr/local/share/licenses/pandoc/COPYING-GPL-2.0; \
+       else \
+         printf '%s\n' "GPL-2.0-or-later text: https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt" > /usr/local/share/licenses/pandoc/README; \
+       fi
