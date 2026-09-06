@@ -94,6 +94,32 @@ class TestUrlDisplayResolver:
         text = (tmp_path / "doc.md").read_text()
         assert "[a.b](http://a.b)" in text
 
+    def test_bare_url_with_balanced_parens(self, tmp_path: Path) -> None:
+        """A closing paren that balances an open paren stays in the URL."""
+        n = self._fix(
+            tmp_path, "doc.md",
+            "See https://en.wikipedia.org/wiki/Foo_(bar) for it.\n",
+        )
+        assert n == 1
+        text = (tmp_path / "doc.md").read_text()
+        assert (
+            "[en.wikipedia.org/wiki/Foo_(bar)]"
+            "(https://en.wikipedia.org/wiki/Foo_(bar)) for it."
+        ) in text
+
+    def test_bare_url_surrounded_by_parens(self, tmp_path: Path) -> None:
+        """Prose parens around a URL stay outside the generated link."""
+        n = self._fix(
+            tmp_path, "doc.md",
+            "(See https://en.wikipedia.org/wiki/Foo_(bar)).\n",
+        )
+        assert n == 1
+        text = (tmp_path / "doc.md").read_text()
+        assert (
+            "(See [en.wikipedia.org/wiki/Foo_(bar)]"
+            "(https://en.wikipedia.org/wiki/Foo_(bar)))."
+        ) in text
+
     def test_multiple_forms_in_one_file(self, tmp_path: Path) -> None:
         """All three forms in one file are normalized together."""
         n = self._fix(
@@ -183,6 +209,66 @@ class TestUrlDisplayResolver:
         n = self._fix(tmp_path, "doc.md", content)
         assert n == 0
         assert (tmp_path / "doc.md").read_text() == content
+
+    # ------------------------------------------------------------------
+    # Realistic combined document
+    # ------------------------------------------------------------------
+    def test_realistic_document(self, tmp_path: Path) -> None:
+        """A realistic qmd document: only intended displays change."""
+        content = (
+            "---\n"
+            "title: Sample\n"
+            "url: https://keep.frontmatter\n"
+            "---\n\n"
+            "{{< include _include/_title_meta_items.qmd >}}\n\n"
+            "```{python}\n"
+            'client = "https://keep.code"\n'
+            "```\n\n"
+            "Intro with https://docs.example.com/a and "
+            "<https://docs.example.com/b> and "
+            "[https://docs.example.com/c](https://docs.example.com/c), "
+            "then [see](https://docs.example.com/d).\n\n"
+            "| col |\n"
+            "|-----|\n"
+            "| https://docs.example.com/e |\n\n"
+            "`https://keep.span` ![alt](https://keep.image.png)\n\n"
+            "[ref]: https://keep.def\n\n"
+            "Footnote text https://docs.example.com/f.\n"
+        )
+        n = self._fix(tmp_path, "doc.qmd", content)
+        assert n == 5, f"Expected 5 fixes, got {n}"
+        text = (tmp_path / "doc.qmd").read_text()
+        assert "url: https://keep.frontmatter" in text
+        assert 'client = "https://keep.code"' in text
+        assert "https://keep.span" in text
+        assert "![alt](https://keep.image.png)" in text
+        assert "[ref]: https://keep.def" in text
+        assert "[see](https://docs.example.com/d)" in text
+        assert "[docs.example.com/a](https://docs.example.com/a)" in text
+        assert "[docs.example.com/b](https://docs.example.com/b)" in text
+        assert "[docs.example.com/c](https://docs.example.com/c)" in text
+        assert "[docs.example.com/e](https://docs.example.com/e)" in text
+        assert "[docs.example.com/f](https://docs.example.com/f)" in text
+
+    def test_realistic_document_idempotent(self, tmp_path: Path) -> None:
+        """The combined document is stable after a second pass."""
+        content = (
+            "---\n"
+            "title: Sample\n"
+            "---\n\n"
+            "Text https://docs.example.com/a and "
+            "<https://docs.example.com/b> and "
+            "[https://docs.example.com/c](https://docs.example.com/c).\n"
+        )
+        path = self._make_file(tmp_path, "doc.qmd", content)
+        n1 = self.resolver.fix_one_file(
+            path, tmp_path, dry_run=False, verbose=False
+        )
+        n2 = self.resolver.fix_one_file(
+            path, tmp_path, dry_run=False, verbose=False
+        )
+        assert n1 == 3
+        assert n2 == 0
 
     # ------------------------------------------------------------------
     # Idempotency and API

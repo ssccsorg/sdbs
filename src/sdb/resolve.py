@@ -1541,6 +1541,14 @@ class UrlDisplayResolver(_BaseResolver):
             raw = m.group(0)
             trim = len(raw)
             while trim > 0 and raw[trim - 1] in cls._TRAILING:
+                ch = raw[trim - 1]
+                if ch == ")":
+                    opens = raw[:trim].count("(")
+                    closes = raw[:trim].count(")")
+                    if closes <= opens:
+                        # This close paren balances an earlier open paren in
+                        # the URL path itself, so it belongs to the URL.
+                        break
                 trim -= 1
             if trim == 0:
                 continue
