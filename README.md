@@ -77,7 +77,7 @@ The sequence is idempotent. Running `sdb pre docs` on an already-clean tree chan
 
 - [SDBS](https://docs.ssccs.org/projects/sdbs/index.html): the project index, covering the build architecture, the parallel build model, and the LLMs pipeline.
 - [Single-Path Artifact Pipeline](https://docs.ssccs.org/projects/sdbs/ci_observations.html): one container image carrying emulation, RTL verification, and documentation, with the agent knowledge base extracted from the same build.
-- [The Living Corpus](https://docs.ssccs.org/projects/sdbs/knowledge_base_vision.html): SDBS as the knowledge-ization engine, from document corpus to living knowledge.
+- [The Living Corpus](https://docs.ssccs.org/projects/sdbs/living_corpus.html): SDBS as the knowledge-ization engine, from document corpus to living knowledge.
 
 ## Development
 
