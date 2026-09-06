@@ -1319,10 +1319,351 @@ class IncludeResolver(_BaseResolver):
 
 
 # ======================================================================
+# UrlDisplayResolver — normalize explicit full URL displays
+# ======================================================================
+class UrlDisplayResolver(_BaseResolver):
+    """Normalize explicit full URL displays into scheme-less working links.
+
+    Three authoring patterns show a full URL to the reader: an inline
+    link whose label is the full URL (``[https://x](https://x)``), an
+    autolink (``<https://x>``), and a bare ``https://x`` in prose. Each
+    becomes ``[x](https://x)`` so the scheme prefix stays out of the
+    visible text while the link remains explicit and functional. The
+    destination is never changed; only the visible label is rewritten,
+    and only when the label is the full URL itself.
+
+    Protected content: YAML front matter, fenced code blocks including
+    Quarto chunks, inline code spans, HTML tags and comments, Quarto
+    shortcodes, destinations of existing markdown links, and reference
+    link definitions. Trailing punctuation stays outside generated links.
+    """
+
+    _APPLY_BUILD_YML_EXCLUDE = True
+    SOURCE_EXTENSIONS: Set[str] = {".qmd", ".md"}
+
+    _RE_FRONT_MATTER = re.compile(
+        r"\A---[ \t]*\n.*?\n---(?=[ \t]*\n|\Z)", re.DOTALL
+    )
+    _RE_FENCE_OPEN = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
+    _RE_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+    _RE_SHORTCODE = re.compile(r"\{\{<.*?>\}\}", re.DOTALL)
+    _RE_HTML_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
+    _RE_BACKTICK_RUN = re.compile(r"`+")
+    _RE_FULL_LABEL_LINK = re.compile(
+        r"\[(https?://[^\]\[\n]*?)\]\(([^()\n]+)\)"
+    )
+    _RE_DEST = re.compile(r"\]\([^)\n]*\)")
+    _RE_AUTOLINK = re.compile(r"<(https?://[^<>\s]+)>")
+    _RE_BARE_URL = re.compile(r"https?://[^\s<>\"'`]+")
+    _RE_REF_DEF = re.compile(r"^[ \t]*\[[^\]]*\]:[ \t]*$")
+    _TRAILING = set(".,;:!?)]}\"'")
+    _BAD_PREV = set(
+        "abcdefghijklmnopqrstuvwxyz"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./-\\[]<"
+    )
+
+    @staticmethod
+    def _strip_scheme(url: str) -> str:
+        """Return ``url`` without its ``http://`` or ``https://`` prefix."""
+        for prefix in ("http://", "https://"):
+            if url.lower().startswith(prefix):
+                return url[len(prefix):]
+        return url
+
+    @staticmethod
+    def _splice(text: str, repl: List[Tuple[int, int, str]]) -> str:
+        """Apply ``(start, end, replacement)`` edits from last to first."""
+        for a, b, val in sorted(repl, key=lambda x: x[0], reverse=True):
+            text = text[:a] + val + text[b:]
+        return text
+
+    # ------------------------------------------------------------------
+    # Protected-span detection
+    # ------------------------------------------------------------------
+    @classmethod
+    def _line_masks(cls, text: str) -> List[Tuple[int, int]]:
+        """Return front matter and fenced code spans as byte ranges."""
+        masks: List[Tuple[int, int]] = []
+        m = cls._RE_FRONT_MATTER.match(text)
+        if m:
+            masks.append((m.start(), m.end()))
+        lines = text.splitlines(keepends=True)
+        offset = 0
+        fence_char = ""
+        fence_len = 0
+        fence_start = 0
+        in_fence = False
+        for line in lines:
+            if not in_fence:
+                fm = cls._RE_FENCE_OPEN.match(line)
+                if fm:
+                    run = fm.group(1)
+                    fence_char = run[0]
+                    fence_len = len(run)
+                    fence_start = offset
+                    in_fence = True
+            else:
+                close = re.match(
+                    r"^[ \t]*" + re.escape(fence_char) + "{"
+                    + str(fence_len) + r",}[ \t]*$",
+                    line,
+                )
+                if close:
+                    masks.append((fence_start, offset + len(line)))
+                    in_fence = False
+            offset += len(line)
+        if in_fence:
+            masks.append((fence_start, offset))
+        return masks
+
+    @classmethod
+    def _char_masks(
+        cls, text: str, start: int, end: int
+    ) -> List[Tuple[int, int]]:
+        """Return inline code, HTML, and shortcode spans inside one block."""
+        masks: List[Tuple[int, int]] = []
+        i = start
+        while i < end:
+            found: Optional[Tuple[int, int]] = None
+            for regex in (
+                cls._RE_HTML_COMMENT,
+                cls._RE_SHORTCODE,
+                cls._RE_HTML_TAG,
+            ):
+                m = regex.search(text, i, end)
+                if m and (found is None or m.start() < found[0]):
+                    found = (m.start(), m.end())
+            run = cls._RE_BACKTICK_RUN.search(text, i, end)
+            if run and (found is None or run.start() < found[0]):
+                k = run.end() - run.start()
+                closer = cls._RE_BACKTICK_RUN.search(text, run.end(), end)
+                while closer and closer.end() - closer.start() != k:
+                    closer = cls._RE_BACKTICK_RUN.search(
+                        text, closer.end(), end
+                    )
+                if closer:
+                    found = (run.start(), closer.end())
+            if found is None:
+                break
+            masks.append(found)
+            i = found[1]
+        return masks
+
+    @classmethod
+    def _plain_ranges(
+        cls, text: str, start: int, end: int
+    ) -> List[Tuple[int, int]]:
+        """Return plain ranges outside the char-level masks of a block."""
+        ranges: List[Tuple[int, int]] = []
+        cursor = start
+        for a, b in sorted(cls._char_masks(text, start, end)):
+            if a > cursor:
+                ranges.append((cursor, a))
+            cursor = max(cursor, b)
+        if cursor < end:
+            ranges.append((cursor, end))
+        return ranges
+
+    @staticmethod
+    def _dest_spans(text: str) -> List[Tuple[int, int]]:
+        """Return destination spans of inline markdown links ``](...)``."""
+        return [
+            (m.start(), m.end())
+            for m in UrlDisplayResolver._RE_DEST.finditer(text)
+        ]
+
+    @staticmethod
+    def _ref_def_prefix(text: str, abs_start: int) -> bool:
+        """True when the URL at ``abs_start`` is a reference definition."""
+        line_start = text.rfind("\n", 0, abs_start) + 1
+        prefix = text[line_start:abs_start]
+        return bool(UrlDisplayResolver._RE_REF_DEF.match(prefix))
+
+    @staticmethod
+    def _inside(span: Tuple[int, int], spans: List[Tuple[int, int]]) -> bool:
+        """True when ``span`` overlaps any range in ``spans``."""
+        a, b = span
+        return any(lo < b and a < hi for lo, hi in spans)
+
+    # ------------------------------------------------------------------
+    # Transformations over plain ranges
+    # ------------------------------------------------------------------
+    @classmethod
+    def _rewrite_full_labels(
+        cls, text: str, start: int, end: int
+    ) -> Tuple[str, int]:
+        """Strip the scheme from labels that equal their own destination."""
+        repl: List[Tuple[int, int, str]] = []
+        for m in cls._RE_FULL_LABEL_LINK.finditer(text, start, end):
+            label = m.group(1)
+            dest = LinkResolver._clean_url(m.group(2))
+            if not dest.startswith(("http://", "https://")):
+                continue
+            if label != dest:
+                continue
+            display = cls._strip_scheme(label)
+            if not display or "[" in display or "]" in display:
+                continue
+            repl.append((m.start(1), m.end(1), display))
+        if not repl:
+            return text, 0
+        return cls._splice(text, repl), len(repl)
+
+    @classmethod
+    def _convert_autolinks(
+        cls, text: str, start: int, end: int
+    ) -> Tuple[str, int]:
+        """Turn ``<https://x>`` autolinks into scheme-less label links."""
+        dests = cls._dest_spans(text)
+        repl: List[Tuple[int, int, str]] = []
+        for m in cls._RE_AUTOLINK.finditer(text, start, end):
+            url = m.group(1)
+            display = cls._strip_scheme(url)
+            if not display or "[" in display or "]" in display:
+                continue
+            if cls._inside((m.start(), m.end()), dests):
+                continue
+            if cls._ref_def_prefix(text, m.start()):
+                continue
+            repl.append((m.start(), m.end(), f"[{display}]({url})"))
+        if not repl:
+            return text, 0
+        return cls._splice(text, repl), len(repl)
+
+    @classmethod
+    def _convert_bare(
+        cls, text: str, start: int, end: int
+    ) -> Tuple[str, int]:
+        """Wrap bare scheme URLs in prose into scheme-less label links."""
+        dests = cls._dest_spans(text)
+        repl: List[Tuple[int, int, str]] = []
+        for m in cls._RE_BARE_URL.finditer(text, start, end):
+            raw = m.group(0)
+            trim = len(raw)
+            while trim > 0 and raw[trim - 1] in cls._TRAILING:
+                trim -= 1
+            if trim == 0:
+                continue
+            url = raw[:trim]
+            abs_start = m.start()
+            abs_end = abs_start + trim
+            if cls._inside((abs_start, abs_end), dests):
+                continue
+            if abs_start > start and text[abs_start - 1] in cls._BAD_PREV:
+                continue
+            if abs_end < len(text) and text[abs_end] == "]":
+                continue
+            if cls._ref_def_prefix(text, abs_start):
+                continue
+            display = cls._strip_scheme(url)
+            if not display or "[" in display or "]" in display:
+                continue
+            repl.append((abs_start, abs_end, f"[{display}]({url})"))
+        if not repl:
+            return text, 0
+        return cls._splice(text, repl), len(repl)
+
+    # ------------------------------------------------------------------
+    # Document-level pass
+    # ------------------------------------------------------------------
+    @classmethod
+    def _transform_block(
+        cls, text: str, start: int, end: int
+    ) -> Tuple[List[Tuple[int, int, str]], int]:
+        """Transform one code-free block.
+
+        Returns ``(edits, fix_count)`` where each edit is a plain range
+        replacement and ``fix_count`` counts every URL display normalized.
+        """
+        edits: List[Tuple[int, int, str]] = []
+        total = 0
+        for a, b in cls._plain_ranges(text, start, end):
+            seg = text[a:b]
+            seg, n1 = cls._rewrite_full_labels(seg, 0, len(seg))
+            seg, n2 = cls._convert_autolinks(seg, 0, len(seg))
+            seg, n3 = cls._convert_bare(seg, 0, len(seg))
+            if n1 or n2 or n3:
+                edits.append((a, b, seg))
+                total += n1 + n2 + n3
+        return edits, total
+
+    @classmethod
+    def _transform_document(cls, text: str) -> Tuple[str, int]:
+        """Normalize a whole document; returns ``(text, fix_count)``."""
+        line_masks = sorted(cls._line_masks(text))
+        repl: List[Tuple[int, int, str]] = []
+        total = 0
+        cursor = 0
+        for a, b in line_masks:
+            if a > cursor:
+                edits, n = cls._transform_block(text, cursor, a)
+                repl.extend(edits)
+                total += n
+            cursor = max(cursor, b)
+        if cursor < len(text):
+            edits, n = cls._transform_block(text, cursor, len(text))
+            repl.extend(edits)
+            total += n
+        if not repl:
+            return text, 0
+        return cls._splice(text, repl), total
+
+    # ------------------------------------------------------------------
+    # Resolver contract
+    # ------------------------------------------------------------------
+    def fix_one_file(
+        self, file_path: Path, root: Path, dry_run: bool, verbose: bool
+    ) -> int:
+        """Normalize explicit full URL displays in a single file."""
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except Exception:
+            return 0
+        new_text, count = self._transform_document(text)
+        if count == 0:
+            return 0
+        rel_display = file_path.relative_to(root)
+        if not dry_run:
+            try:
+                file_path.write_text(new_text, encoding="utf-8")
+            except Exception as e:
+                print(
+                    f"  ERROR writing {rel_display}: {e}", file=sys.stderr
+                )
+                return 0
+        mode = " (dry-run)" if dry_run else ""
+        print(f"  {rel_display}: normalized {count} URL display(s){mode}")
+        return count
+
+    def resolve_all(
+        self,
+        root: Path,
+        scan_root: Path,
+        dry_run: bool,
+        verbose: bool,
+    ) -> Tuple[int, int]:
+        return self._run_fix_all(
+            root,
+            scan_root,
+            dry_run,
+            verbose,
+            "Normalizing explicit URL displays",
+        )
+
+
+def rewrite_url_displays(text: str) -> Tuple[str, int]:
+    """Normalize explicit full URL displays in ``text``.
+
+    Returns ``(new_text, fix_count)``. See ``UrlDisplayResolver``.
+    """
+    return UrlDisplayResolver._transform_document(text)
+
+
+# ======================================================================
 # resolve_all — top-level entry point
 # ======================================================================
 def resolve_all(docs_root: Path, check_only: bool = False) -> bool:
-    """Run all four resolvers on ``docs_root`` in sequence.
+    """Run all registered resolvers on ``docs_root`` in sequence.
 
     Parameters
     ----------
@@ -1341,6 +1682,7 @@ def resolve_all(docs_root: Path, check_only: bool = False) -> bool:
         QmdLinkResolver(),
         PathResolver(),
         LinkResolver(),
+        UrlDisplayResolver(),
         IncludeResolver(),
         DocExtResolver(),
         TitleMetaResolver(),
@@ -1349,6 +1691,7 @@ def resolve_all(docs_root: Path, check_only: bool = False) -> bool:
         "Qmd reference links",
         "Asset paths",
         "Markdown links",
+        "URL display normalization",
         "Include paths",
         "Doc ext .qmd/.md -> .html",
         "Missing title-meta-items include",
