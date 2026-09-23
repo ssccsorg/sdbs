@@ -39,7 +39,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
@@ -147,17 +147,31 @@ def front_matter_text(text: str) -> str:
     return ""
 
 
-def read_front_matter(qmd_path: Path) -> Dict[str, Any]:
-    """Parse the YAML front matter of a document, or return an empty mapping."""
-    block = front_matter_text(_read_text(qmd_path))
+def parse_front_matter(text: str) -> Optional[Dict[str, Any]]:
+    """Parse the front matter of a document.
+
+    Returns an empty mapping when the document declares none, and None when
+    the block is present but invalid.  The distinction matters: a caller
+    that would otherwise write declarations from the data has to stop
+    rather than write a file of empty macros.
+    """
+    block = front_matter_text(text)
     if not block:
         return {}
     try:
         data = yaml.safe_load(block)
-    except yaml.YAMLError as exc:
-        logger.warning("Metadata: invalid front matter in %s: %s", qmd_path, exc)
-        return {}
+    except yaml.YAMLError:
+        return None
     return data if isinstance(data, dict) else {}
+
+
+def read_front_matter(qmd_path: Path) -> Dict[str, Any]:
+    """Parse the YAML front matter of a document, or return an empty mapping."""
+    parsed = parse_front_matter(_read_text(qmd_path))
+    if parsed is None:
+        logger.warning("Metadata: invalid front matter in %s", qmd_path)
+        return {}
+    return parsed
 
 
 def find_metadata_inputs(front_matter_block: str) -> List[str]:
@@ -350,7 +364,15 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
                 )
             continue
 
-        front = read_front_matter(qmd)
+        front = parse_front_matter(text)
+        if front is None:
+            logger.warning(
+                "Metadata: %s has invalid front matter, so %s cannot be "
+                "generated from it.",
+                _display(qmd, root), ", ".join(references),
+            )
+            continue
+
         merged, sources = resolve_metadata_files(front, qmd)
 
         for reference in references:
