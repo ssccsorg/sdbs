@@ -1,4 +1,8 @@
-"""Unit tests for the built-in LaTeX metadata generation step."""
+"""Unit tests for the built-in LaTeX metadata generation step.
+
+The scenarios mirror the documents that motivated the step, so a failure
+here names the incident it would have caused.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +10,8 @@ import logging
 import os
 import time
 from pathlib import Path
+
+import pytest
 
 from sdb.utils.metadata import (
     GENERATED_MACROS,
@@ -15,6 +21,7 @@ from sdb.utils.metadata import (
     generate_metadata_tex,
     generate_metadata_for,
     named_contract_macros,
+    parse_front_matter,
     read_front_matter,
     render_metadata_tex,
     resolve_metadata_files,
@@ -30,6 +37,49 @@ AUTHOR_YML = """author:
         domain: test.ssccs.org
 """
 
+# ssccs/docs/_include/author.yml carries no role and a foundation name.
+SSCCS_AUTHOR = """author:
+  - name: SSCCS Foundation
+    email: contact@ssccs.org
+    affiliations:
+      - name: SSCCS Foundation
+        domain: ssccs.org
+        url: https://ssccs.org
+"""
+
+# es/docs/_include/author.founder.yml stores the ampersand already escaped.
+ES_FOUNDER = """author:
+  - name: Taeho Lee
+    orcid: 0009-0006-8767-8069
+    email: lee@ssccs.org
+    role: "Founder \\\\& Architect"
+    affiliations:
+      - name: SSCCS Foundation
+        domain: ssccs.org
+        url: https://ssccs.org
+"""
+
+# ct/docs/_include/author.founder.yml stores it raw.
+CT_FOUNDER = """author:
+  - name: Taeho Lee
+    email: chton@ssccs.org
+    role: "Founder & Architect"
+    affiliations:
+      - name: Project Chton (pre-incorporation)
+        domain: ssccs.org
+        url: https://ssccs.org
+"""
+
+# ktema/docs/_include/author.ktema.yml, which whitepaper.qmd resolves.
+KTEMA_AUTHOR = """author:
+  - name: Taeho Lee
+    role: "Founder and Architect"
+    affiliations:
+      - name: Ktema Systems (Pre-incorporation)
+        domain: ktema.systems
+        url: https://ktema.systems
+"""
+
 
 def _write(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,23 +87,30 @@ def _write(path: Path, content: str) -> Path:
     return path
 
 
-def _document(reference: str = "./_files/doc_metadata.tex") -> str:
-    return (
-        "---\n"
-        'title: "Test"\n'
-        "version-prefix: test_doc\n"
-        "version-mark: true\n"
-        "metadata-files:\n"
-        "  - ./_include/author.yml\n"
-        "format:\n"
-        "  pdf:\n"
-        "    include-in-header:\n"
-        "      text: |\n"
-        f"        \\input{{{reference}}}\n"
-        "---\n"
-        "\n"
-        "Body.\n"
-    )
+def _document(
+    reference: str | None = "./_files/doc_metadata.tex",
+    *,
+    prefix: str | None = "test_doc",
+    version_mark: bool = True,
+    fmt: str = "pdf",
+    header_extra: str = "",
+    metadata_files: tuple[str, ...] = ("./_include/author.yml",),
+) -> str:
+    lines = ["---", 'title: "Test"']
+    if prefix is not None:
+        lines.append(f"version-prefix: {prefix}")
+    if version_mark:
+        lines.append("version-mark: true")
+    if metadata_files:
+        lines.append("metadata-files:")
+        lines += [f"  - {path}" for path in metadata_files]
+    lines += ["format:", f"  {fmt}:", "    include-in-header:", "      text: |"]
+    if reference is not None:
+        lines.append(f"        \\input{{{reference}}}")
+    if header_extra:
+        lines += [f"        {line}" for line in header_extra.splitlines()]
+    lines += ["---", "", "Body.", ""]
+    return "\n".join(lines)
 
 
 class TestEscapeValue:
@@ -82,6 +139,33 @@ class TestEscapeValue:
 
     def test_url_keeps_its_shape(self) -> None:
         assert escape_value("https://test.ssccs.org") == "https://test.ssccs.org"
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("Taeho Lee", "Taeho Lee"),
+            ("SSCCS Foundation", "SSCCS Foundation"),
+            ("contact@ssccs.org", "contact@ssccs.org"),
+            ("0009-0006-8767-8069", "0009-0006-8767-8069"),
+            ("Founder & Architect", r"Founder \& Architect"),
+            (r"Founder \& Architect", r"Founder \& Architect"),
+            (
+                "Kletos (A product of Ktema Systems, Pre-incorporation)",
+                "Kletos (A product of Ktema Systems, Pre-incorporation)",
+            ),
+            ("kletos_pitch", r"kletos\_pitch"),
+            ("kletos.ktema.systems", "kletos.ktema.systems"),
+            ("https://kletos.ktema.systems", "https://kletos.ktema.systems"),
+            ("100%_done", r"100\%\_done"),
+            (
+                "a#b$c{d}e~f^g",
+                r"a\#b\$c\{d\}e\textasciitilde{}f\textasciicircum{}g",
+            ),
+        ],
+    )
+    def test_values_taken_from_the_corpus(self, raw: str, expected: str) -> None:
+        """Real author, affiliation, and prefix values survive intact."""
+        assert escape_value(raw) == expected
 
 
 class TestFrontMatterText:
@@ -194,12 +278,24 @@ class TestRenderMetadataTex:
         assert "\\authorrole}{Founder \\& Architect}" in rendered
         assert "\\affiliationurl}{https://test.ssccs.org}" in rendered
 
-    def test_respects_pre_escaped_data(self, tmp_path: Path) -> None:
-        """ssccs and es store the role escaped, and it must survive intact."""
-        rendered = self._render(
-            tmp_path,
-            front=AUTHOR_YML.replace('"Founder & Architect"', '"Founder \\\\& Architect"'),
-        )
+    def test_ssccs_style_author_without_role(self, tmp_path: Path) -> None:
+        """ssccs/docs/_include/author.yml declares no role and a foundation."""
+        rendered = self._render(tmp_path, front=SSCCS_AUTHOR)
+        assert "\\authorname}{SSCCS Foundation}" in rendered
+        assert "\\authorrole}{}" in rendered
+        assert "\\affiliationname}{SSCCS Foundation}" in rendered
+        assert "\\affiliationdomain}{ssccs.org}" in rendered
+
+    def test_es_style_role_already_escaped(self, tmp_path: Path) -> None:
+        """es stores the role escaped, and the escape must survive intact."""
+        rendered = self._render(tmp_path, front=ES_FOUNDER)
+        assert "\\authorrole}{Founder \\& Architect}" in rendered
+        assert "\\orcid}{0009-0006-8767-8069}" in rendered
+        assert "textbackslash" not in rendered
+
+    def test_ct_style_role_raw(self, tmp_path: Path) -> None:
+        """ct stores the raw ampersand, which the writer has to escape."""
+        rendered = self._render(tmp_path, front=CT_FOUNDER)
         assert "\\authorrole}{Founder \\& Architect}" in rendered
         assert "textbackslash" not in rendered
 
@@ -216,6 +312,38 @@ class TestRenderMetadataTex:
     def test_version_mark_block_only_when_requested(self, tmp_path: Path) -> None:
         assert "\\backgroundsetup" in self._render(tmp_path)
         assert "\\backgroundsetup" not in self._render(tmp_path, extra="")
+
+    @pytest.mark.parametrize(
+        "prefix", ["kletos_pitch", "ktema_pitch", "es_pitchdeck", "doc_prefix"]
+    )
+    def test_version_prefixes_from_the_corpus(self, tmp_path: Path, prefix: str) -> None:
+        """Every prefix in the corpus carries an underscore, so the stamp
+        has to be escaped for the text-mode consumer in a title page."""
+        qmd = _write(tmp_path / "doc.qmd", "---\ntitle: T\n---\n")
+        rendered = render_metadata_tex({"version-prefix": prefix}, qmd)
+        assert rendered.startswith(
+            "\\newcommand{\\version}{" + prefix.replace("_", "\\_") + "-"
+        )
+
+    def test_version_without_a_prefix(self, tmp_path: Path) -> None:
+        """A document that declares no version-prefix gets hash and date."""
+        import re
+
+        qmd = _write(tmp_path / "doc.qmd", "---\ntitle: T\n---\n")
+        rendered = render_metadata_tex({}, qmd)
+        assert re.match(
+            r"\\newcommand\{\\version\}\{[0-9a-f]{6}-\d{6}\}", rendered
+        )
+
+    def test_declaration_order_matches_the_template_generator(self, tmp_path: Path) -> None:
+        """The template generator writes the same order, so a project can
+        switch between the two without churning the file."""
+        import re
+
+        names = re.findall(
+            r"\\newcommand\{\\([a-z]+)\}", self._render(tmp_path)
+        )
+        assert names == list(GENERATED_MACROS)
 
 
 class TestGenerateMetadataTex:
@@ -321,3 +449,216 @@ class TestGenerateMetadataFor:
     def test_document_outside_root_does_not_raise(self, tmp_path: Path) -> None:
         outside = _write(tmp_path.parent / "outside_root_doc.qmd", _document())
         assert generate_metadata_for([outside], tmp_path) is True
+
+
+# =========================================================================
+# Scenarios drawn from the documents that motivated the step
+# =========================================================================
+
+
+class TestDocumentScenarios:
+    """The incidents, and the variants the corpus actually contains."""
+
+    def _project(
+        self,
+        tmp_path: Path,
+        document: str,
+        author: str = AUTHOR_YML,
+        name: str = "doc.qmd",
+    ) -> Path:
+        _write(tmp_path / "_include" / "author.yml", author)
+        _write(tmp_path / name, document)
+        return tmp_path
+
+    def test_kletos_pitch_reports_every_named_macro(self, tmp_path, caplog) -> None:
+        r"""kletos/docs/pitch.qmd named three macros with no reference line,
+        and LuaLaTeX reported only the first, one line below \maketitle."""
+        document = _document(
+            reference=None,
+            header_extra=(
+                "{\\large \\@author \\affiliationname \\par}\n"
+                "{\\normalsize \\texttt{\\href{\\affiliationurl}"
+                "{\\affiliationdomain}} \\par}"
+            ),
+        )
+        self._project(tmp_path, document)
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        message = " ".join(str(r.message) for r in caplog.records)
+        for name in ("affiliationname", "affiliationurl", "affiliationdomain"):
+            assert name in message
+        assert not (tmp_path / "_files").exists()
+
+    def test_ktema_whitepaper_needs_no_named_macro(self, tmp_path) -> None:
+        r"""ktema/docs/whitepaper.qmd names no macro: the watermark block the
+        generated file carries is what consumes \version, so the reference
+        alone has to be enough."""
+        self._project(tmp_path, _document(reference="./_files/wp_metadata.tex"))
+        generate_metadata_tex(tmp_path)
+        written = (tmp_path / "_files" / "wp_metadata.tex").read_text(encoding="utf-8")
+        assert "\\newcommand{\\version}" in written
+        assert "\\backgroundsetup" in written
+
+    def test_ssccs_pt_names_version_in_a_beamer_header(self, tmp_path, caplog) -> None:
+        r"""ssccs/docs/works/pt.qmd is beamer and consumes \version in its
+        title template without asking for the watermark."""
+        document = _document(
+            reference="./_files/pt_metadata.tex",
+            fmt="beamer",
+            prefix="ssccs",
+            version_mark=False,
+            header_extra="{\\scriptsize \\texttt{\\color{lightgray}\\version} \\par}",
+        )
+        self._project(tmp_path, document)
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        written = (tmp_path / "_files" / "pt_metadata.tex").read_text(encoding="utf-8")
+        assert written.startswith("\\newcommand{\\version}{ssccs-")
+        assert "\\backgroundsetup" not in written
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_ssccs_nested_document_writes_beside_itself(self, tmp_path) -> None:
+        """A nested document keeps its generated file next to itself, as
+        projects/syntagma/tagma/map/index.qmd does."""
+        document = _document(
+            reference="./_files/kv_metadata.tex",
+            metadata_files=("../../../../_include/author.yml",),
+        )
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        _write(
+            tmp_path / "projects" / "syntagma" / "tagma" / "map" / "index.qmd",
+            document,
+        )
+        generate_metadata_tex(tmp_path)
+        nested = tmp_path / "projects" / "syntagma" / "tagma" / "map"
+        assert (nested / "_files" / "kv_metadata.tex").is_file()
+        assert not (tmp_path / "_files").exists()
+
+    def test_absent_target_is_created(self, tmp_path) -> None:
+        """Fifteen documents in the corpus referenced a file the tree lacks."""
+        self._project(tmp_path, _document())
+        assert not (tmp_path / "_files").exists()
+        generate_metadata_tex(tmp_path)
+        assert (tmp_path / "_files" / "doc_metadata.tex").is_file()
+
+    def test_stale_after_an_author_change(self, tmp_path) -> None:
+        """ktema/docs/_files/wp_metadata.tex still declares SSCCS Foundation
+        while whitepaper.qmd resolves author.ktema.yml."""
+        _write(tmp_path / "_include" / "author.yml", SSCCS_AUTHOR)
+        _write(
+            tmp_path / "whitepaper.qmd",
+            _document(reference="./_files/wp_metadata.tex"),
+        )
+        generate_metadata_tex(tmp_path)
+        target = tmp_path / "_files" / "wp_metadata.tex"
+        assert "SSCCS Foundation" in target.read_text(encoding="utf-8")
+
+        _write(tmp_path / "_include" / "author.yml", KTEMA_AUTHOR)
+        future = time.time() + 10
+        os.utime(tmp_path / "_include" / "author.yml", (future, future))
+        generate_metadata_tex(tmp_path)
+        rewritten = target.read_text(encoding="utf-8")
+        assert "Ktema Systems (Pre-incorporation)" in rewritten
+        assert "SSCCS Foundation" not in rewritten
+
+    def test_output_of_a_project_hook_survives(self, tmp_path) -> None:
+        """A project hook writes the same path at render time.  Its output is
+        newer than the document, so the pre-build pass leaves it alone."""
+        self._project(tmp_path, _document())
+        generate_metadata_tex(tmp_path)
+        target = tmp_path / "_files" / "doc_metadata.tex"
+        hook_output = (
+            "% written by _quarto_pre-render.py\n"
+            + target.read_text(encoding="utf-8")
+        )
+        target.write_text(hook_output, encoding="utf-8")
+        generate_metadata_tex(tmp_path)
+        assert target.read_text(encoding="utf-8") == hook_output
+
+    def test_second_pass_changes_nothing(self, tmp_path) -> None:
+        self._project(tmp_path, _document())
+        generate_metadata_tex(tmp_path)
+        target = tmp_path / "_files" / "doc_metadata.tex"
+        before = (target.stat().st_mtime_ns, target.read_bytes())
+        generate_metadata_tex(tmp_path)
+        assert (target.stat().st_mtime_ns, target.read_bytes()) == before
+
+    def test_two_references_in_one_document(self, tmp_path) -> None:
+        document = _document(
+            reference="./_files/a_metadata.tex",
+            header_extra="\\input{./_files/b_metadata.tex}",
+        )
+        self._project(tmp_path, document)
+        generate_metadata_tex(tmp_path)
+        assert (tmp_path / "_files" / "a_metadata.tex").is_file()
+        assert (tmp_path / "_files" / "b_metadata.tex").is_file()
+
+    def test_generated_trees_are_excluded(self, tmp_path) -> None:
+        """Output and dependency trees carry copies that must not be served."""
+        _write(
+            tmp_path / "build.yml",
+            'exclude:\n  - "**/*_files/"\n  - "**/*_cached/"\n  - "_archive/**"\n',
+        )
+        for tree in ("_site", "node_modules", "_cached", "_archive"):
+            _write(tmp_path / tree / "doc.qmd", _document())
+        generate_metadata_tex(tmp_path)
+        for tree in ("_site", "node_modules", "_cached", "_archive"):
+            assert not (tmp_path / tree / "_files" / "doc_metadata.tex").exists()
+
+
+class TestDegradedInputs:
+    """Inputs the step has to survive in a corpus of hand-written documents."""
+
+    def test_parse_front_matter_signals_the_difference(self) -> None:
+        assert parse_front_matter("---\ntitle: A\n---\n") == {"title": "A"}
+        assert parse_front_matter("no front matter\n") == {}
+        assert parse_front_matter('---\ntitle: "A\n---\n') is None
+
+    def test_invalid_yaml_stops_generation(self, tmp_path, caplog) -> None:
+        """A file of empty macros would degrade the title page in silence,
+        which is worse than the missing file it replaces."""
+        _write(
+            tmp_path / "doc.qmd",
+            '---\ntitle: "Test\nmetadata-files:\n  - ./_include/author.yml\n'
+            "format:\n  pdf:\n    include-in-header:\n      text: |\n"
+            "        \\input{./_files/doc_metadata.tex}\n---\n\nBody.\n",
+        )
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        assert any("invalid front matter" in r.message for r in caplog.records)
+        assert not (tmp_path / "_files").exists()
+
+    def test_missing_metadata_file_warns_and_the_chain_continues(
+        self, tmp_path, caplog
+    ) -> None:
+        """A document can list a metadata file the tree does not carry."""
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        _write(
+            tmp_path / "doc.qmd",
+            _document(
+                metadata_files=("./_include/absent.yml", "./_include/author.yml")
+            ),
+        )
+        with caplog.at_level(logging.WARNING):
+            generate_metadata_tex(tmp_path)
+        assert any("missing metadata file" in r.message for r in caplog.records)
+        written = (tmp_path / "_files" / "doc_metadata.tex").read_text(encoding="utf-8")
+        assert "\\authorname}{Taeho Lee}" in written
+
+    def test_document_without_front_matter_is_ignored(self, tmp_path) -> None:
+        _write(tmp_path / "doc.qmd", "# Heading\n\nBody.\n")
+        assert generate_metadata_tex(tmp_path) is True
+        assert not (tmp_path / "_files").exists()
+
+    def test_document_without_author_data(self, tmp_path) -> None:
+        """A document that resolves no author still gets a well-formed file."""
+        _write(tmp_path / "doc.qmd", _document(metadata_files=()))
+        generate_metadata_tex(tmp_path)
+        written = (tmp_path / "_files" / "doc_metadata.tex").read_text(encoding="utf-8")
+        assert "\\newcommand{\\authorname}{}" in written
+
+    def test_byte_order_mark_front_matter_is_read(self, tmp_path) -> None:
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        _write(tmp_path / "doc.qmd", "\ufeff" + _document())
+        generate_metadata_tex(tmp_path)
+        assert (tmp_path / "_files" / "doc_metadata.tex").is_file()
