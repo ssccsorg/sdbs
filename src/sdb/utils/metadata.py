@@ -23,8 +23,11 @@ one both are expected to write.
 
 Two rules keep the step free of side effects.
 
-- It writes only a path a document references, only inside the docs root,
-  and never edits a document or a Quarto configuration.
+- It writes only a path a document references, and only inside the docs root,
+  and it edits a document in exactly one case: a header that names a
+  generated macro with no reference gets that reference inserted, which is
+  the inconsistency that would otherwise reach LuaLaTeX as an undefined
+  control sequence.  A Quarto configuration is never edited.
 - It writes only when the target is missing or older than the document
   and the files the document resolves through ``metadata-files``.  A
   repeated run converges after the first pass, and a project hook that
@@ -188,6 +191,16 @@ def escape_value(value: str) -> str:
     return "".join(out)
 
 
+def _front_matter_end(lines: List[str]) -> Optional[int]:
+    """Return the index of the line that closes the front matter."""
+    if not lines or lines[0].lstrip("\ufeff").strip() != "---":
+        return None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            return index
+    return None
+
+
 def front_matter_text(text: str) -> str:
     """Return the raw YAML front matter block of a document.
 
@@ -197,12 +210,10 @@ def front_matter_text(text: str) -> str:
     should still be reported rather than silently skipped.
     """
     lines = text.splitlines(keepends=True)
-    if not lines or lines[0].lstrip("\ufeff").strip() != "---":
+    end = _front_matter_end(lines)
+    if end is None:
         return ""
-    for index in range(1, len(lines)):
-        if lines[index].strip() == "---":
-            return "".join(lines[1:index])
-    return ""
+    return "".join(lines[1:end])
 
 
 def parse_front_matter(text: str) -> Optional[Dict[str, Any]]:
@@ -248,6 +259,78 @@ def named_contract_macros(front_matter_block: str) -> List[str]:
         for name in GENERATED_MACROS
         if re.search(r"\\" + name + r"\b", front_matter_block)
     ]
+
+
+_HEADER_TEXT_RE = re.compile(r"^(?P<indent>\s*)text:\s*\|[-+]?\s*$")
+
+
+def _header_block_starts(lines: List[str]) -> List[Tuple[int, int]]:
+    """Locate the literal header blocks that name a generated macro.
+
+    Returns ``(first content line index, content indentation)`` for every
+    ``text: |`` block whose content uses a macro, so a missing reference
+    can be added where the macros are used rather than anywhere in the
+    front matter.
+    """
+    found: List[Tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        match = _HEADER_TEXT_RE.match(line)
+        if not match:
+            continue
+        directive_indent = len(match.group("indent"))
+        if index + 1 >= len(lines):
+            continue
+        first = lines[index + 1]
+        if not first.strip():
+            continue
+        content_indent = len(first) - len(first.lstrip())
+        if content_indent <= directive_indent:
+            continue
+
+        block: List[str] = []
+        cursor = index + 1
+        while cursor < len(lines):
+            current = lines[cursor]
+            if current.strip() and (len(current) - len(current.lstrip())) <= directive_indent:
+                break
+            block.append(current)
+            cursor += 1
+
+        body = "".join(block)
+        if any(re.search(r"\\" + name + r"\b", body) for name in GENERATED_MACROS):
+            found.append((index + 1, content_indent))
+    return found
+
+
+def insert_reference(text: str, reference: str) -> Optional[str]:
+    """Add an ``\\input`` for the generated file to the header that needs it.
+
+    The line goes at the front of every literal header block that names a
+    generated macro, indented to match the block, and nowhere else.  Returns
+    None when the document offers no block that can be edited mechanically,
+    which leaves the choice to the author.
+    """
+    lines = text.splitlines(keepends=True)
+    end = _front_matter_end(lines)
+    if end is None:
+        return None
+
+    starts = _header_block_starts(lines[:end])
+    if not starts:
+        return None
+
+    for index, indent in reversed(starts):
+        lines.insert(index, " " * indent + f"\\input{{{reference}}}\n")
+    return "".join(lines)
+
+
+def metadata_reference_for(qmd_path: Path) -> str:
+    """Return the generated file path a document is given by convention.
+
+    One file per document, so a directory whose documents share a header
+    does not end up sharing one generated file.
+    """
+    return f"./_files/{qmd_path.stem}_metadata.tex"
 
 
 def resolve_metadata_files(
@@ -358,6 +441,26 @@ def _display(path: Path, root: Path) -> str:
         return str(path)
 
 
+def _repair_missing_reference(qmd: Path, text: str) -> Optional[str]:
+    """Add the reference a header needs but the document does not declare.
+
+    A header that uses a generated macro with no ``\\input`` line is the
+    inconsistency that reaches LuaLaTeX as an undefined control sequence.
+    The repair is confined to a document that asks for the contract and
+    carries no other input this step cannot account for, so a document
+    whose intent is ambiguous is reported instead.
+    """
+    block = front_matter_text(text)
+    if not named_contract_macros(block):
+        return None
+    if find_metadata_inputs(block):
+        return None
+    for path in find_inputs(block):
+        if not (qmd.parent / path).resolve().is_file():
+            return None
+    return insert_reference(text, metadata_reference_for(qmd))
+
+
 def _report_missing_inputs(
     root: Path, qmd: Path, block: str, references: List[str]
 ) -> None:
@@ -433,6 +536,7 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
     contested: Dict[Path, List[Path]] = {}
     outside: Dict[Path, List[Path]] = {}
     written = 0
+    repaired_count = 0
     missing_reference = 0
 
     for qmd in qmds:
@@ -452,6 +556,26 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
         block = front_matter_text(text)
         references = find_metadata_inputs(block)
         _report_missing_inputs(root, qmd, block, references)
+
+        if not references and named_contract_macros(block):
+            repaired = _repair_missing_reference(qmd, text)
+            if repaired is not None:
+                try:
+                    qmd.write_text(repaired, encoding="utf-8")
+                except OSError as exc:
+                    logger.warning("Metadata: could not write %s: %s", qmd, exc)
+                else:
+                    text = repaired
+                    block = front_matter_text(text)
+                    references = find_metadata_inputs(block)
+                    if references:
+                        repaired_count += 1
+                        logger.info(
+                            "Metadata: added \\input{%s} to %s, whose header "
+                            "names %s with no generated file (FIXING).",
+                            references[0], _display(qmd, root),
+                            ", ".join(named_contract_macros(block)),
+                        )
 
         if not references:
             used = named_contract_macros(block)
@@ -525,6 +649,8 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
         logger.info("Metadata: generated %d file(s).", written)
     else:
         logger.info("Metadata: no file needs regenerating.")
+    if repaired_count:
+        logger.info("Metadata: repaired %d document(s).", repaired_count)
     if missing_reference:
         logger.info(
             "Metadata: %d document(s) name a metadata macro without a reference.",
