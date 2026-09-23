@@ -6,6 +6,7 @@ here names the incident it would have caused.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
@@ -21,6 +22,7 @@ from sdb.utils.metadata import (
     front_matter_text,
     generate_metadata_tex,
     generate_metadata_for,
+    insert_reference,
     named_contract_macros,
     parse_front_matter,
     render_metadata_tex,
@@ -421,18 +423,28 @@ class TestGenerateMetadataTex:
         generate_metadata_tex(tmp_path)
         assert "Taeho Lee (edited)" in target.read_text(encoding="utf-8")
 
-    def test_names_macro_without_reference(self, tmp_path: Path, caplog) -> None:
+    def test_names_macro_without_reference_is_repaired(self, tmp_path: Path) -> None:
+        """A header that asks for the contract with no reference is the
+        inconsistency that reaches LuaLaTeX as an undefined control sequence,
+        so the reference is added and the file it names is generated."""
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
         _write(
             tmp_path / "doc.qmd",
-            "---\nformat:\n  pdf:\n    include-in-header:\n      text: |\n"
+            "---\nmetadata-files:\n  - ./_include/author.yml\n"
+            "format:\n  pdf:\n    include-in-header:\n      text: |\n"
             "        {\\large \\affiliationname \\par}\n---\n",
         )
-        with caplog.at_level(logging.WARNING):
-            assert generate_metadata_tex(tmp_path) is True
-        assert any("affiliationname" in r.message for r in caplog.records), (
-            "expected a warning naming the macro"
-        )
-        assert not (tmp_path / "_files").exists()
+        assert generate_metadata_tex(tmp_path) is True
+
+        document = (tmp_path / "doc.qmd").read_text(encoding="utf-8")
+        assert "\\input{./_files/doc_metadata.tex}" in document
+        assert document.startswith("---\nmetadata-files:")
+
+        written = (tmp_path / "_files" / "doc_metadata.tex").read_text(encoding="utf-8")
+        assert "\\affiliationname}{Project Test (pre-incorporation)}" in written
+        # The stamp has to describe the repaired text, not the text before it.
+        digest = hashlib.sha256(document.encode("utf-8")).hexdigest()[:6]
+        assert digest in written.splitlines()[0]
 
     def test_reference_outside_root_is_skipped(self, tmp_path: Path, caplog) -> None:
         _write(
@@ -505,6 +517,80 @@ class TestGenerateMetadataFor:
 # =========================================================================
 
 
+class TestInsertReference:
+    """insert_reference() adds the line and touches nothing else."""
+
+    def _document(self, header: str, indent: str = "        ") -> str:
+        lines = (
+            "---",
+            'title: "Test"',
+            "format:",
+            "  pdf:",
+            "    include-in-header:",
+            "      text: |",
+        ) + tuple(indent + line for line in header.splitlines()) + ("---", "", "Body.", "")
+        return "\n".join(lines)
+
+    def test_inserts_at_the_front_of_the_block(self) -> None:
+        before = self._document("\\usepackage{microtype}\n{\\large \\affiliationname \\par}")
+        after = insert_reference(before, "./_files/doc_metadata.tex")
+        assert after is not None
+        added = [line for line in after.splitlines() if line not in before.splitlines()]
+        assert added == ["        \\input{./_files/doc_metadata.tex}"]
+        assert after.index("\\input{") < after.index("\\usepackage")
+        assert after.replace("        \\input{./_files/doc_metadata.tex}\n", "") == before
+
+    def test_ignores_a_block_that_names_no_macro(self) -> None:
+        before = self._document("\\usepackage{microtype}")
+        assert insert_reference(before, "./_files/doc_metadata.tex") is None
+
+    def test_edits_every_block_that_needs_it(self) -> None:
+        before = (
+            "---\nformat:\n  pdf:\n    include-in-header:\n      text: |\n"
+            "        {\\large \\affiliationname \\par}\n"
+            "  beamer:\n    include-in-header:\n      text: |\n"
+            "        {\\scriptsize \\version \\par}\n---\n"
+        )
+        after = insert_reference(before, "./_files/doc_metadata.tex")
+        assert after is not None
+        assert after.count("\\input{./_files/doc_metadata.tex}") == 2
+
+    def test_accepts_a_strip_chomping_block(self) -> None:
+        before = (
+            "---\nformat:\n  pdf:\n    include-in-header:\n      text: |-\n"
+            "        {\\large \\affiliationname \\par}\n---\n"
+        )
+        assert insert_reference(before, "./_files/a_metadata.tex") is not None
+
+    def test_copies_a_deeper_indentation(self) -> None:
+        before = (
+            "---\nformat:\n  pdf:\n    include-in-header:\n      text: |\n"
+            "            {\\large \\authorrole \\par}\n---\n"
+        )
+        after = insert_reference(before, "./_files/a_metadata.tex")
+        assert after is not None
+        assert "            \\input{./_files/a_metadata.tex}" in after
+
+    def test_no_front_matter_is_left_alone(self) -> None:
+        assert insert_reference("# Heading\n", "./_files/a_metadata.tex") is None
+
+    def test_a_flow_scalar_header_is_left_alone(self) -> None:
+        before = (
+            "---\nformat:\n  pdf:\n    include-in-header:\n"
+            '      text: "{\\large \\affiliationname \\par}"\n---\n'
+        )
+        assert insert_reference(before, "./_files/a_metadata.tex") is None
+
+    def test_the_result_is_served_on_the_next_pass(self) -> None:
+        """Once the line is in place, the reference is what discovery finds."""
+        before = self._document("{\\large \\affiliationname \\par}")
+        after = insert_reference(before, "./_files/doc_metadata.tex")
+        assert after is not None
+        assert find_metadata_inputs(front_matter_text(after)) == [
+            "./_files/doc_metadata.tex"
+        ]
+
+
 class TestDocumentScenarios:
     """The incidents, and the variants the corpus actually contains."""
 
@@ -519,9 +605,10 @@ class TestDocumentScenarios:
         _write(tmp_path / name, document)
         return tmp_path
 
-    def test_kletos_pitch_reports_every_named_macro(self, tmp_path, caplog) -> None:
-        r"""kletos/docs/pitch.qmd named three macros with no reference line,
-        and LuaLaTeX reported only the first, one line below \maketitle."""
+    def test_kletos_pitch_is_repaired(self, tmp_path, caplog) -> None:
+        r"""kletos/docs/pitch.qmd named three macros with no reference line, so
+        LuaLaTeX reported an undefined \affiliationname one line below
+        \maketitle.  The header is repaired and the file it needs is written."""
         document = _document(
             reference=None,
             header_extra=(
@@ -531,11 +618,50 @@ class TestDocumentScenarios:
             ),
         )
         self._project(tmp_path, document)
+        with caplog.at_level(logging.INFO):
+            assert generate_metadata_tex(tmp_path) is True
+
+        repaired = (tmp_path / "doc.qmd").read_text(encoding="utf-8")
+        assert repaired.count("\\input{") == 1
+        assert "\\input{./_files/doc_metadata.tex}" in repaired
+        written = (tmp_path / "_files" / "doc_metadata.tex").read_text(encoding="utf-8")
+        for name in ("affiliationname", "affiliationurl", "affiliationdomain"):
+            assert f"\\newcommand{{\\{name}}}" in written
+
+    def test_a_header_that_cannot_be_edited_is_reported(
+        self, tmp_path, caplog
+    ) -> None:
+        """A header written as a flow scalar offers no line to add, so the
+        document is reported and left alone."""
+        _write(
+            tmp_path / "doc.qmd",
+            "---\nformat:\n  pdf:\n    include-in-header:\n"
+            '      text: "{\\large \\affiliationname \\par}"\n---\n',
+        )
         with caplog.at_level(logging.WARNING):
             assert generate_metadata_tex(tmp_path) is True
         message = " ".join(str(r.message) for r in caplog.records)
-        for name in ("affiliationname", "affiliationurl", "affiliationdomain"):
-            assert name in message
+        assert "affiliationname" in message
+        assert not (tmp_path / "_files").exists()
+        assert "\\input{" not in (tmp_path / "doc.qmd").read_text(encoding="utf-8")
+
+    def test_repair_stays_out_when_another_input_is_missing(
+        self, tmp_path, caplog
+    ) -> None:
+        """A header that already inputs something nothing creates has an
+        ambiguous intent, so a second reference is not added."""
+        _write(
+            tmp_path / "doc.qmd",
+            "---\nformat:\n  pdf:\n    include-in-header:\n      text: |\n"
+            "        \\input{./_files/meta.tex}\n"
+            "        {\\large \\affiliationname \\par}\n---\n",
+        )
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        message = " ".join(str(r.message) for r in caplog.records)
+        assert "_files/meta.tex" in message
+        document = (tmp_path / "doc.qmd").read_text(encoding="utf-8")
+        assert document.count("\\input{") == 1
         assert not (tmp_path / "_files").exists()
 
     def test_ktema_whitepaper_needs_no_named_macro(self, tmp_path) -> None:
