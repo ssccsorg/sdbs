@@ -49,6 +49,13 @@ remain.  Neither changes a document in the corpus today.
   so a project could set them in a shared ``metadata-files`` entry.  The
   generator scripts read only the document's own front matter, and no
   project in the corpus uses the shared form.
+
+The contract is the macro list below.  A header is examined for those names
+and for the reference that gives them a path into the document, and for
+nothing else.  A command the generator does not declare, and a name outside
+the list, are not this step's to judge, so a header that names only such a
+name passes in silence.  The step is a statement about the metadata contract,
+and not about a document's LaTeX.
 """
 
 from __future__ import annotations

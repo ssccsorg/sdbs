@@ -99,6 +99,8 @@ metadata:
 
 A repair that a disabled case depends on is held back with it, so the affiliation keys are supplied together or not at all.
 
+The contract the step judges is the macro list its generator writes. A header is examined for those names and for the reference that gives them a path into the document, and for nothing else, so a header that names a command the generator does not declare passes in silence. A passing step is a statement about the metadata contract, and not about a document's LaTeX.
+
 ## Documentation
 
 - [SDBS](https://docs.ssccs.org/projects/sdbs/index.html): the project index, covering the build architecture, the parallel build model, and the LLMs pipeline.
