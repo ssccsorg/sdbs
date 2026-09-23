@@ -16,6 +16,7 @@ import pytest
 from sdb.utils.metadata import (
     GENERATED_MACROS,
     escape_value,
+    find_inputs,
     find_metadata_inputs,
     front_matter_text,
     generate_metadata_tex,
@@ -230,6 +231,19 @@ class TestFindMetadataInputs:
         assert find_metadata_inputs("\\input{_files/x_metadata.tex}") == [
             "_files/x_metadata.tex"
         ]
+
+    def test_finds_every_input(self) -> None:
+        block = "\\input{./_files/doc_metadata.tex}\n\\input{./_include/style.tex}\n"
+        assert find_inputs(block) == [
+            "./_files/doc_metadata.tex",
+            "./_include/style.tex",
+        ]
+        assert find_metadata_inputs(block) == ["./_files/doc_metadata.tex"]
+
+    def test_the_name_is_the_filter(self) -> None:
+        """A reference that breaks the convention is invisible to generation."""
+        assert find_inputs("\\input{./_files/meta.tex}") == ["./_files/meta.tex"]
+        assert find_metadata_inputs("\\input{./_files/meta.tex}") == []
 
     def test_ignores_body_reference(self) -> None:
         text = "---\ntitle: A\n---\n\n\\input{./_files/doc_metadata.tex}\n"
@@ -632,6 +646,54 @@ class TestDocumentScenarios:
         self._project(tmp_path, _document(reference="_files/doc_metadata.tex"))
         generate_metadata_tex(tmp_path)
         assert (tmp_path / "_files" / "doc_metadata.tex").is_file()
+
+    def test_a_markdown_document_is_served(self, tmp_path) -> None:
+        """Quarto renders .md alongside .qmd and sdbs treats both as source
+        documents, so both can carry the reference."""
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        _write(tmp_path / "notes.md", _document(reference="./_files/notes_metadata.tex"))
+        generate_metadata_tex(tmp_path)
+        assert (tmp_path / "_files" / "notes_metadata.tex").is_file()
+
+    def test_a_name_that_breaks_the_convention_is_reported(
+        self, tmp_path, caplog
+    ) -> None:
+        """The name is the discovery key, so ./_files/meta.tex is served by
+        nothing while the header's macros still need a definition."""
+        document = _document(
+            reference="./_files/meta.tex",
+            header_extra="{\\large \\@author \\affiliationname \\par}",
+        )
+        self._project(tmp_path, document)
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        message = " ".join(str(r.message) for r in caplog.records)
+        assert "_files/meta.tex" in message
+        assert "does not end in _metadata.tex" in message
+        assert not (tmp_path / "_files").exists()
+
+    def test_an_existing_side_input_is_not_reported(self, tmp_path, caplog) -> None:
+        """A hand-written file that the header also inputs is not this step's."""
+        _write(tmp_path / "_include" / "style.tex", "% hand written\n")
+        document = _document(
+            header_extra=(
+                "\\input{./_include/style.tex}\n"
+                "{\\large \\@author \\affiliationname \\par}"
+            ),
+        )
+        self._project(tmp_path, document)
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_an_input_a_chunk_writes_is_not_reported(self, tmp_path, caplog) -> None:
+        """A file a code chunk produces during the render has no contract
+        macro beside it, so the report stays confined to the naming case."""
+        document = _document(header_extra="\\input{./_files/from_chunk.tex}")
+        self._project(tmp_path, document)
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
     def test_same_reference_twice_is_not_a_collision(self, tmp_path, caplog) -> None:
         """A document may repeat its own reference without tripping the guard
