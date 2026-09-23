@@ -23,16 +23,18 @@ one both are expected to write.
 
 Two rules keep the step free of side effects.
 
-- It writes only a path a document references, and only inside the docs root,
-  and it edits a document in exactly one case: a header that names a
-  generated macro with no reference gets that reference inserted, which is
-  the inconsistency that would otherwise reach LuaLaTeX as an undefined
-  control sequence.  A Quarto configuration is never edited.
-- It writes only when the target is missing or older than the document
-  and the files the document resolves through ``metadata-files``.  A
-  repeated run converges after the first pass, and a project hook that
-  writes the same path at render time stays quiet because its output is
-  newer than the document.
+- It writes only what a document's own declarations ask for, and only inside
+  the docs root.  It generates the path a document references, inserts the
+  reference a header needs but does not declare, which is the inconsistency
+  that would otherwise reach LuaLaTeX as an undefined control sequence, and
+  adds the affiliation keys an ``affiliations`` entry is missing.  Every write
+  adds to a file the document already names, and a Quarto configuration is
+  never edited.
+- It writes the generated file only when the target is missing or older than
+  the document and the files the document resolves through
+  ``metadata-files``.  A repeated run converges after the first pass, and a
+  project hook that writes the same path at render time stays quiet because
+  its output is newer than the document.
 
 Two differences from the per-project ``_generate_metadata_tex.py`` scripts
 remain.  Neither changes a document in the corpus today.
@@ -54,9 +56,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import yaml
 
@@ -189,6 +193,355 @@ def escape_value(value: str) -> str:
             out.append(char)
         index += 1
     return "".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Case inventory
+# ---------------------------------------------------------------------------
+# Every potential inconsistency between a document's declarations and what the
+# renderer needs is one named case.  A case reports, and repairs when the
+# repair is mechanical.  The order below is the order they run, and each
+# position is an ordering constraint rather than a preference:
+#
+#   1. document-outside-root            report.  Nothing else can be judged.
+#   2. input-missing                    report.  Needs the document text.
+#   3. reference-missing                repair, insert the \input line, and
+#      report when no line can be added.  It decides whether a file is
+#      generated at all, and it changes the document text the version stamp
+#      hashes, so it runs before the stamp is taken.
+#   4. invalid-front-matter             report.  Needs the parsed mapping.
+#   5. declared-metadata-missing        report.  Needs the parsed mapping.
+#   6. affiliation-url-from-author-key  repair, the url is declared elsewhere.
+#   7. affiliation-url-from-domain      repair, https://<domain>.
+#   8. affiliation-domain-from-url      repair, the netloc of the url.
+#   9. affiliation-blank                report.  Nothing is left to derive from.
+#  10. reference-outside-root           report.  Needs the claimed set.
+#  11. shared-target                    report.  Needs the claimed set.
+#  12. metadata-file-missing-or-stale   repair, write the generated file.  It
+#      runs last because the cases above change what it must contain.
+#
+# A case can be turned off by name under ``metadata.disabled`` in build.yml,
+# and every repair can be turned off at once with ``metadata.report_only``,
+# which leaves the step reading and reporting only (the default sequence's
+# steps are documented in the README).
+CASE_DOCUMENT_OUTSIDE_ROOT = "document-outside-root"
+CASE_INPUT_MISSING = "input-missing"
+CASE_REFERENCE_MISSING = "reference-missing"
+CASE_INVALID_FRONT_MATTER = "invalid-front-matter"
+CASE_DECLARED_METADATA_MISSING = "declared-metadata-missing"
+CASE_AFFILIATION_URL_FROM_AUTHOR_KEY = "affiliation-url-from-author-key"
+CASE_AFFILIATION_URL_FROM_DOMAIN = "affiliation-url-from-domain"
+CASE_AFFILIATION_DOMAIN_FROM_URL = "affiliation-domain-from-url"
+CASE_AFFILIATION_BLANK = "affiliation-blank"
+CASE_REFERENCE_OUTSIDE_ROOT = "reference-outside-root"
+CASE_SHARED_TARGET = "shared-target"
+CASE_METADATA_FILE = "metadata-file-missing-or-stale"
+
+CASE_ORDER: Tuple[str, ...] = (
+    CASE_DOCUMENT_OUTSIDE_ROOT,
+    CASE_INPUT_MISSING,
+    CASE_REFERENCE_MISSING,
+    CASE_INVALID_FRONT_MATTER,
+    CASE_DECLARED_METADATA_MISSING,
+    CASE_AFFILIATION_URL_FROM_AUTHOR_KEY,
+    CASE_AFFILIATION_URL_FROM_DOMAIN,
+    CASE_AFFILIATION_DOMAIN_FROM_URL,
+    CASE_AFFILIATION_BLANK,
+    CASE_REFERENCE_OUTSIDE_ROOT,
+    CASE_SHARED_TARGET,
+    CASE_METADATA_FILE,
+)
+
+# A URL is derived with this scheme when only a domain is declared.  Every
+# affiliation in the corpus uses it, and the case is separately switchable.
+DERIVED_URL_SCHEME = "https://"
+
+
+@dataclass(frozen=True)
+class MetadataPolicy:
+    """Which cases may repair, and which are off entirely."""
+
+    report_only: bool = False
+    disabled: Tuple[str, ...] = ()
+
+    def is_enabled(self, case: str) -> bool:
+        return case not in self.disabled
+
+    def may_repair(self, case: str) -> bool:
+        return self.is_enabled(case) and not self.report_only
+
+
+def load_metadata_policy(docs_root: Path) -> MetadataPolicy:
+    """Read the ``metadata:`` block from ``build.yml``.
+
+    Unknown case names are reported rather than ignored, so a typo in a
+    switch does not silently leave a case on.
+    """
+    config_path = docs_root / "build.yml"
+    if not config_path.is_file():
+        return MetadataPolicy()
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        logger.warning("Could not read metadata policy from %s", config_path)
+        return MetadataPolicy()
+    block = cfg.get("metadata") if isinstance(cfg, dict) else None
+    if not isinstance(block, dict):
+        return MetadataPolicy()
+
+    disabled = block.get("disabled", [])
+    names = tuple(name for name in disabled if isinstance(name, str)) \
+        if isinstance(disabled, list) else ()
+    unknown = [name for name in names if name not in CASE_ORDER]
+    if unknown:
+        logger.warning(
+            "Unknown metadata case name(s) in build.yml: %s. Known cases: %s",
+            ", ".join(unknown), ", ".join(CASE_ORDER),
+        )
+    return MetadataPolicy(
+        report_only=bool(block.get("report_only", False)),
+        disabled=names,
+    )
+
+
+def _note(case: str, detail: str, level: int = logging.WARNING) -> None:
+    """Log one finding, tagged with the case that produced it."""
+    logger.log(level, "Metadata[%s]: %s", case, detail)
+
+
+def _did(case: str, detail: str) -> None:
+    """Log one repair, tagged with the case that produced it."""
+    logger.info("Metadata[%s]: %s (FIXING)", case, detail)
+
+
+# ---------------------------------------------------------------------------
+# Affiliation declaration
+# ---------------------------------------------------------------------------
+# The title page links with \href{\affiliationurl}{\affiliationdomain}, so an
+# affiliation that declares neither links nowhere.  An empty link is not a
+# LaTeX error, which is why this case reports rather than failing: the
+# declaration is incomplete for its consumer, and it is the generated file that
+# carries the result.
+#
+# A supplied key goes into the declared file rather than into the generated
+# one, because the declared file is what the generator reads: a Quarto-only
+# render, which reads the same file, is healed by the same write.
+#
+# A case fires only for a macro the document's own header names, so a document
+# that does not link an affiliation is never the reason a declared file is
+# edited.
+_AFFILIATION_URL_MACRO = "affiliationurl"
+_AFFILIATION_DOMAIN_MACRO = "affiliationdomain"
+
+# The key a legacy author file may carry the affiliation url under, beside the
+# nested affiliations entry the generator reads.
+_AUTHOR_URL_KEYS = ("affiliation-url", "affiliation_url")
+
+_LIST_ITEM_RE = re.compile(r"^(?P<indent>\s*)-\s(?P<rest>\S.*)$")
+_AFFILIATIONS_RE = re.compile(r"^\s*affiliations:\s*$")
+
+
+def _declared(value: Any) -> Optional[str]:
+    """Return the trimmed string a mapping declares, or None."""
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def derive_affiliation_url(
+    author: Dict[str, Any], affiliation: Dict[str, Any]
+) -> Tuple[Optional[str], Optional[str]]:
+    """Return the url to supply for an affiliation that declares none.
+
+    Returns ``(url, case)``, or ``(None, None)`` when the affiliation
+    declares a url or when nothing here can be derived from it.
+    """
+    if _declared(affiliation.get("url")):
+        return None, None
+    for key in _AUTHOR_URL_KEYS:
+        candidate = _declared(author.get(key))
+        if candidate:
+            return candidate, CASE_AFFILIATION_URL_FROM_AUTHOR_KEY
+    domain = _declared(affiliation.get("domain"))
+    if domain:
+        return DERIVED_URL_SCHEME + domain, CASE_AFFILIATION_URL_FROM_DOMAIN
+    return None, None
+
+
+def derive_affiliation_domain(
+    affiliation: Dict[str, Any], url: Optional[str]
+) -> Tuple[Optional[str], Optional[str]]:
+    """Return the domain to supply for an affiliation that declares none."""
+    if _declared(affiliation.get("domain")):
+        return None, None
+    candidate = _declared(url) or _declared(affiliation.get("url"))
+    if not candidate:
+        return None, None
+    netloc = urlparse(candidate).netloc
+    if netloc:
+        return netloc, CASE_AFFILIATION_DOMAIN_FROM_URL
+    return None, None
+
+
+def _affiliation_item(lines: List[str]) -> Optional[Tuple[int, int, int]]:
+    """Locate the first item of the first ``affiliations`` list.
+
+    Returns ``(item index, last index, key indentation)`` so a supplied key
+    can be appended to the item with the indentation its siblings use.
+    """
+    start = None
+    for index, line in enumerate(lines):
+        if _AFFILIATIONS_RE.match(line.rstrip("\n")):
+            start = index
+            break
+    if start is None:
+        return None
+
+    cursor = start + 1
+    while cursor < len(lines) and not lines[cursor].strip():
+        cursor += 1
+    if cursor >= len(lines):
+        return None
+    match = _LIST_ITEM_RE.match(lines[cursor].rstrip("\n"))
+    if not match:
+        return None
+
+    item = cursor
+    indent = len(match.group("indent"))
+    key_indent = indent + 2
+    last = item
+    cursor = item + 1
+    while cursor < len(lines):
+        current = lines[cursor].rstrip("\n")
+        if not current.strip():
+            break
+        if len(current) - len(current.lstrip()) <= indent:
+            break
+        last = cursor
+        cursor += 1
+    return item, last, key_indent
+
+
+def _item_key(
+    lines: List[str], item: int, last: int, key: str
+) -> Tuple[bool, Optional[str]]:
+    """Return ``(declared, value)`` for ``key`` inside a list item."""
+    pattern = re.compile(r"^\s*" + re.escape(key) + r":\s*(?P<value>.*)$")
+    for index in range(item, last + 1):
+        match = pattern.match(lines[index].rstrip("\n"))
+        if match:
+            return True, match.group("value").strip()
+    return False, None
+
+
+def supply_affiliation_declaration(
+    path: Path, used_macros: Iterable[str], policy: MetadataPolicy, root: Path
+) -> bool:
+    """Add the affiliation keys a title page links with to a declared file.
+
+    Only a key for a macro the document names is considered, only a key the
+    item does not already declare is added, at the indentation its siblings
+    use, and nothing else in the file changes.  Returns whether the file
+    changed, which tells the caller the merged mapping has to be read again.
+    """
+    text = _read_text(path)
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        logger.warning("Metadata: could not read %s: %s", path, exc)
+        return False
+    if not isinstance(data, dict):
+        return False
+
+    author = _first_author(data)
+    affiliation = _first_affiliation(author)
+    if not affiliation:
+        return False
+
+    url, url_case = derive_affiliation_url(author, affiliation)
+    # A domain derived from a url is derived from the url the file will carry,
+    # so switching the url case off leaves the two in step rather than writing
+    # a domain beside a url that is not there.
+    effective_url = affiliation.get("url")
+    if url is not None and policy.may_repair(url_case):
+        effective_url = url
+    domain, domain_case = derive_affiliation_domain(affiliation, effective_url)
+    supplied = (
+        (_AFFILIATION_URL_MACRO, "url", url, url_case),
+        (_AFFILIATION_DOMAIN_MACRO, "domain", domain, domain_case),
+    )
+    if not any(
+        macro in used_macros and value is not None
+        for macro, _, value, _ in supplied
+    ):
+        return False
+
+    lines = text.splitlines(keepends=True)
+    located = _affiliation_item(lines)
+    if located is None:
+        return False
+    item, last, key_indent = located
+
+    added = []
+    for macro, key, value, case in supplied:
+        if macro not in used_macros or value is None:
+            continue
+        if not policy.may_repair(case):
+            continue
+        present, _ = _item_key(lines, item, last, key)
+        if present:
+            continue
+        lines.insert(last + 1, " " * key_indent + f"{key}: {value}\n")
+        last += 1
+        added.append((case, key, value))
+
+    if not added:
+        return False
+    try:
+        path.write_text("".join(lines), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Metadata: could not write %s: %s", path, exc)
+        return False
+    for case, key, value in added:
+        _did(case, f"{_display(path, root)}: added {key}: {value}")
+    return True
+
+
+def report_affiliation_gaps(
+    merged: Dict[str, Any],
+    used_macros: Iterable[str],
+    qmd: Path,
+    root: Path,
+    policy: MetadataPolicy,
+) -> None:
+    """Report an affiliation link the header cannot fill.
+
+    The header is what consumes the values, so a gap is reported only for a
+    macro the header actually names: an affiliation that declares no url in a
+    document that links no url is not a mismatch.
+    """
+    if not policy.is_enabled(CASE_AFFILIATION_BLANK):
+        return
+    affiliation = _first_affiliation(_first_author(merged))
+    if not affiliation:
+        return
+
+    used = set(used_macros)
+    gaps = []
+    if _AFFILIATION_URL_MACRO in used and not _declared(affiliation.get("url")):
+        gaps.append("url")
+    if _AFFILIATION_DOMAIN_MACRO in used and not _declared(
+        affiliation.get("domain")
+    ):
+        gaps.append("domain")
+    if not gaps:
+        return
+    named = "/".join(f"\\affiliation{gap}" for gap in gaps)
+    _note(
+        CASE_AFFILIATION_BLANK,
+        f"{_display(qmd, root)} links {named}, and its affiliation declares "
+        f"no {' or '.join(gaps)}.",
+    )
 
 
 def _front_matter_end(lines: List[str]) -> Optional[int]:
@@ -334,7 +687,9 @@ def metadata_reference_for(qmd_path: Path) -> str:
 
 
 def resolve_metadata_files(
-    front: Dict[str, Any], qmd_path: Path
+    front: Dict[str, Any],
+    qmd_path: Path,
+    policy: MetadataPolicy = MetadataPolicy(),
 ) -> Tuple[Dict[str, Any], List[Path]]:
     """Merge the ``metadata-files`` chain over the front matter.
 
@@ -354,10 +709,11 @@ def resolve_metadata_files(
                 continue
             candidate = (qmd_path.parent / entry).resolve()
             if not candidate.is_file():
-                logger.warning(
-                    "Metadata: %s lists missing metadata file %s",
-                    qmd_path.name, entry,
-                )
+                if policy.is_enabled(CASE_DECLARED_METADATA_MISSING):
+                    _note(
+                        CASE_DECLARED_METADATA_MISSING,
+                        f"{qmd_path.name} lists missing metadata file {entry}",
+                    )
                 continue
             try:
                 data = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
@@ -479,10 +835,11 @@ def _report_missing_inputs(
             continue
         if (qmd.parent / path).resolve().is_file():
             continue
-        logger.warning(
-            "Metadata: %s inputs %s, which does not exist and whose name "
-            "does not end in _metadata.tex, so nothing here creates it.",
-            _display(qmd, root), path,
+        _note(
+            CASE_INPUT_MISSING,
+            f"{_display(qmd, root)} inputs {path}, which does not exist and "
+            f"whose name does not end in _metadata.tex, so nothing here "
+            f"creates it.",
         )
 
 
@@ -532,6 +889,7 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
     Returns True on success; a document that cannot be served is reported
     and left alone.
     """
+    policy = load_metadata_policy(root)
     claimed: Dict[Path, Path] = {}
     contested: Dict[Path, List[Path]] = {}
     outside: Dict[Path, List[Path]] = {}
@@ -546,18 +904,24 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
             # reference belongs to the tree the real file lives in.  The
             # document is skipped here rather than reported as a bad
             # reference, which is what it would otherwise look like.
-            logger.warning(
-                "Metadata: %s resolves outside the docs root, skipping.",
-                qmd,
-            )
+            if policy.is_enabled(CASE_DOCUMENT_OUTSIDE_ROOT):
+                _note(
+                    CASE_DOCUMENT_OUTSIDE_ROOT,
+                    f"{qmd} resolves outside the docs root, skipping.",
+                )
             continue
 
         text = _read_text(qmd)
         block = front_matter_text(text)
         references = find_metadata_inputs(block)
-        _report_missing_inputs(root, qmd, block, references)
+        if policy.is_enabled(CASE_INPUT_MISSING):
+            _report_missing_inputs(root, qmd, block, references)
 
-        if not references and named_contract_macros(block):
+        if (
+            not references
+            and named_contract_macros(block)
+            and policy.may_repair(CASE_REFERENCE_MISSING)
+        ):
             repaired = _repair_missing_reference(qmd, text)
             if repaired is not None:
                 try:
@@ -570,35 +934,45 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
                     references = find_metadata_inputs(block)
                     if references:
                         repaired_count += 1
-                        logger.info(
-                            "Metadata: added \\input{%s} to %s, whose header "
-                            "names %s with no generated file (FIXING).",
-                            references[0], _display(qmd, root),
-                            ", ".join(named_contract_macros(block)),
+                        _did(
+                            CASE_REFERENCE_MISSING,
+                            f"added \\input{{{references[0]}}} to "
+                            f"{_display(qmd, root)}, whose header names "
+                            f"{', '.join(named_contract_macros(block))} with "
+                            f"no generated file.",
                         )
 
         if not references:
             used = named_contract_macros(block)
-            if used:
+            if used and policy.is_enabled(CASE_REFERENCE_MISSING):
                 missing_reference += 1
-                logger.warning(
-                    "Metadata: %s names %s with no \\input{..._metadata.tex} "
-                    "reference, so the generated file has no path into the "
-                    "document.",
-                    _display(qmd, root), ", ".join(used),
+                _note(
+                    CASE_REFERENCE_MISSING,
+                    f"{_display(qmd, root)} names {', '.join(used)} with no "
+                    f"\\input{{..._metadata.tex}} reference, so the generated "
+                    f"file has no path into the document.",
                 )
             continue
 
         front = parse_front_matter(text)
         if front is None:
-            logger.warning(
-                "Metadata: %s has invalid front matter, so %s cannot be "
-                "generated from it.",
-                _display(qmd, root), ", ".join(references),
-            )
+            if policy.is_enabled(CASE_INVALID_FRONT_MATTER):
+                _note(
+                    CASE_INVALID_FRONT_MATTER,
+                    f"{_display(qmd, root)} has invalid front matter, so "
+                    f"{', '.join(references)} cannot be generated from it.",
+                )
             continue
 
-        merged, sources = resolve_metadata_files(front, qmd)
+        merged, sources = resolve_metadata_files(front, qmd, policy)
+        used = named_contract_macros(block)
+        changed = False
+        for source in sources:
+            if supply_affiliation_declaration(source, used, policy, root):
+                changed = True
+        if changed:
+            merged, sources = resolve_metadata_files(front, qmd, policy)
+        report_affiliation_gaps(merged, used, qmd, root, policy)
 
         for reference in references:
             target = (qmd.parent / reference).resolve()
@@ -614,6 +988,15 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
             inputs = [qmd] + sources
             if not _is_stale(target, inputs):
                 continue
+            if not policy.may_repair(CASE_METADATA_FILE):
+                if policy.is_enabled(CASE_METADATA_FILE):
+                    _note(
+                        CASE_METADATA_FILE,
+                        f"{_display(target, root)} is missing or older than "
+                        f"{_display(qmd, root)}, and report_only leaves it "
+                        f"alone.",
+                    )
+                continue
 
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -623,27 +1006,30 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
                 continue
 
             written += 1
-            logger.info(
-                "Metadata: wrote %s for %s",
-                _display(target, root), _display(qmd, root),
+            _did(
+                CASE_METADATA_FILE,
+                f"wrote {_display(target, root)} for {_display(qmd, root)}",
             )
 
     for target, documents in outside.items():
-        logger.warning(
-            "Metadata: %d document(s) reference %s outside the docs root (%s), "
-            "so it is left alone.",
-            len(documents), _display(target, root),
-            ", ".join(_display(document, root) for document in documents),
-        )
+        if policy.is_enabled(CASE_REFERENCE_OUTSIDE_ROOT):
+            _note(
+                CASE_REFERENCE_OUTSIDE_ROOT,
+                f"{len(documents)} document(s) reference "
+                f"{_display(target, root)} outside the docs root "
+                f"({', '.join(_display(document, root) for document in documents)}), "
+                f"so it is left alone.",
+            )
 
     for target, owners in contested.items():
-        logger.info(
-            "Metadata: %d documents reference %s (%s), so it carries the stamp "
-            "of %s.",
-            len(owners), _display(target, root),
-            ", ".join(_display(owner, root) for owner in owners),
-            _display(owners[0], root),
-        )
+        if policy.is_enabled(CASE_SHARED_TARGET):
+            _note(
+                CASE_SHARED_TARGET,
+                f"{len(owners)} documents reference {_display(target, root)} "
+                f"({', '.join(_display(owner, root) for owner in owners)}), so "
+                f"it carries the stamp of {_display(owners[0], root)}.",
+                level=logging.INFO,
+            )
 
     if written:
         logger.info("Metadata: generated %d file(s).", written)
