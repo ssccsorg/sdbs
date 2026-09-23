@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -520,6 +521,20 @@ class TestQuickRender:
         args, _ = mock_render.call_args
         assert args[0].name == "report.qmd"
 
+    @patch("sdb.utils.quick_render.generate_metadata_for")
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_metadata_failure_does_not_stop_the_render(
+        self, mock_render: MagicMock, mock_metadata: MagicMock,
+        qmd_tree: Path, caplog,
+    ) -> None:
+        """A build input must not take the preview down with it."""
+        mock_metadata.side_effect = RuntimeError("boom")
+        mock_render.return_value = True
+        with caplog.at_level(logging.WARNING):
+            assert quick_render("report", root=qmd_tree, prompt=False) is True
+        mock_render.assert_called_once()
+        assert any("Metadata generation failed" in r.message for r in caplog.records)
+
     @patch("sdb.utils.quick_render.render_qmd")
     def test_no_match(self, mock_render: MagicMock, qmd_tree: Path) -> None:
         """No matches returns False and does not render."""
@@ -735,6 +750,22 @@ class TestResolveAndRender:
         assert success is True
         assert len(paths) == 1
         assert paths[0].name == "report.qmd"
+
+    @patch("sdb.utils.quick_render.generate_metadata_for")
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_metadata_failure_does_not_stop_the_render(
+        self, mock_render: MagicMock, mock_metadata: MagicMock,
+        qmd_tree: Path, caplog,
+    ) -> None:
+        """The shared pipeline reports the failure and renders anyway."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_metadata.side_effect = RuntimeError("boom")
+        mock_render.return_value = True
+        with caplog.at_level(logging.WARNING):
+            success, paths = resolve_and_render(["report"], qmd_tree, prompt=False)
+        assert success is True
+        assert len(paths) == 1
+        assert any("Metadata generation failed" in r.message for r in caplog.records)
 
     @patch("sdb.utils.quick_render.render_qmd")
     def test_no_match(self, mock_render: MagicMock, qmd_tree: Path) -> None:

@@ -142,6 +142,19 @@ class TestEscapeValue:
     def test_plain_text_unchanged(self) -> None:
         assert escape_value("Taeho Lee") == "Taeho Lee"
 
+    def test_command_with_an_argument_survives(self) -> None:
+        """A value that already carries LaTeX is not half-escaped."""
+        assert escape_value(r"\textbackslash{}") == r"\textbackslash{}"
+
+    def test_command_argument_survives_beside_a_raw_special(self) -> None:
+        assert (
+            escape_value(r"\textbf{Founder} & Architect")
+            == r"\textbf{Founder} \& Architect"
+        )
+
+    def test_escaped_special_survives(self) -> None:
+        assert escape_value(r"100\% of them") == r"100\% of them"
+
     def test_url_keeps_its_shape(self) -> None:
         assert escape_value("https://test.ssccs.org") == "https://test.ssccs.org"
 
@@ -418,11 +431,18 @@ class TestGenerateMetadataTex:
         assert not (tmp_path.parent / "outside_doc_metadata.tex").exists()
 
     def test_shared_target_is_reported(self, tmp_path: Path, caplog) -> None:
-        _write(tmp_path / "a.qmd", _document())
-        _write(tmp_path / "b.qmd", _document())
-        with caplog.at_level(logging.WARNING):
+        """Several documents in a directory may share one generated file, as
+        the ssccs philosophy series and the es documents do.  The choice of
+        which document supplies the stamp has to be stated once."""
+        for name in ("a.qmd", "b.qmd", "c.qmd"):
+            _write(tmp_path / name, _document())
+        with caplog.at_level(logging.INFO):
             assert generate_metadata_tex(tmp_path) is True
-        assert any("both reference" in r.message for r in caplog.records)
+        messages = [str(r.message) for r in caplog.records]
+        contests = [m for m in messages if "documents reference" in m]
+        assert len(contests) == 1, contests
+        assert "3 documents reference" in contests[0]
+        assert "a.qmd" in contests[0] and "c.qmd" in contests[0]
 
     def test_excluded_document_is_skipped(self, tmp_path: Path) -> None:
         _write(tmp_path / "build.yml", 'exclude:\n  - "skip/**"\n')
