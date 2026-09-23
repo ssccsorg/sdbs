@@ -470,10 +470,8 @@ def supply_affiliation_declaration(
         (_AFFILIATION_URL_MACRO, "url", url, url_case),
         (_AFFILIATION_DOMAIN_MACRO, "domain", domain, domain_case),
     )
-    if not any(
-        macro in used_macros and value is not None
-        for macro, _, value, _ in supplied
-    ):
+    used = set(used_macros)
+    if not any(macro in used and value is not None for macro, _, value, _ in supplied):
         return False
 
     lines = text.splitlines(keepends=True)
@@ -484,7 +482,7 @@ def supply_affiliation_declaration(
 
     added = []
     for macro, key, value, case in supplied:
-        if macro not in used_macros or value is None:
+        if macro not in used or value is None:
             continue
         if not policy.may_repair(case):
             continue

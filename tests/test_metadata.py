@@ -1153,6 +1153,20 @@ class TestAffiliationDerivation:
         ) is True
         assert "url: https://rem.ssccs.org" in author.read_text(encoding="utf-8")
 
+    def test_the_macro_names_may_be_a_one_shot_iterable(self, tmp_path: Path) -> None:
+        """The caller's macro names are consulted for both keys, so a
+        generator has to be materialised rather than consumed once."""
+        author = _write(tmp_path / "author.yml", AUTHOR_URL_KEY)
+        assert supply_affiliation_declaration(
+            author,
+            iter(["affiliationurl", "affiliationdomain"]),
+            MetadataPolicy(),
+            tmp_path,
+        ) is True
+        declared = author.read_text(encoding="utf-8")
+        assert "url: https://rem.ssccs.org" in declared
+        assert "domain: rem.ssccs.org" in declared
+
 
 class TestAffiliationDeclaration:
     """The url and domain a title page links with are supplied where declared."""
