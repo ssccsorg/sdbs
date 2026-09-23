@@ -46,3 +46,18 @@ exclude:
   - "**/*_pages/"
   # Jupyter cache created during code cell execution.
   - "**/.jupyter_cache"
+
+# Metadata healing (optional)
+# The pre-build metadata step generates the LaTeX file a document's title page
+# inputs and heals an inconsistency between a document's declarations and what
+# the Quarto render needs, mostly on the PDF path.  Every case is named, so one
+# can be switched off on its own, and every repair can be switched off at once.
+#
+# Cases: document-outside-root, input-missing, reference-missing,
+# invalid-front-matter, declared-metadata-missing,
+# affiliation-url-from-author-key, affiliation-url-from-domain,
+# affiliation-domain-from-url, affiliation-blank, reference-outside-root,
+# shared-target, metadata-file-missing-or-stale
+metadata:
+  disabled: []
+  report_only: false

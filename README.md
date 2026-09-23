@@ -70,9 +70,34 @@ sdb clean docs
 - Path resolution: resolve relative asset paths and includes across QMD and MD files.
 - Footnote deduplication: in each `.qmd`, remove every use of a footnote tag after the first. Footnote definitions, YAML front matter, fenced code blocks, inline code spans, and escaped references are preserved.
 - Formatting: run `rumdl fmt` with MD036 disabled.
-- Metadata: write the `_metadata.tex` a document references from its PDF or beamer header, taking the values from the document's front matter and the files it lists under `metadata-files:`. A header that names a metadata macro without referencing a generated file has that reference inserted, which repairs the inconsistency that otherwise reaches LuaLaTeX as an undefined control sequence. It runs last so the version stamp covers the text after resolution and formatting, writes only when the target is missing or older than its inputs, and reports a document whose header offers no line to edit.
+- Metadata: write the `_metadata.tex` a document references from its PDF or beamer header, taking the values from the document's front matter and the files it lists under `metadata-files:`. The step heals the mismatches between those declarations and what the render needs. A header that names a metadata macro without referencing a generated file gets that reference inserted, which is the inconsistency that would otherwise reach LuaLaTeX as an undefined control sequence. An `affiliations` entry that declares no url or domain gets the key supplied in the file that declares it, which is what the `\href` on the title page reads; an incomplete affiliation renders an empty link rather than failing, so that case reports it. The generated file itself is written when it is missing or older than its inputs. It runs last so the version stamp covers the text after resolution and formatting, and it reports a document whose header offers no line to edit. Every case is named, so one can be switched off on its own under `metadata.disabled` in `build.yml`, and `metadata.report_only` turns every repair off at once.
 
-The sequence is idempotent. Running `sdb pre docs` on an already-clean tree changes nothing. Documents rendered through `sdb render` or `sdb pub` skip this sequence, since those commands call the underlying renderer directly without preprocessing. They do write the metadata file for the documents they select, and insert the reference a header needs, because the renderer reads that file from the document header and a preview of a new document would otherwise fail on a missing input.
+The sequence is idempotent. Running `sdb pre docs` on an already-clean tree changes nothing. Documents rendered through `sdb render` or `sdb pub` skip this sequence, since those commands call the underlying renderer directly without preprocessing. They do run the metadata step for the documents they select, which writes the file a header consumes, inserts the reference a header needs, and supplies the affiliation keys a header links with, because the renderer reads that file from the document header and a preview of a new document would otherwise fail on a missing input.
+
+### Metadata Cases
+
+The metadata step works through a named list of inconsistencies between a document's declarations and what the render needs. Each case is switched on its own under `metadata:` in `build.yml`, so a finding can be silenced or a repair held back without turning the step off.
+
+```yaml
+metadata:
+  disabled: [affiliation-blank]   # case names to switch off; a typo is reported
+  report_only: false              # report every finding and write nothing
+```
+
+- `document-outside-root`: a document that resolves out of the docs root is skipped, which is what a symlinked document looks like.
+- `input-missing`: a header input that does not exist and whose name does not follow the `*_metadata.tex` convention is reported, since nothing here creates it.
+- `reference-missing`: a header that names a generated macro with no reference gets the reference inserted, and a header with no editable line is reported.
+- `invalid-front-matter`: front matter that does not parse stops generation for that document rather than writing a file of empty macros.
+- `declared-metadata-missing`: a `metadata-files` entry the tree does not carry is reported and skipped.
+- `affiliation-url-from-author-key`: an affiliation with no url takes the url the same author entry declares at author level.
+- `affiliation-url-from-domain`: an affiliation with no url takes its domain with the `https://` scheme.
+- `affiliation-domain-from-url`: an affiliation with no domain takes the host of its url.
+- `affiliation-blank`: an affiliation whose url or domain a header links with, and that nothing can supply, is reported; the declaration is left alone.
+- `reference-outside-root`: a reference that resolves out of the docs root is reported per target and left alone.
+- `shared-target`: several documents referencing one generated file is reported once, with the document that supplies the stamp.
+- `metadata-file-missing-or-stale`: the generated file is written when it is missing or older than the document and its `metadata-files`.
+
+A repair that a disabled case depends on is held back with it, so the affiliation keys are supplied together or not at all.
 
 ## Documentation
 
