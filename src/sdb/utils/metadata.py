@@ -165,15 +165,6 @@ def parse_front_matter(text: str) -> Optional[Dict[str, Any]]:
     return data if isinstance(data, dict) else {}
 
 
-def read_front_matter(qmd_path: Path) -> Dict[str, Any]:
-    """Parse the YAML front matter of a document, or return an empty mapping."""
-    parsed = parse_front_matter(_read_text(qmd_path))
-    if parsed is None:
-        logger.warning("Metadata: invalid front matter in %s", qmd_path)
-        return {}
-    return parsed
-
-
 def find_metadata_inputs(front_matter_block: str) -> List[str]:
     """Return the ``..._metadata.tex`` paths the front matter references."""
     return [m.group(1) for m in METADATA_INPUT_RE.finditer(front_matter_block)]
