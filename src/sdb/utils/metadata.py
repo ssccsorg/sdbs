@@ -61,7 +61,8 @@ from sdb.utils.latest import matches_exclude
 
 logger = logging.getLogger(__name__)
 
-METADATA_INPUT_RE = re.compile(r"\\input\{([^}]*_metadata\.tex)\}")
+METADATA_NAME_RE = re.compile(r"_metadata\.tex$")
+INPUT_RE = re.compile(r"\\input\{([^}]+)\}")
 
 _ESCAPE_MAP = {
     "&": r"\&",
@@ -222,9 +223,22 @@ def parse_front_matter(text: str) -> Optional[Dict[str, Any]]:
     return data if isinstance(data, dict) else {}
 
 
+def find_inputs(front_matter_block: str) -> List[str]:
+    """Return every file the front matter inputs."""
+    return [m.group(1) for m in INPUT_RE.finditer(front_matter_block)]
+
+
 def find_metadata_inputs(front_matter_block: str) -> List[str]:
-    """Return the ``..._metadata.tex`` paths the front matter references."""
-    return [m.group(1) for m in METADATA_INPUT_RE.finditer(front_matter_block)]
+    """Return the inputs whose name follows the generated-file convention.
+
+    The name is the discovery key, so a document that asks for
+    ``./_files/meta.tex`` is served by nothing.  ``find_inputs`` exists so
+    that case can still be reported.
+    """
+    return [
+        path for path in find_inputs(front_matter_block)
+        if METADATA_NAME_RE.search(path)
+    ]
 
 
 def named_contract_macros(front_matter_block: str) -> List[str]:
@@ -344,6 +358,31 @@ def _display(path: Path, root: Path) -> str:
         return str(path)
 
 
+def _report_missing_inputs(
+    root: Path, qmd: Path, block: str, references: List[str]
+) -> None:
+    """Report an input the document needs but that nothing here creates.
+
+    A document that names a contract macro is asking for the generated
+    file, so an input whose name breaks the convention is a naming mistake
+    rather than an artifact produced elsewhere.  Reporting is confined to
+    that case, which keeps a file written by a code chunk during the render
+    out of it.
+    """
+    if not named_contract_macros(block):
+        return
+    for path in find_inputs(block):
+        if path in references:
+            continue
+        if (qmd.parent / path).resolve().is_file():
+            continue
+        logger.warning(
+            "Metadata: %s inputs %s, which does not exist and whose name "
+            "does not end in _metadata.tex, so nothing here creates it.",
+            _display(qmd, root), path,
+        )
+
+
 def _newest_mtime(paths: List[Path]) -> float:
     stamps = []
     for path in paths:
@@ -370,7 +409,7 @@ def generate_metadata_tex(docs_root: Path) -> bool:
     """
     root = docs_root.resolve()
     return _generate(
-        root, _discover_qmd_files(root, _load_build_yml_excludes(root))
+        root, _discover_documents(root, _load_build_yml_excludes(root))
     )
 
 
@@ -411,7 +450,10 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
                     "document.",
                     _display(qmd, root), ", ".join(used),
                 )
+                _report_missing_inputs(root, qmd, block, references)
             continue
+
+        _report_missing_inputs(root, qmd, block, references)
 
         front = parse_front_matter(text)
         if front is None:
@@ -491,11 +533,19 @@ def _load_build_yml_excludes(docs_root: Path) -> List[str]:
     return []
 
 
-def _discover_qmd_files(docs_root: Path, exclude_patterns: List[str]) -> List[Path]:
-    files: List[Path] = []
-    for path in sorted(docs_root.rglob("*.qmd")):
-        rel = path.relative_to(docs_root).as_posix()
-        if matches_exclude(rel, exclude_patterns):
-            continue
-        files.append(path)
-    return files
+def _discover_documents(
+    docs_root: Path, exclude_patterns: List[str]
+) -> List[Path]:
+    """Return the documents that can carry a metadata reference.
+
+    Quarto renders ``.md`` alongside ``.qmd``, and sdbs treats both as
+    source documents, so both are served.
+    """
+    found: List[Path] = []
+    for pattern in ("*.qmd", "*.md"):
+        for path in docs_root.rglob(pattern):
+            rel = path.relative_to(docs_root).as_posix()
+            if matches_exclude(rel, exclude_patterns):
+                continue
+            found.append(path)
+    return sorted(set(found))
