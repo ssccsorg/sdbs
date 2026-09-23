@@ -15,7 +15,11 @@ from pathlib import Path
 import pytest
 
 from sdb.utils.metadata import (
+    CASE_ORDER,
     GENERATED_MACROS,
+    MetadataPolicy,
+    derive_affiliation_domain,
+    derive_affiliation_url,
     escape_value,
     find_inputs,
     find_metadata_inputs,
@@ -23,10 +27,12 @@ from sdb.utils.metadata import (
     generate_metadata_tex,
     generate_metadata_for,
     insert_reference,
+    load_metadata_policy,
     named_contract_macros,
     parse_front_matter,
     render_metadata_tex,
     resolve_metadata_files,
+    supply_affiliation_declaration,
 )
 
 AUTHOR_YML = """author:
@@ -82,6 +88,55 @@ KTEMA_AUTHOR = """author:
         url: https://ktema.systems
 """
 
+# mtep/_include/author.founder.yml states the url at author level, beside an
+# affiliations entry that declares only a name.
+AUTHOR_URL_KEY = """author:
+  - name: Taeho Lee
+    corresponding: true
+    email: lee@ssccs.org
+    role: "Founder & Architect"
+    affiliation-name: Project Rem (Pre-Incorporation)
+    affiliation-url: https://rem.ssccs.org
+    affiliations:
+      - name: Project Rem (Pre-Incorporation)
+linkedin: https://www.linkedin.com/in/stells
+"""
+
+# ct/docs/_include/author.founder.yml declares a name and nothing else.
+AUTHOR_BLANK = """author:
+  - name: Taeho Lee
+    corresponding: true
+    email: chton@ssccs.org
+    role: "Founder & Architect"
+    affiliations:
+      - name: Project Chton (pre-incorporation)
+"""
+
+# An affiliation that declares a domain but no url.
+AUTHOR_DOMAIN_ONLY = """author:
+  - name: Taeho Lee
+    email: lee@ssccs.org
+    affiliations:
+      - name: Ktema Systems (Pre-incorporation)
+        domain: ktema.systems
+"""
+
+# An affiliation that declares a url but no domain.
+AUTHOR_URL_ONLY = """author:
+  - name: Taeho Lee
+    email: lee@ssccs.org
+    affiliations:
+      - name: Ktema Systems (Pre-incorporation)
+        url: https://ktema.systems
+"""
+
+# The header ktema/docs/pitch.qmd carries: the affiliation link is what
+# consumes the two values the declaration has to supply.
+AFFILIATION_HEADER = (
+    "{\\normalsize \\texttt{\\href{\\affiliationurl}"
+    "{\\affiliationdomain}} \\par}"
+)
+
 
 def _write(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -119,6 +174,11 @@ def _document(
         lines += [f"        {line}" for line in header_extra.splitlines()]
     lines += ["---", "", "Body.", ""]
     return "\n".join(lines)
+
+
+def _affiliation_document() -> str:
+    """A document whose title page links with the affiliation macros."""
+    return _document(header_extra=AFFILIATION_HEADER)
 
 
 class TestEscapeValue:
@@ -950,3 +1010,291 @@ class TestDegradedInputs:
         _write(tmp_path / "doc.qmd", "\ufeff" + _document())
         generate_metadata_tex(tmp_path)
         assert (tmp_path / "_files" / "doc_metadata.tex").is_file()
+
+
+class TestMetadataPolicy:
+    """A case can be switched off on its own, and every repair at once."""
+
+    def test_absent_policy_repairs(self, tmp_path: Path) -> None:
+        policy = load_metadata_policy(tmp_path)
+        assert policy == MetadataPolicy()
+        assert policy.is_enabled(CASE_ORDER[0])
+        assert policy.may_repair(CASE_ORDER[0])
+
+    def test_disabled_case_and_report_only_are_read(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path / "build.yml",
+            "metadata:\n  disabled:\n    - affiliation-blank\n"
+            "  report_only: true\n",
+        )
+        policy = load_metadata_policy(tmp_path)
+        assert policy.is_enabled("reference-missing")
+        assert not policy.is_enabled("affiliation-blank")
+        assert not policy.may_repair("reference-missing")
+        assert not policy.may_repair("affiliation-blank")
+
+    def test_unknown_case_name_is_reported(self, tmp_path: Path, caplog) -> None:
+        _write(tmp_path / "build.yml", "metadata:\n  disabled:\n    - typo-case\n")
+        with caplog.at_level(logging.WARNING):
+            policy = load_metadata_policy(tmp_path)
+        message = " ".join(str(r.message) for r in caplog.records)
+        assert "typo-case" in message
+        assert "reference-missing" in message
+        assert policy.is_enabled("reference-missing")
+
+    def test_a_yml_without_the_block_uses_the_default(self, tmp_path: Path) -> None:
+        _write(tmp_path / "build.yml", 'exclude:\n  - "**/skip/**"\n')
+        assert load_metadata_policy(tmp_path) == MetadataPolicy()
+
+    def test_invalid_build_yml_uses_the_default(self, tmp_path: Path, caplog) -> None:
+        _write(tmp_path / "build.yml", "metadata: [not a mapping\n")
+        with caplog.at_level(logging.WARNING):
+            policy = load_metadata_policy(tmp_path)
+        assert policy == MetadataPolicy()
+
+    def test_disabled_case_repairs_nothing(self, tmp_path: Path) -> None:
+        """A disabled case is off entirely rather than reported."""
+        _write(
+            tmp_path / "build.yml",
+            "metadata:\n  disabled:\n    - metadata-file-missing-or-stale\n",
+        )
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        _write(tmp_path / "doc.qmd", _document())
+        assert generate_metadata_tex(tmp_path) is True
+        assert not (tmp_path / "_files" / "doc_metadata.tex").exists()
+
+    def test_report_only_writes_nothing(self, tmp_path: Path, caplog) -> None:
+        _write(tmp_path / "build.yml", "metadata:\n  report_only: true\n")
+        author = _write(tmp_path / "_include" / "author.yml", AUTHOR_URL_KEY)
+        before = author.read_text(encoding="utf-8")
+        _write(tmp_path / "doc.qmd", _affiliation_document())
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        assert not (tmp_path / "_files").exists()
+        assert author.read_text(encoding="utf-8") == before
+        message = " ".join(str(r.message) for r in caplog.records)
+        assert "Metadata[metadata-file-missing-or-stale]:" in message
+        assert "report_only leaves it alone" in message
+
+    def test_report_only_still_reports_a_missing_reference(
+        self, tmp_path, caplog
+    ) -> None:
+        _write(tmp_path / "build.yml", "metadata:\n  report_only: true\n")
+        _write(
+            tmp_path / "doc.qmd",
+            _document(
+                reference=None,
+                header_extra="{\\large \\affiliationname \\par}",
+            ),
+        )
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        assert "\\input{" not in (tmp_path / "doc.qmd").read_text(encoding="utf-8")
+        assert any(
+            str(r.message).startswith("Metadata[reference-missing]:")
+            for r in caplog.records
+        )
+
+
+class TestAffiliationDerivation:
+    """The derivation is a pure function of the declaration."""
+
+    def test_url_is_left_alone_when_declared(self) -> None:
+        assert derive_affiliation_url(
+            {"affiliation-url": "https://author.example"},
+            {"url": "https://affiliation.example"},
+        ) == (None, None)
+
+    def test_url_comes_from_the_author_key_before_the_domain(self) -> None:
+        assert derive_affiliation_url(
+            {"affiliation-url": "https://author.example"},
+            {"domain": "affiliation.example"},
+        ) == ("https://author.example", "affiliation-url-from-author-key")
+
+    def test_url_comes_from_the_domain_with_https(self) -> None:
+        assert derive_affiliation_url({}, {"domain": "ktema.systems"}) == (
+            "https://ktema.systems",
+            "affiliation-url-from-domain",
+        )
+
+    def test_nothing_to_derive(self) -> None:
+        assert derive_affiliation_url({}, {"name": "Only a name"}) == (None, None)
+
+    def test_domain_is_left_alone_when_declared(self) -> None:
+        assert derive_affiliation_domain({"domain": "a.example"}, None) == (
+            None,
+            None,
+        )
+
+    def test_domain_comes_from_the_url(self) -> None:
+        assert derive_affiliation_domain({}, "https://ktema.systems/x") == (
+            "ktema.systems",
+            "affiliation-domain-from-url",
+        )
+
+    def test_domain_from_a_url_without_a_host_is_not_derived(self) -> None:
+        assert derive_affiliation_domain({}, "ktema.systems") == (None, None)
+
+    def test_blank_values_are_treated_as_absent(self) -> None:
+        assert derive_affiliation_url(
+            {}, {"url": "   ", "domain": "a.example"}
+        ) == ("https://a.example", "affiliation-url-from-domain")
+        assert derive_affiliation_domain({"domain": "  "}, None) == (None, None)
+
+    def test_a_document_that_links_no_macro_edits_nothing(self, tmp_path: Path) -> None:
+        author = _write(tmp_path / "author.yml", AUTHOR_URL_KEY)
+        before = author.read_text(encoding="utf-8")
+        assert supply_affiliation_declaration(
+            author, [], MetadataPolicy(), tmp_path
+        ) is False
+        assert author.read_text(encoding="utf-8") == before
+        assert supply_affiliation_declaration(
+            author, ["affiliationurl"], MetadataPolicy(), tmp_path
+        ) is True
+        assert "url: https://rem.ssccs.org" in author.read_text(encoding="utf-8")
+
+
+class TestAffiliationDeclaration:
+    """The url and domain a title page links with are supplied where declared."""
+
+    def _project(self, tmp_path: Path, author: str) -> Path:
+        _write(tmp_path / "_include" / "author.yml", author)
+        _write(tmp_path / "doc.qmd", _affiliation_document())
+        return tmp_path / "_include" / "author.yml"
+
+    def test_url_and_domain_from_the_author_key(self, tmp_path, caplog) -> None:
+        """mtep/_include/author.founder.yml states the url at author level,
+        beside an affiliations entry that declares only a name."""
+        author = self._project(tmp_path, AUTHOR_URL_KEY)
+        with caplog.at_level(logging.INFO):
+            assert generate_metadata_tex(tmp_path) is True
+        declared = author.read_text(encoding="utf-8")
+        assert "\n        url: https://rem.ssccs.org\n" in declared
+        assert "\n        domain: rem.ssccs.org\n" in declared
+        rendered = (tmp_path / "_files" / "doc_metadata.tex").read_text(
+            encoding="utf-8"
+        )
+        assert "\\newcommand{\\affiliationurl}{https://rem.ssccs.org}" in rendered
+        assert "\\newcommand{\\affiliationdomain}{rem.ssccs.org}" in rendered
+        message = " ".join(str(r.message) for r in caplog.records)
+        assert "Metadata[affiliation-url-from-author-key]:" in message
+        assert "Metadata[affiliation-domain-from-url]:" in message
+
+    def test_url_from_the_domain(self, tmp_path, caplog) -> None:
+        author = self._project(tmp_path, AUTHOR_DOMAIN_ONLY)
+        with caplog.at_level(logging.INFO):
+            assert generate_metadata_tex(tmp_path) is True
+        declared = author.read_text(encoding="utf-8")
+        assert "\n        url: https://ktema.systems\n" in declared
+        # The domain is declared, so it is not derived beside the url.
+        assert declared.count("domain:") == 1
+        assert "Metadata[affiliation-url-from-domain]:" in " ".join(
+            str(r.message) for r in caplog.records
+        )
+
+    def test_domain_from_the_url(self, tmp_path, caplog) -> None:
+        author = self._project(tmp_path, AUTHOR_URL_ONLY)
+        with caplog.at_level(logging.INFO):
+            assert generate_metadata_tex(tmp_path) is True
+        declared = author.read_text(encoding="utf-8")
+        assert "\n        domain: ktema.systems\n" in declared
+        assert "Metadata[affiliation-domain-from-url]:" in " ".join(
+            str(r.message) for r in caplog.records
+        )
+
+    def test_indentation_matches_the_siblings(self, tmp_path) -> None:
+        """A deeper affiliations list keeps the indentation it uses."""
+        author = self._project(
+            tmp_path,
+            "author:\n  - name: T\n    affiliations:\n"
+            "          - name: Ktema Systems\n"
+            "            domain: ktema.systems\n",
+        )
+        assert generate_metadata_tex(tmp_path) is True
+        assert "\n            url: https://ktema.systems\n" in author.read_text(
+            encoding="utf-8"
+        )
+
+    def test_blank_affiliation_is_reported_and_left_alone(
+        self, tmp_path, caplog
+    ) -> None:
+        """ct/docs/_include/author.founder.yml declares a name and nothing
+        else, so there is nothing here to derive from."""
+        author = self._project(tmp_path, AUTHOR_BLANK)
+        before = author.read_text(encoding="utf-8")
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        assert author.read_text(encoding="utf-8") == before
+        message = " ".join(str(r.message) for r in caplog.records)
+        assert "Metadata[affiliation-blank]:" in message
+        assert "no url or domain" in message
+
+    def test_declared_values_are_not_touched(self, tmp_path) -> None:
+        author = self._project(tmp_path, AUTHOR_YML)
+        before = author.read_text(encoding="utf-8")
+        assert generate_metadata_tex(tmp_path) is True
+        assert author.read_text(encoding="utf-8") == before
+
+    def test_a_gap_the_header_does_not_link_is_not_reported(
+        self, tmp_path, caplog
+    ) -> None:
+        """An affiliation link no header consumes is not a mismatch."""
+        author = self._project(tmp_path, AUTHOR_BLANK)
+        before = author.read_text(encoding="utf-8")
+        _write(
+            tmp_path / "doc.qmd",
+            _document(header_extra="{\\large \\affiliationname \\par}"),
+        )
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        assert author.read_text(encoding="utf-8") == before
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_second_pass_changes_nothing(self, tmp_path) -> None:
+        author = self._project(tmp_path, AUTHOR_URL_KEY)
+        generate_metadata_tex(tmp_path)
+        declared = author.read_text(encoding="utf-8")
+        (tmp_path / "_files" / "doc_metadata.tex").write_text(
+            "% marker\n", encoding="utf-8"
+        )
+        generate_metadata_tex(tmp_path)
+        assert author.read_text(encoding="utf-8") == declared
+
+    def test_a_disabled_case_leaves_the_declaration_alone(self, tmp_path) -> None:
+        _write(
+            tmp_path / "build.yml",
+            "metadata:\n  disabled:\n    - affiliation-url-from-author-key\n",
+        )
+        author = self._project(tmp_path, AUTHOR_URL_KEY)
+        before = author.read_text(encoding="utf-8")
+        generate_metadata_tex(tmp_path)
+        assert author.read_text(encoding="utf-8") == before
+
+
+class TestCaseTags:
+    """Every finding and repair names the case that produced it."""
+
+    def test_an_unrepairable_reference_is_tagged(self, tmp_path, caplog) -> None:
+        _write(
+            tmp_path / "doc.qmd",
+            "---\nformat:\n  pdf:\n    include-in-header:\n"
+            '      text: "{\\large \\affiliationname \\par}"\n---\n',
+        )
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        assert any(
+            str(r.message).startswith("Metadata[reference-missing]:")
+            for r in caplog.records
+        )
+
+    def test_a_write_is_tagged_as_its_case(self, tmp_path, caplog) -> None:
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        _write(tmp_path / "doc.qmd", _document())
+        with caplog.at_level(logging.INFO):
+            assert generate_metadata_tex(tmp_path) is True
+        records = [str(r.message) for r in caplog.records]
+        assert any(
+            m.startswith("Metadata[metadata-file-missing-or-stale]:")
+            for m in records
+        )
+        assert any(m.endswith("(FIXING)") for m in records)
