@@ -22,7 +22,6 @@ from sdb.utils.metadata import (
     generate_metadata_for,
     named_contract_macros,
     parse_front_matter,
-    read_front_matter,
     render_metadata_tex,
     resolve_metadata_files,
 )
@@ -85,6 +84,12 @@ def _write(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def _front_matter(path: Path) -> dict:
+    parsed = parse_front_matter(path.read_text(encoding="utf-8"))
+    assert parsed is not None, f"front matter of {path} is invalid"
+    return parsed
 
 
 def _document(
@@ -185,6 +190,10 @@ class TestFrontMatterText:
     def test_unterminated_block(self) -> None:
         assert front_matter_text("---\ntitle: A\n") == ""
 
+    def test_crlf_line_endings(self) -> None:
+        """A document written on another platform still yields its block."""
+        assert front_matter_text("---\r\ntitle: A\r\n---\r\n") == "title: A\r\n"
+
 
 class TestFindMetadataInputs:
     """find_metadata_inputs() locates the generated file reference."""
@@ -202,6 +211,12 @@ class TestFindMetadataInputs:
 
     def test_ignores_other_inputs(self) -> None:
         assert find_metadata_inputs("\\input{./_include/style.tex}\n") == []
+
+    def test_reference_without_a_dot_slash(self) -> None:
+        """A hand-written document may omit the leading ./ that the corpus uses."""
+        assert find_metadata_inputs("\\input{_files/x_metadata.tex}") == [
+            "_files/x_metadata.tex"
+        ]
 
     def test_ignores_body_reference(self) -> None:
         text = "---\ntitle: A\n---\n\n\\input{./_files/doc_metadata.tex}\n"
@@ -236,7 +251,7 @@ class TestResolveMetadataFiles:
             "---\nmetadata-files:\n  - ./_include/a.yml\n  - ./_include/b.yml\n"
             "author: from_qmd\n---\n",
         )
-        merged, sources = resolve_metadata_files(read_front_matter(qmd), qmd)
+        merged, sources = resolve_metadata_files(_front_matter(qmd), qmd)
         assert merged["author"] == "from_qmd"
         assert merged["link-citations"] is True
         assert [p.name for p in sources] == ["a.yml", "b.yml"]
@@ -246,7 +261,7 @@ class TestResolveMetadataFiles:
             tmp_path / "doc.qmd",
             "---\nmetadata-files:\n  - ./_include/absent.yml\n---\n",
         )
-        merged, sources = resolve_metadata_files(read_front_matter(qmd), qmd)
+        merged, sources = resolve_metadata_files(_front_matter(qmd), qmd)
         assert sources == []
         assert merged == {"metadata-files": ["./_include/absent.yml"]}
 
@@ -265,7 +280,7 @@ class TestRenderMetadataTex:
             tmp_path / "doc.qmd",
             "---\nmetadata-files:\n  - ./_include/author.yml\n" + extra + "---\n",
         )
-        merged, _ = resolve_metadata_files(read_front_matter(qmd), qmd)
+        merged, _ = resolve_metadata_files(_front_matter(qmd), qmd)
         return render_metadata_tex(merged, qmd)
 
     def test_declares_every_macro(self, tmp_path: Path) -> None:
@@ -592,6 +607,24 @@ class TestDocumentScenarios:
         generate_metadata_tex(tmp_path)
         assert (tmp_path / "_files" / "a_metadata.tex").is_file()
         assert (tmp_path / "_files" / "b_metadata.tex").is_file()
+
+    def test_relative_reference_without_a_dot_slash(self, tmp_path) -> None:
+        self._project(tmp_path, _document(reference="_files/doc_metadata.tex"))
+        generate_metadata_tex(tmp_path)
+        assert (tmp_path / "_files" / "doc_metadata.tex").is_file()
+
+    def test_same_reference_twice_is_not_a_collision(self, tmp_path, caplog) -> None:
+        """A document may repeat its own reference without tripping the guard
+        that exists for two documents sharing one target."""
+        document = _document(
+            reference="./_files/doc_metadata.tex",
+            header_extra="\\input{./_files/doc_metadata.tex}",
+        )
+        self._project(tmp_path, document)
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert (tmp_path / "_files" / "doc_metadata.tex").is_file()
 
     def test_generated_trees_are_excluded(self, tmp_path) -> None:
         """Output and dependency trees carry copies that must not be served."""
