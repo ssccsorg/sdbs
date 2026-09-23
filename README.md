@@ -44,7 +44,7 @@ sdb init docs --template ssccs     # with SSCCS-specific templates
 sdb build .
 sdb build . --website -j 4         # parallel website build
 
-# Pre-render steps (latest docs, path resolution, footnote cleanup, formatting)
+# Pre-render steps (latest docs, path resolution, footnote cleanup, formatting, metadata)
 sdb pre docs
 
 # Validate links and citations
@@ -64,14 +64,15 @@ sdb clean docs
 
 ## Pre-build Sequence
 
-`pre` and every `build` invoke the same built-in pre-build sequence before rendering. The sequence runs in four phases.
+`pre` and every `build` invoke the same built-in pre-build sequence before rendering. The sequence runs in five phases.
 
 - Latest docs: regenerate `_include/_updated_docs_list.qmd` from git-tracked documents.
 - Path resolution: resolve relative asset paths and includes across QMD and MD files.
 - Footnote deduplication: in each `.qmd`, remove every use of a footnote tag after the first. Footnote definitions, YAML front matter, fenced code blocks, inline code spans, and escaped references are preserved.
 - Formatting: run `rumdl fmt` with MD036 disabled.
+- Metadata: write the `_metadata.tex` a document references from its PDF or beamer header, taking the values from the document's front matter and the files it lists under `metadata-files:`. It runs last so the version stamp covers the text after resolution and formatting, writes only when the target is missing or older than its inputs, and reports a document that names a metadata macro without referencing a generated file.
 
-The sequence is idempotent. Running `sdb pre docs` on an already-clean tree changes nothing. Documents rendered through `sdb render` or `sdb pub` skip this sequence, since those commands call the underlying renderer directly without preprocessing.
+The sequence is idempotent. Running `sdb pre docs` on an already-clean tree changes nothing. Documents rendered through `sdb render` or `sdb pub` skip this sequence, since those commands call the underlying renderer directly without preprocessing. They do write the metadata file for the documents they select, because the renderer reads it from the document header and a preview of a new document would otherwise fail on a missing input.
 
 ## Documentation
 
