@@ -708,6 +708,53 @@ class TestDocumentScenarios:
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
         assert (tmp_path / "_files" / "doc_metadata.tex").is_file()
 
+    def test_two_documents_on_one_outside_target_report_once(
+        self, tmp_path, caplog
+    ) -> None:
+        """The skip is per target, so the report is consolidated like the
+        shared-target report rather than repeated per document."""
+        reference = "../../shared/notes_metadata.tex"
+        for name in ("a.qmd", "b.qmd"):
+            _write(tmp_path / name, _document(reference))
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        reported = [
+            str(record.message) for record in caplog.records
+            if "outside the docs root" in str(record.message)
+        ]
+        assert len(reported) == 1, reported
+        assert "2 document(s)" in reported[0]
+        assert not (tmp_path / "_files").exists()
+
+    def test_a_symlinked_document_is_skipped_as_a_document(
+        self, tmp_path, caplog
+    ) -> None:
+        """A document resolving out of the tree is a document-level skip, not
+        a bad reference reported against the document that points at it."""
+        outside = _write(tmp_path.parent / "linked_source.qmd", _document())
+        try:
+            os.symlink(outside, tmp_path / "linked.qmd")
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks are not available in this environment")
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        message = " ".join(str(r.message) for r in caplog.records)
+        assert "resolves outside the docs root" in message
+        assert not (tmp_path / "_files").exists()
+
+    def test_a_fresh_shared_target_is_not_rewritten_for_another_sharer(
+        self, tmp_path
+    ) -> None:
+        """The first document in path order owns a shared target, so a second
+        document that happens to be newer does not change it."""
+        self._project(tmp_path, _document(), name="a.qmd")
+        generate_metadata_tex(tmp_path)
+        target = tmp_path / "_files" / "doc_metadata.tex"
+        before = target.read_text(encoding="utf-8")
+        _write(tmp_path / "b.qmd", _document())
+        generate_metadata_tex(tmp_path)
+        assert target.read_text(encoding="utf-8") == before
+
     def test_generated_trees_are_excluded(self, tmp_path) -> None:
         """Output and dependency trees carry copies that must not be served."""
         _write(
