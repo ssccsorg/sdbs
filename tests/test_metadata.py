@@ -328,6 +328,11 @@ class TestNamedContractMacros:
     def test_ignores_similar_plain_key(self) -> None:
         assert named_contract_macros("version-prefix: test_doc\n") == []
 
+    def test_an_undeclared_name_is_not_returned(self) -> None:
+        """The contract is the declared list, so a name outside it is not a
+        contract macro even when it reads like one."""
+        assert named_contract_macros("{\\large \\affiliationcity \\par}") == []
+
 
 class TestResolveMetadataFiles:
     """resolve_metadata_files() merges the chain and reports the sources."""
@@ -880,6 +885,22 @@ class TestDocumentScenarios:
         with caplog.at_level(logging.WARNING):
             assert generate_metadata_tex(tmp_path) is True
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_a_name_outside_the_declared_list_passes_in_silence(
+        self, tmp_path, caplog
+    ) -> None:
+        r"""The contract is the declared macro list, so a header that names a
+        command the generator does not declare is not this step's to judge."""
+        document = _document(
+            reference=None,
+            header_extra="{\\large \\affiliationcity \\par}",
+        )
+        self._project(tmp_path, document)
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert not (tmp_path / "_files").exists()
+        assert "\\input{" not in (tmp_path / "doc.qmd").read_text(encoding="utf-8")
 
     def test_same_reference_twice_is_not_a_collision(self, tmp_path, caplog) -> None:
         """A document may repeat its own reference without tripping the guard
