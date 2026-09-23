@@ -42,6 +42,7 @@ from sdb.resolve import resolve_all
 from sdb.utils.footnotes import clean_duplicate_footnotes
 from sdb.utils.latest import generate_latest_docs
 from sdb.utils.llms import generate_llms_txt
+from sdb.utils.metadata import generate_metadata_tex
 
 logger = logging.getLogger(__name__)
 
@@ -552,11 +553,14 @@ def refresh_cache_for_target(
 
 
 # Default pre-build sequence (always runs first, before user config)
+# The metadata step runs last so the version stamp it writes covers the
+# document text after path resolution and formatting have had their turn.
 _DEFAULT_PRE_BUILD: List[Callable[[Path], Any] | List[str]] = [
     generate_latest_docs,
     resolve_all,
     clean_duplicate_footnotes,
     ["rumdl", "fmt", ".", "--silent", "--disable", "MD036"],
+    generate_metadata_tex,
 ]
 
 # Default post-render sequence (always runs after build)

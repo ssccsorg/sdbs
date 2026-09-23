@@ -36,6 +36,11 @@ class TestDefaultCommandConstants:
     def test_pre_build_has_rumdl(self) -> None:
         assert ["rumdl", "fmt", ".", "--silent", "--disable", "MD036"] in _DEFAULT_PRE_BUILD
 
+    def test_metadata_generation_runs_last(self) -> None:
+        """The version stamp must cover the text after formatting."""
+        from sdb.utils.metadata import generate_metadata_tex
+        assert _DEFAULT_PRE_BUILD[-1] is generate_metadata_tex
+
     def test_post_render_has_generate_llms(self) -> None:
         from sdb.utils.llms import generate_llms_txt
         assert generate_llms_txt in _DEFAULT_POST_RENDER
