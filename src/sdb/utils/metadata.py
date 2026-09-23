@@ -30,6 +30,20 @@ Two rules keep the step free of side effects.
   repeated run converges after the first pass, and a project hook that
   writes the same path at render time stays quiet because its output is
   newer than the document.
+
+Two differences from the per-project ``_generate_metadata_tex.py`` scripts
+remain.  Neither changes a document in the corpus today.
+
+- A file referenced by several documents is written from the first of them
+  in path order and the choice is reported at info level, while a project
+  hook writes it from whichever document rendered last.  Sharing is normal
+  here: five ssccs philosophy documents and three es documents point at one
+  file each, and ``mtep/_files/_metadata.tex`` is shared by two documents
+  that disagree about ``version-mark``.
+- ``version-prefix`` and ``version-mark`` are read from the merged metadata,
+  so a project could set them in a shared ``metadata-files`` entry.  The
+  generator scripts read only the document's own front matter, and no
+  project in the corpus uses the shared form.
 """
 
 from __future__ import annotations
@@ -112,21 +126,64 @@ def _preceded_by_backslash(value: str, index: int) -> bool:
     return count % 2 == 1
 
 
+def _matching_brace(value: str, start: int) -> Optional[int]:
+    """Return the index of the brace that closes the one at ``start``."""
+    depth = 0
+    for index in range(start, len(value)):
+        if value[index] == "{":
+            depth += 1
+        elif value[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def _command_end(value: str, start: int) -> int:
+    r"""Return the index after a LaTeX command beginning at ``start``.
+
+    Returns ``start`` when the backslash opens no command name, so a bare
+    ``\&`` or ``\{`` is handled by the escape rule below.  A command that
+    carries a braced argument is consumed with it, which keeps a value such
+    as ``\textbackslash{}`` from having its braces escaped apart from the
+    command that needs them.
+    """
+    index = start + 1
+    if index >= len(value) or not value[index].isalpha():
+        return start
+    while index < len(value) and value[index].isalpha():
+        index += 1
+    if index < len(value) and value[index] == "{":
+        end = _matching_brace(value, index)
+        if end is not None:
+            return end + 1
+    return index
+
+
 def escape_value(value: str) -> str:
-    """Escape LaTeX specials in an author value, leaving existing escapes alone.
+    """Escape LaTeX specials in an author value, leaving existing LaTeX alone.
 
     The author data in the corpus disagrees about where escaping happens:
     some trees store a raw ``&`` and rely on the writer, and others store
     ``\\&`` already escaped.  An unconditional escape turns the second
     case into ``\\textbackslash{}\\&`` and renders a stray backslash, so a
-    character that already follows a backslash passes through.
+    value that already carries a LaTeX command passes through untouched.
     """
     out = []
-    for index, char in enumerate(value):
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if char == "\\":
+            end = _command_end(value, index)
+            if end > index:
+                out.append(value[index:end])
+                index = end
+                continue
         if char in _ESCAPE_MAP and not _preceded_by_backslash(value, index):
             out.append(_ESCAPE_MAP[char])
         else:
             out.append(char)
+        index += 1
     return "".join(out)
 
 
@@ -334,6 +391,7 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
     and left alone.
     """
     claimed: Dict[Path, Path] = {}
+    contested: Dict[Path, List[Path]] = {}
     written = 0
     missing_reference = 0
 
@@ -376,11 +434,7 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
                 continue
             owner = claimed.get(target)
             if owner is not None and owner != qmd:
-                logger.warning(
-                    "Metadata: %s and %s both reference %s, leaving it to %s.",
-                    _display(owner, root), _display(qmd, root),
-                    reference, _display(owner, root),
-                )
+                contested.setdefault(target, [owner]).append(qmd)
                 continue
             claimed[target] = qmd
 
@@ -400,6 +454,15 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
                 "Metadata: wrote %s for %s",
                 _display(target, root), _display(qmd, root),
             )
+
+    for target, owners in contested.items():
+        logger.info(
+            "Metadata: %d documents reference %s (%s), so it carries the stamp "
+            "of %s.",
+            len(owners), _display(target, root),
+            ", ".join(_display(owner, root) for owner in owners),
+            _display(owners[0], root),
+        )
 
     if written:
         logger.info("Metadata: generated %d file(s).", written)
