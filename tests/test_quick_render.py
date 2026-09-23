@@ -488,6 +488,28 @@ class TestSelectQmdFiles:
 class TestQuickRender:
     """Tests for the orchestration layer."""
 
+    @patch("sdb.utils.quick_render.generate_metadata_for")
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_generates_metadata_before_rendering(
+        self, mock_render: MagicMock, mock_metadata: MagicMock, qmd_tree: Path
+    ) -> None:
+        """The preview path writes the metadata file Quarto's header reads."""
+        mock_render.return_value = True
+        quick_render("report", root=qmd_tree, prompt=False)
+        mock_metadata.assert_called_once()
+        paths, docs_root = mock_metadata.call_args[0]
+        assert [p.name for p in paths] == ["report.qmd"]
+        assert docs_root == qmd_tree
+
+    @patch("sdb.utils.quick_render.generate_metadata_for")
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_no_match_generates_nothing(
+        self, mock_render: MagicMock, mock_metadata: MagicMock, qmd_tree: Path
+    ) -> None:
+        """No selected document means no metadata work."""
+        quick_render("nonexistent", root=qmd_tree)
+        mock_metadata.assert_not_called()
+
     @patch("sdb.utils.quick_render.render_qmd")
     def test_single_match_renders(self, mock_render: MagicMock, qmd_tree: Path) -> None:
         """Single match calls render_qmd once."""
@@ -685,6 +707,20 @@ class TestQuickRender:
 
 class TestResolveAndRender:
     """Tests for the shared multi-pattern pipeline."""
+
+    @patch("sdb.utils.quick_render.generate_metadata_for")
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_generates_metadata_for_selected_documents(
+        self, mock_render: MagicMock, mock_metadata: MagicMock, qmd_tree: Path
+    ) -> None:
+        """The shared render and publish pipeline generates what it renders."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_render.return_value = True
+        resolve_and_render(["report"], qmd_tree, prompt=False)
+        mock_metadata.assert_called_once()
+        paths, docs_root = mock_metadata.call_args[0]
+        assert [p.name for p in paths] == ["report.qmd"]
+        assert docs_root == qmd_tree
 
     @patch("sdb.utils.quick_render.render_qmd")
     def test_single_pattern_success(

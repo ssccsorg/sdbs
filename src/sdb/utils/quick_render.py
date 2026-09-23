@@ -13,6 +13,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from sdb.utils.metadata import generate_metadata_for
+
 logger = logging.getLogger(__name__)
 
 
@@ -368,6 +370,8 @@ def quick_render(
     if selected is None:
         return False
 
+    generate_metadata_for(selected, root or Path.cwd())
+
     success = True
     for qmd in selected:
         if not render_qmd(qmd, cwd=root, format=format):
@@ -468,6 +472,10 @@ def resolve_and_render(
                 logger.info("Cancelled.")
                 return (False, [])
             print("Invalid choice. Enter 1, 2, or q.")
+
+    # The metadata file is a build input rather than a byproduct, so it is
+    # generated before Quarto reads the document headers.
+    generate_metadata_for(file_order, root)
 
     # Render
     success = True
