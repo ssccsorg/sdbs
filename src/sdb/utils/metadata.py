@@ -431,14 +431,27 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
     """
     claimed: Dict[Path, Path] = {}
     contested: Dict[Path, List[Path]] = {}
+    outside: Dict[Path, List[Path]] = {}
     written = 0
     missing_reference = 0
 
     for qmd in qmds:
         qmd = Path(qmd).resolve()
+        if not qmd.is_relative_to(root):
+            # A symlinked document resolves out of the tree, and its
+            # reference belongs to the tree the real file lives in.  The
+            # document is skipped here rather than reported as a bad
+            # reference, which is what it would otherwise look like.
+            logger.warning(
+                "Metadata: %s resolves outside the docs root, skipping.",
+                qmd,
+            )
+            continue
+
         text = _read_text(qmd)
         block = front_matter_text(text)
         references = find_metadata_inputs(block)
+        _report_missing_inputs(root, qmd, block, references)
 
         if not references:
             used = named_contract_macros(block)
@@ -450,10 +463,7 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
                     "document.",
                     _display(qmd, root), ", ".join(used),
                 )
-                _report_missing_inputs(root, qmd, block, references)
             continue
-
-        _report_missing_inputs(root, qmd, block, references)
 
         front = parse_front_matter(text)
         if front is None:
@@ -469,10 +479,7 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
         for reference in references:
             target = (qmd.parent / reference).resolve()
             if not target.is_relative_to(root):
-                logger.warning(
-                    "Metadata: %s references %s outside the docs root, skipping.",
-                    _display(qmd, root), reference,
-                )
+                outside.setdefault(target, []).append(qmd)
                 continue
             owner = claimed.get(target)
             if owner is not None and owner != qmd:
@@ -496,6 +503,14 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
                 "Metadata: wrote %s for %s",
                 _display(target, root), _display(qmd, root),
             )
+
+    for target, documents in outside.items():
+        logger.warning(
+            "Metadata: %d document(s) reference %s outside the docs root (%s), "
+            "so it is left alone.",
+            len(documents), _display(target, root),
+            ", ".join(_display(document, root) for document in documents),
+        )
 
     for target, owners in contested.items():
         logger.info(
