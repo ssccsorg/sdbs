@@ -370,7 +370,10 @@ def quick_render(
     if selected is None:
         return False
 
-    generate_metadata_for(selected, root or Path.cwd())
+    try:
+        generate_metadata_for(selected, root or Path.cwd())
+    except Exception as exc:  # a build input must not stop the render
+        logger.warning("Metadata generation failed: %s", exc)
 
     success = True
     for qmd in selected:
@@ -475,7 +478,10 @@ def resolve_and_render(
 
     # The metadata file is a build input rather than a byproduct, so it is
     # generated before Quarto reads the document headers.
-    generate_metadata_for(file_order, root)
+    try:
+        generate_metadata_for(file_order, root)
+    except Exception as exc:  # a build input must not stop the render
+        logger.warning("Metadata generation failed: %s", exc)
 
     # Render
     success = True
