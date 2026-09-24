@@ -23,9 +23,12 @@ from sdb.utils.metadata import (
     escape_value,
     find_inputs,
     find_metadata_inputs,
+    find_plain_references,
     front_matter_text,
     generate_metadata_tex,
     generate_metadata_for,
+    guard_reference,
+    has_guarded_reference,
     insert_reference,
     load_metadata_policy,
     named_contract_macros,
@@ -511,6 +514,100 @@ class TestGenerateMetadataTex:
         digest = hashlib.sha256(document.encode("utf-8")).hexdigest()[:6]
         assert digest in written.splitlines()[0]
 
+    def test_a_plain_reference_is_guarded(self, tmp_path: Path, caplog) -> None:
+        """An input that a render without sdbs would fail on is put behind a
+        guard, and the stamp covers the guarded text."""
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        _write(
+            tmp_path / "doc.qmd",
+            _document(header_extra="{\\large \\affiliationname \\par}"),
+        )
+        with caplog.at_level(logging.INFO):
+            assert generate_metadata_tex(tmp_path) is True
+        document = (tmp_path / "doc.qmd").read_text(encoding="utf-8")
+        assert "\\IfFileExists{./_files/doc_metadata.tex}" in document
+        assert "\\providecommand{\\affiliationname}{}" in document
+        digest = hashlib.sha256(document.encode("utf-8")).hexdigest()[:6]
+        written = (tmp_path / "_files" / "doc_metadata.tex").read_text(encoding="utf-8")
+        assert digest in written.splitlines()[0]
+        assert "Metadata[reference-unguarded]:" in " ".join(
+            str(record.message) for record in caplog.records
+        )
+
+    def test_a_document_with_nothing_to_consume_is_guarded_too(
+        self, tmp_path: Path
+    ) -> None:
+        """The input itself is what fails when the file is absent, so a
+        document that declares no macro still gets the guard."""
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        _write(tmp_path / "doc.qmd", _document())
+        assert generate_metadata_tex(tmp_path) is True
+        document = (tmp_path / "doc.qmd").read_text(encoding="utf-8")
+        assert "\\IfFileExists{./_files/doc_metadata.tex}" in document
+        assert "\\providecommand" not in document
+
+    def test_a_guarded_document_is_left_alone(self, tmp_path: Path, caplog) -> None:
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        guarded = _document(header_extra="{\\large \\affiliationname \\par}").replace(
+            "        \\input{./_files/doc_metadata.tex}",
+            "        \\IfFileExists{./_files/doc_metadata.tex}"
+            "{\\input{./_files/doc_metadata.tex}}"
+            "{\\providecommand{\\affiliationname}{}}",
+        )
+        _write(tmp_path / "doc.qmd", guarded)
+        with caplog.at_level(logging.INFO):
+            assert generate_metadata_tex(tmp_path) is True
+        assert (tmp_path / "doc.qmd").read_text(encoding="utf-8") == guarded
+        assert not any(
+            "reference-unguarded" in str(record.message)
+            for record in caplog.records
+        )
+
+    def test_the_guard_case_can_be_switched_off(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path / "build.yml",
+            "metadata:\n  disabled:\n    - reference-unguarded\n",
+        )
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        _write(tmp_path / "doc.qmd", _document())
+        assert generate_metadata_tex(tmp_path) is True
+        document = (tmp_path / "doc.qmd").read_text(encoding="utf-8")
+        assert "\\IfFileExists" not in document
+        assert (tmp_path / "_files" / "doc_metadata.tex").is_file()
+
+    def test_the_guard_case_under_report_only_is_reported(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        _write(tmp_path / "build.yml", "metadata:\n  report_only: true\n")
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        _write(tmp_path / "doc.qmd", _document())
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        message = " ".join(str(record.message) for record in caplog.records)
+        assert "Metadata[reference-unguarded]:" in message
+        assert "report_only leaves it alone" in message
+        assert "\\IfFileExists" not in (tmp_path / "doc.qmd").read_text(
+            encoding="utf-8"
+        )
+
+    def test_a_reference_in_another_form_is_reported(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        """A flow scalar header offers no line to rewrite, so the document is
+        reported rather than left to fail on a render without sdbs."""
+        _write(
+            tmp_path / "doc.qmd",
+            "---\ntitle: T\nformat:\n  pdf:\n    include-in-header:\n"
+            '      text: "\\input{./_files/doc_metadata.tex} '
+            '{\\large \\affiliationname \\par}"\n---\n',
+        )
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        message = " ".join(str(record.message) for record in caplog.records)
+        assert "Metadata[reference-unguarded]:" in message
+        assert "cannot rewrite" in message
+        assert not (tmp_path / "_files").exists()
+
     def test_reference_outside_root_is_skipped(self, tmp_path: Path, caplog) -> None:
         _write(
             tmp_path / "a" / "doc.qmd",
@@ -580,6 +677,81 @@ class TestGenerateMetadataFor:
 # =========================================================================
 # Scenarios drawn from the documents that motivated the step
 # =========================================================================
+
+
+class TestGuardReference:
+    """guard_reference() puts an existing input behind \\IfFileExists."""
+
+    def _document(self, header: str, indent: str = "        ") -> str:
+        lines = (
+            "---",
+            'title: "Test"',
+            "format:",
+            "  pdf:",
+            "    include-in-header:",
+            "      text: |",
+            indent + header,
+            "---",
+            "",
+            "Body.",
+            "",
+        )
+        return "\n".join(lines)
+
+    def test_rewrites_a_plain_input(self) -> None:
+        before = self._document("\\input{./_files/doc_metadata.tex}")
+        after = guard_reference(before, ["affiliationname"])
+        assert after is not None
+        assert (
+            "        \\IfFileExists{./_files/doc_metadata.tex}"
+            "{\\input{./_files/doc_metadata.tex}}{\\GenericWarning" in after
+        )
+        assert "\\providecommand{\\affiliationname}{}" in after
+        assert "\n        \\input{./_files/doc_metadata.tex}\n" not in after
+        assert after.endswith("Body.\n")
+
+    def test_guards_even_without_macro_names(self) -> None:
+        """A document that consumes nothing still has to survive the absent
+        file, because the input itself is what fails."""
+        before = self._document("\\input{./_files/doc_metadata.tex}")
+        after = guard_reference(before, [])
+        assert after is not None
+        assert "\\IfFileExists{./_files/doc_metadata.tex}" in after
+        assert "\\providecommand" not in after
+
+    def test_an_already_guarded_header_is_left_alone(self) -> None:
+        before = self._document(
+            "\\IfFileExists{./_files/doc_metadata.tex}"
+            "{\\input{./_files/doc_metadata.tex}}{}"
+        )
+        assert guard_reference(before, ["affiliationname"]) is None
+
+    def test_a_header_without_an_input_is_left_alone(self) -> None:
+        before = self._document("{\\large \\affiliationname \\par}")
+        assert guard_reference(before, ["affiliationname"]) is None
+
+    def test_line_endings_are_preserved(self) -> None:
+        before = self._document("\\input{./_files/doc_metadata.tex}").replace(
+            "\n", "\r\n"
+        )
+        after = guard_reference(before, ["version"])
+        assert after is not None
+        assert after.count("\r\n") == before.count("\r\n")
+
+    def test_the_readers_see_both_forms(self) -> None:
+        plain = (
+            "---\nformat:\n  pdf:\n    include-in-header:\n      text: |\n"
+            "        \\input{./_files/a_metadata.tex}\n---\n"
+        )
+        guarded = (
+            "---\nformat:\n  pdf:\n    include-in-header:\n      text: |\n"
+            "        \\IfFileExists{./_files/a_metadata.tex}"
+            "{\\input{./_files/a_metadata.tex}}{}\n---\n"
+        )
+        assert find_plain_references(plain) == ["./_files/a_metadata.tex"]
+        assert find_plain_references(guarded) == []
+        assert has_guarded_reference(guarded) is True
+        assert has_guarded_reference(plain) is False
 
 
 class TestInsertReference:
@@ -1325,6 +1497,12 @@ class TestAffiliationDeclaration:
         """A supplied key goes into a metadata-files entry, because that is
         what the generator reads, so a document that declares the affiliation
         itself is reported rather than edited."""
+        # The guard case rewrites the header, so it is switched off to isolate
+        # what this case does to the document.
+        _write(
+            tmp_path / "build.yml",
+            "metadata:\n  disabled:\n    - reference-unguarded\n",
+        )
         document = (
             "---\n"
             'title: "Test"\n'

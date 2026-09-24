@@ -221,15 +221,20 @@ def escape_value(value: str) -> str:
 #      report when no line can be added.  It decides whether a file is
 #      generated at all, and it changes the document text the version stamp
 #      hashes, so it runs before the stamp is taken.
-#   4. invalid-front-matter             report.  Needs the parsed mapping.
-#   5. declared-metadata-missing        report.  Needs the parsed mapping.
-#   6. affiliation-url-from-author-key  repair, the url is declared elsewhere.
-#   7. affiliation-url-from-domain      repair, https://<domain>.
-#   8. affiliation-domain-from-url      repair, the netloc of the url.
-#   9. affiliation-blank                report.  Nothing is left to derive from.
-#  10. reference-outside-root           report.  Needs the claimed set.
-#  11. shared-target                    report.  Needs the claimed set.
-#  12. metadata-file-missing-or-stale   repair, write the generated file.  It
+#   4. reference-unguarded              repair, put that line behind
+#      \IfFileExists, and report a reference in a form this step cannot
+#      rewrite.  Values then come from sdbs, and a render that never reaches
+#      sdbs compiles with them empty.  It edits the same text the stamp
+#      hashes, so it runs before the stamp too.
+#   5. invalid-front-matter             report.  Needs the parsed mapping.
+#   6. declared-metadata-missing        report.  Needs the parsed mapping.
+#   7. affiliation-url-from-author-key  repair, the url is declared elsewhere.
+#   8. affiliation-url-from-domain      repair, https://<domain>.
+#   9. affiliation-domain-from-url      repair, the netloc of the url.
+#  10. affiliation-blank                report.  Nothing is left to derive from.
+#  11. reference-outside-root           report.  Needs the claimed set.
+#  12. shared-target                    report.  Needs the claimed set.
+#  13. metadata-file-missing-or-stale   repair, write the generated file.  It
 #      runs last because the cases above change what it must contain.
 #
 # A case can be turned off by name under ``metadata.disabled`` in build.yml,
@@ -239,6 +244,7 @@ def escape_value(value: str) -> str:
 CASE_DOCUMENT_OUTSIDE_ROOT = "document-outside-root"
 CASE_INPUT_MISSING = "input-missing"
 CASE_REFERENCE_MISSING = "reference-missing"
+CASE_REFERENCE_UNGUARDED = "reference-unguarded"
 CASE_INVALID_FRONT_MATTER = "invalid-front-matter"
 CASE_DECLARED_METADATA_MISSING = "declared-metadata-missing"
 CASE_AFFILIATION_URL_FROM_AUTHOR_KEY = "affiliation-url-from-author-key"
@@ -253,6 +259,7 @@ CASE_ORDER: Tuple[str, ...] = (
     CASE_DOCUMENT_OUTSIDE_ROOT,
     CASE_INPUT_MISSING,
     CASE_REFERENCE_MISSING,
+    CASE_REFERENCE_UNGUARDED,
     CASE_INVALID_FRONT_MATTER,
     CASE_DECLARED_METADATA_MISSING,
     CASE_AFFILIATION_URL_FROM_AUTHOR_KEY,
@@ -667,8 +674,8 @@ def _header_block_starts(lines: List[str]) -> List[Tuple[int, int]]:
     return found
 
 
-def _reference_entry(reference: str, empty_macros: Iterable[str]) -> str:
-    """Return the header line that inputs the generated file.
+def _guarded_entry(reference: str, names: List[str]) -> str:
+    """Return the header line that inputs the generated file behind a guard.
 
     A header that uses the contract can be rendered without sdbs, and then the
     generated file is absent.  The guard keeps that render compiling by
@@ -676,10 +683,7 @@ def _reference_entry(reference: str, empty_macros: Iterable[str]) -> str:
     loses the stamp and the affiliation values rather than failing.  The
     reference itself stays in the same shape, so discovery is unaffected.
     """
-    names = list(dict.fromkeys(empty_macros))
-    if not names:
-        return f"\\input{{{reference}}}"
-    empty = "".join(f"\\providecommand{{\\{name}}}{{}}" for name in names)
+    declared = "".join(f"\\providecommand{{\\{name}}}{{}}" for name in names)
     warning = (
         "\\GenericWarning{}{Metadata: no generated file is present, so the "
         "version stamp and the affiliation values are empty. "
@@ -688,8 +692,70 @@ def _reference_entry(reference: str, empty_macros: Iterable[str]) -> str:
     return (
         f"\\IfFileExists{{{reference}}}"
         f"{{\\input{{{reference}}}}}"
-        f"{{{warning}{empty}}}"
+        f"{{{warning}{declared}}}"
     )
+
+
+def _reference_entry(reference: str, empty_macros: Iterable[str]) -> str:
+    """Return the header line that inputs the generated file.
+
+    The guard needs the macro names, so a caller that does not know them gets
+    the plain line.
+    """
+    names = list(dict.fromkeys(empty_macros))
+    if not names:
+        return f"\\input{{{reference}}}"
+    return _guarded_entry(reference, names)
+
+
+_PLAIN_REFERENCE_RE = re.compile(
+    r"^(?P<indent>[ \t]*)\\input\{(?P<reference>[^}]*_metadata\.tex)\}[ \t]*$"
+)
+_GUARDED_REFERENCE_RE = re.compile(r"\\IfFileExists\{[^}]*_metadata\.tex\}")
+
+
+def find_plain_references(block: str) -> List[str]:
+    """Return the generated files a header inputs without a guard."""
+    return [
+        match.group("reference")
+        for line in block.splitlines()
+        if (match := _PLAIN_REFERENCE_RE.match(line))
+    ]
+
+
+def has_guarded_reference(block: str) -> bool:
+    """Return True when a header guards its input with ``\\IfFileExists``."""
+    return bool(_GUARDED_REFERENCE_RE.search(block))
+
+
+def guard_reference(text: str, empty_macros: Iterable[str]) -> Optional[str]:
+    """Put a header's metadata input behind ``\\IfFileExists``.
+
+    The values come from sdbs, and a render that never reaches sdbs compiles
+    with the macros the header uses declared empty.  Returns None when the
+    document carries no plain input line, which leaves the choice to the
+    author.
+    """
+    lines = text.splitlines(keepends=True)
+    end = _front_matter_end(lines)
+    if end is None:
+        return None
+
+    names = list(dict.fromkeys(empty_macros))
+    guarded = False
+    for index in range(1, end):
+        body = lines[index].rstrip("\r\n")
+        match = _PLAIN_REFERENCE_RE.match(body)
+        if not match:
+            continue
+        ending = lines[index][len(body):] or "\n"
+        lines[index] = (
+            match.group("indent")
+            + _guarded_entry(match.group("reference"), names)
+            + ending
+        )
+        guarded = True
+    return "".join(lines) if guarded else None
 
 
 def insert_reference(
@@ -997,6 +1063,46 @@ def _generate(root: Path, qmds: Iterable[Path]) -> bool:
                     f"file has no path into the document.",
                 )
             continue
+
+        if policy.is_enabled(CASE_REFERENCE_UNGUARDED):
+            plain = find_plain_references(block)
+            if plain and not has_guarded_reference(block):
+                if policy.may_repair(CASE_REFERENCE_UNGUARDED):
+                    guarded = guard_reference(text, named_contract_macros(block))
+                    if guarded is not None:
+                        try:
+                            qmd.write_text(guarded, encoding="utf-8")
+                        except OSError as exc:
+                            logger.warning(
+                                "Metadata: could not write %s: %s", qmd, exc
+                            )
+                        else:
+                            text = guarded
+                            block = front_matter_text(text)
+                            references = find_metadata_inputs(block)
+                            _did(
+                                CASE_REFERENCE_UNGUARDED,
+                                f"guarded {', '.join(plain)} in "
+                                f"{_display(qmd, root)}, so a render that never "
+                                f"reaches sdbs still compiles.",
+                            )
+                else:
+                    _note(
+                        CASE_REFERENCE_UNGUARDED,
+                        f"{_display(qmd, root)} inputs {', '.join(plain)} "
+                        f"without a guard, and report_only leaves it alone.",
+                    )
+            elif named_contract_macros(block) and not has_guarded_reference(
+                block
+            ):
+                # The macros are named and the reference sits somewhere this
+                # step cannot rewrite, such as a flow scalar header.
+                _note(
+                    CASE_REFERENCE_UNGUARDED,
+                    f"{_display(qmd, root)} inputs a generated file in a form "
+                    f"this step cannot rewrite, so a render that never reaches "
+                    f"sdbs fails on the absent file.",
+                )
 
         front = parse_front_matter(text)
         if front is None:
