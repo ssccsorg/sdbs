@@ -640,9 +640,11 @@ def _header_block_starts(lines: List[str]) -> List[Tuple[int, int]]:
     """Locate the literal header blocks that name a generated macro.
 
     Returns ``(first content line index, content indentation)`` for every
-    ``text: |`` block whose content uses a macro, so a missing reference
-    can be added where the macros are used rather than anywhere in the
-    front matter.
+    ``text: |`` block whose content uses a macro, so a missing reference can
+    be added where the macros are used rather than anywhere in the front
+    matter.  A literal block may open with blank lines, which YAML keeps as
+    content, so the block is located from its first line that carries
+    something; a block whose lines are all blank offers no line to edit.
     """
     found: List[Tuple[int, int]] = []
     for index, line in enumerate(lines):
@@ -650,17 +652,19 @@ def _header_block_starts(lines: List[str]) -> List[Tuple[int, int]]:
         if not match:
             continue
         directive_indent = len(match.group("indent"))
-        if index + 1 >= len(lines):
+
+        start = index + 1
+        while start < len(lines) and not lines[start].strip():
+            start += 1
+        if start >= len(lines):
             continue
-        first = lines[index + 1]
-        if not first.strip():
-            continue
+        first = lines[start]
         content_indent = len(first) - len(first.lstrip())
         if content_indent <= directive_indent:
             continue
 
         block: List[str] = []
-        cursor = index + 1
+        cursor = start
         while cursor < len(lines):
             current = lines[cursor]
             if current.strip() and (len(current) - len(current.lstrip())) <= directive_indent:
@@ -670,7 +674,7 @@ def _header_block_starts(lines: List[str]) -> List[Tuple[int, int]]:
 
         body = "".join(block)
         if any(re.search(r"\\" + name + r"\b", body) for name in GENERATED_MACROS):
-            found.append((index + 1, content_indent))
+            found.append((start, content_indent))
     return found
 
 

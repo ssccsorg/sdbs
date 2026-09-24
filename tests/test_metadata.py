@@ -514,6 +514,26 @@ class TestGenerateMetadataTex:
         digest = hashlib.sha256(document.encode("utf-8")).hexdigest()[:6]
         assert digest in written.splitlines()[0]
 
+    def test_a_header_that_opens_with_a_blank_line_is_repaired(
+        self, tmp_path: Path
+    ) -> None:
+        """The shape a hand-edited header reaches: the literal block opens with
+        a blank line and the reference has been taken out."""
+        _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
+        _write(
+            tmp_path / "doc.qmd",
+            "---\ntitle: T\nmetadata-files:\n  - ./_include/author.yml\n"
+            "format:\n  pdf:\n    include-in-header:\n      text: |\n"
+            "        \n"
+            "        \\usepackage{xcolor}\n"
+            "        {\\large \\affiliationname \\par}\n---\n\nBody.\n",
+        )
+        assert generate_metadata_tex(tmp_path) is True
+        document = (tmp_path / "doc.qmd").read_text(encoding="utf-8")
+        assert "\\IfFileExists{./_files/doc_metadata.tex}" in document
+        assert "\\providecommand{\\affiliationname}{}" in document
+        assert (tmp_path / "_files" / "doc_metadata.tex").is_file()
+
     def test_a_plain_reference_is_guarded(self, tmp_path: Path, caplog) -> None:
         """An input that a render without sdbs would fail on is put behind a
         guard, and the stamp covers the guarded text."""
@@ -847,6 +867,29 @@ class TestInsertReference:
             '      text: "{\\large \\affiliationname \\par}"\n---\n'
         )
         assert insert_reference(before, "./_files/a_metadata.tex") is None
+
+    def test_a_block_that_opens_with_a_blank_line_is_editable(self) -> None:
+        """A literal block may open with blank lines, which YAML keeps as
+        content and which say nothing about the macros below them."""
+        before = (
+            "---\nformat:\n  pdf:\n    include-in-header:\n      text: |\n"
+            "        \n"
+            "        {\\large \\affiliationname \\par}\n---\n"
+        )
+        after = insert_reference(before, "./_files/doc_metadata.tex")
+        assert after is not None
+        lines = after.splitlines()
+        assert lines[5].strip() == ""
+        assert lines[6] == "        \\input{./_files/doc_metadata.tex}"
+        assert lines[7] == "        {\\large \\affiliationname \\par}"
+
+    def test_a_block_of_only_blank_lines_offers_nothing(self) -> None:
+        before = (
+            "---\nformat:\n  pdf:\n    include-in-header:\n      text: |\n"
+            "        \n"
+            "        \n---\n"
+        )
+        assert insert_reference(before, "./_files/doc_metadata.tex") is None
 
     def test_the_result_is_served_on_the_next_pass(self) -> None:
         """Once the line is in place, the reference is what discovery finds."""
