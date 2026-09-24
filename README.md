@@ -62,6 +62,8 @@ sdb pub map --all                  # render all matches without prompting
 sdb clean docs
 ```
 
+Every command that takes a docs root stops when the path is not a directory, and names the path it rejected. A command that would otherwise walk no documents and report success fails instead, so a typo or a wrong working directory is visible where it happens rather than later as a render error in a document that was never processed.
+
 ## Pre-build Sequence
 
 `pre` and every `build` invoke the same built-in pre-build sequence before rendering. The sequence runs in four phases.

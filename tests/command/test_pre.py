@@ -42,13 +42,15 @@ class TestPreDefaults:
             args, kwargs = mock_seq.call_args
             assert args[2] == "Pre-build"
 
-    def test_pre_with_docs_root(self) -> None:
+    def test_pre_with_docs_root(self, tmp_path: Path) -> None:
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
         with patch("sdb.build._run_default_sequence") as mock_seq:
-            code = _run_pre(["/tmp/docs"])
+            code = _run_pre([str(docs_root)])
             assert code == 0
             mock_seq.assert_called_once()
             args, kwargs = mock_seq.call_args
-            assert str(args[1]).endswith("/tmp/docs")
+            assert Path(args[1]) == docs_root.resolve()
 
 
 class TestPreReal:

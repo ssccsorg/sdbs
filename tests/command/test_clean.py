@@ -40,17 +40,21 @@ class TestCleanDefaults:
             assert code == 0
             mock_clean.assert_called_once()
 
-    def test_clean_with_docs_root(self) -> None:
+    def test_clean_with_docs_root(self, tmp_path: Path) -> None:
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
         with patch("sdb.build.clean_quarto_artifacts") as mock_clean:
-            code = _run_clean(["/tmp/docs"])
+            code = _run_clean([str(docs_root)])
             assert code == 0
             mock_clean.assert_called_once()
             args, _kwargs = mock_clean.call_args
-            assert str(args[0]).endswith("/tmp/docs")
+            assert Path(args[0]) == docs_root.resolve()
 
-    def test_clean_propagates_failure(self) -> None:
+    def test_clean_propagates_failure(self, tmp_path: Path) -> None:
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
         with patch("sdb.build.clean_quarto_artifacts", return_value=False):
-            code = _run_clean(["/tmp/docs"])
+            code = _run_clean([str(docs_root)])
             assert code == 1
 
 

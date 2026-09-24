@@ -46,7 +46,9 @@ class TestBuildDefaults:
             assert code == 0
             mock_build.assert_called_once()
 
-    def test_build_specific_target(self) -> None:
+    def test_build_specific_target(self, tmp_path: Path) -> None:
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
         with (
             patch("sdb.cli.build_module.initialize_config"),
             patch("sdb.cli.build_module.parse_targets") as mock_parse,
@@ -57,22 +59,27 @@ class TestBuildDefaults:
             mock_parse.return_value = ["whitepaper"]
             mock_validate.return_value = ["whitepaper"]
             mock_build.return_value = True
-            code = _run_build(["docs", "whitepaper", "--website", "-j", "4"])
+            code = _run_build(
+                [str(docs_root), "whitepaper", "--website", "-j", "4"]
+            )
             assert code == 0
             mock_parse.assert_called_once_with(["whitepaper"])
             _kwargs: Any = mock_build.call_args.kwargs
             assert _kwargs["max_jobs"] == 4
             assert _kwargs["website"] is True
 
-    def test_build_clean_not_a_target(self) -> None:
-        """sdb build docs clean no longer triggers cleanup; clean is not a build target."""
+    def test_build_clean_not_a_target(self, tmp_path: Path) -> None:
+        """sdb build <dir> clean no longer triggers cleanup; clean is not a build target."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
         with (
             patch("sdb.cli.build_module.initialize_config"),
             patch("sdb.cli.build_module.validate_targets") as mock_val,
         ):
             mock_val.side_effect = SystemExit(1)
-            code = _run_build(["docs", "clean"])
+            code = _run_build([str(docs_root), "clean"])
             assert code == 1
+            mock_val.assert_called_once()
 
 
 class TestBuildSequence:
