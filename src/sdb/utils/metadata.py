@@ -12,7 +12,11 @@ references that file from its own front matter::
 
 The reference is the discovery key.  The step generates exactly the path
 the document asks for and nothing else, which is what lets it run before
-every build without touching a file a person owns.
+every build without touching a file a person owns.  A header may guard the
+reference with ``\IfFileExists`` and declare the macros it uses in the other
+branch, which is the form the step inserts when it adds a missing reference:
+the values then come from sdbs, and a render that never reaches sdbs compiles
+with them empty rather than failing on an absent file.
 
 Holding the generation here makes it part of the default pre-build
 sequence, so a project needs neither an ``_include/_generate_metadata_tex.py``
@@ -663,13 +667,43 @@ def _header_block_starts(lines: List[str]) -> List[Tuple[int, int]]:
     return found
 
 
-def insert_reference(text: str, reference: str) -> Optional[str]:
+def _reference_entry(reference: str, empty_macros: Iterable[str]) -> str:
+    """Return the header line that inputs the generated file.
+
+    A header that uses the contract can be rendered without sdbs, and then the
+    generated file is absent.  The guard keeps that render compiling by
+    declaring the macros the header uses as empty, so a Quarto-only render
+    loses the stamp and the affiliation values rather than failing.  The
+    reference itself stays in the same shape, so discovery is unaffected.
+    """
+    names = list(dict.fromkeys(empty_macros))
+    if not names:
+        return f"\\input{{{reference}}}"
+    empty = "".join(f"\\providecommand{{\\{name}}}{{}}" for name in names)
+    warning = (
+        "\\GenericWarning{}{Metadata: no generated file is present, so the "
+        "version stamp and the affiliation values are empty. "
+        "Run 'sdb pre .' to write them.}"
+    )
+    return (
+        f"\\IfFileExists{{{reference}}}"
+        f"{{\\input{{{reference}}}}}"
+        f"{{{warning}{empty}}}"
+    )
+
+
+def insert_reference(
+    text: str, reference: str, empty_macros: Iterable[str] = ()
+) -> Optional[str]:
     """Add an ``\\input`` for the generated file to the header that needs it.
 
     The line goes at the front of every literal header block that names a
     generated macro, indented to match the block, and nowhere else.  Returns
     None when the document offers no block that can be edited mechanically,
     which leaves the choice to the author.
+
+    ``empty_macros`` are the names the header uses, which the guard declares
+    empty for the branch where the generated file does not exist yet.
     """
     lines = text.splitlines(keepends=True)
     end = _front_matter_end(lines)
@@ -680,8 +714,9 @@ def insert_reference(text: str, reference: str) -> Optional[str]:
     if not starts:
         return None
 
+    entry = _reference_entry(reference, empty_macros)
     for index, indent in reversed(starts):
-        lines.insert(index, " " * indent + f"\\input{{{reference}}}\n")
+        lines.insert(index, " " * indent + entry + "\n")
     return "".join(lines)
 
 
@@ -815,14 +850,15 @@ def _repair_missing_reference(qmd: Path, text: str) -> Optional[str]:
     whose intent is ambiguous is reported instead.
     """
     block = front_matter_text(text)
-    if not named_contract_macros(block):
+    used = named_contract_macros(block)
+    if not used:
         return None
     if find_metadata_inputs(block):
         return None
     for path in find_inputs(block):
         if not (qmd.parent / path).resolve().is_file():
             return None
-    return insert_reference(text, metadata_reference_for(qmd))
+    return insert_reference(text, metadata_reference_for(qmd), used)
 
 
 def _report_missing_inputs(

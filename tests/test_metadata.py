@@ -605,6 +605,36 @@ class TestInsertReference:
         assert after.index("\\input{") < after.index("\\usepackage")
         assert after.replace("        \\input{./_files/doc_metadata.tex}\n", "") == before
 
+    def test_a_guarded_reference_declares_the_macros_empty(self) -> None:
+        """A header that uses the contract can be rendered without sdbs, so the
+        line declares those macros for the branch where the generated file does
+        not exist yet."""
+        before = self._document("{\\large \\affiliationname \\par}")
+        after = insert_reference(
+            before, "./_files/doc_metadata.tex", ["affiliationname", "version"]
+        )
+        assert after is not None
+        assert (
+            "        \\IfFileExists{./_files/doc_metadata.tex}"
+            "{\\input{./_files/doc_metadata.tex}}" in after
+        )
+        assert "\\providecommand{\\affiliationname}{}" in after
+        assert "\\providecommand{\\version}{}" in after
+        # The degradation is stated rather than silent.
+        assert "\\GenericWarning" in after
+
+    def test_the_guard_keeps_the_reference_discoverable(self) -> None:
+        """The discovery key is the ``\\input`` inside the guard, so the step
+        still finds the document that asks for the file."""
+        before = self._document("{\\large \\affiliationname \\par}")
+        after = insert_reference(
+            before, "./_files/doc_metadata.tex", ["affiliationname"]
+        )
+        assert after is not None
+        block = front_matter_text(after)
+        assert find_metadata_inputs(block) == ["./_files/doc_metadata.tex"]
+        assert named_contract_macros(block) == ["affiliationname"]
+
     def test_ignores_a_block_that_names_no_macro(self) -> None:
         before = self._document("\\usepackage{microtype}")
         assert insert_reference(before, "./_files/doc_metadata.tex") is None
@@ -689,6 +719,10 @@ class TestDocumentScenarios:
         repaired = (tmp_path / "doc.qmd").read_text(encoding="utf-8")
         assert repaired.count("\\input{") == 1
         assert "\\input{./_files/doc_metadata.tex}" in repaired
+        # The header uses the contract, so the guard declares those macros for a
+        # render that never reaches sdbs.
+        assert "\\IfFileExists{./_files/doc_metadata.tex}" in repaired
+        assert "\\providecommand{\\affiliationname}{}" in repaired
         written = (tmp_path / "_files" / "doc_metadata.tex").read_text(encoding="utf-8")
         for name in ("affiliationname", "affiliationurl", "affiliationdomain"):
             assert f"\\newcommand{{\\{name}}}" in written
