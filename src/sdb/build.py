@@ -42,7 +42,7 @@ from sdb.resolve import resolve_all
 from sdb.utils.footnotes import clean_duplicate_footnotes
 from sdb.utils.latest import generate_latest_docs
 from sdb.utils.llms import generate_llms_txt
-from sdb.utils.metadata import generate_metadata_tex
+from sdb.utils.metadata import generate_metadata_for, generate_metadata_tex
 
 logger = logging.getLogger(__name__)
 
@@ -1567,6 +1567,26 @@ def build_single_target(
 # ---------------------------------------------------------------------------
 
 
+def prepare_isolated_docs(temp_docs: Path, qmd: Optional[str]) -> None:
+    """Write the metadata file a target's own header needs inside a copy.
+
+    The isolated copy excludes ``_files/``, since that is generated output, so
+    the file a title page inputs has to be written again here.  A project
+    pre-render hook used to write it during the render, and the built-in step
+    owns it now.  This is the one render path the pre-build sequence cannot
+    reach, since that sequence runs against the original tree.
+    """
+    if not qmd:
+        return
+    document = temp_docs / qmd
+    if not document.is_file():
+        return
+    try:
+        generate_metadata_for([document], temp_docs)
+    except Exception as exc:  # a build input must not stop the render
+        logger.warning(f"Metadata generation failed for {document}: {exc}")
+
+
 def _render_target_isolated(
     target: str,
     output_dir: Optional[Path],
@@ -1802,6 +1822,7 @@ def build_targets(
                 return ignored
 
             shutil.copytree(docs_root, temp_docs, ignore=_strict_ignore)
+            prepare_isolated_docs(temp_docs, TARGET_CONFIG.get(t, {}).get("qmd"))
             return t, temp_docs
 
         target_temp_dirs: Dict[str, Path] = {}
