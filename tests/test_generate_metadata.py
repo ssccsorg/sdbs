@@ -114,9 +114,9 @@ author:
     email: test@example.com
     role: "Founder & Architect"
     affiliations:
-      - name: SSCCS Foundation
-        url: https://ssccs.org
-        domain: ssccs.org
+      - name: Example Foundation
+        url: https://example.org
+        domain: example.org
 ---
 
 # Hello

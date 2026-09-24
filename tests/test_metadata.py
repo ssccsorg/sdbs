@@ -1295,9 +1295,9 @@ class TestAffiliationDeclaration:
             "---\n"
             'title: "Test"\n'
             "author:\n"
-            "  - name: Taeho Lee\n"
+            "  - name: Example Author\n"
             "    affiliations:\n"
-            "      - name: Ktema Systems\n"
+            "      - name: Example Foundation\n"
             "metadata-files:\n"
             "  - ./_include/other.yml\n"
             "format:\n"
