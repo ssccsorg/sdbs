@@ -107,23 +107,30 @@ format:
     # LaTeX header inclusions for PDF typography and metadata.
     include-in-header:
       text: |
-        \\usepackage{geometry}
-        \\usepackage{microtype}
-        \\addtokomafont{disposition}{\\rmfamily}
-        \\input{./_files/document_metadata.tex}
-        \\makeatletter
-        \\def\\@maketitle{
-          {\\LARGE \\bfseries \\@title \\par}
-          \\vspace{0.3em}
-          {\\large \\@subtitle \\par}
-          \\vspace{2em}
+        \IfFileExists{./_files/document_metadata.tex}
+          {\input{./_files/document_metadata.tex}}
+          {\providecommand{\affiliationname}{}\providecommand{\affiliationurl}{}\providecommand{\affiliationdomain}{}\providecommand{\version}{}}
+        \usepackage{geometry}
+        \usepackage{microtype}
+        \addtokomafont{disposition}{\rmfamily}
+        \makeatletter
+        \def\@maketitle{
+          {\LARGE \bfseries \@title \par}
+          \vspace{0.3em}
+          {\large \@subtitle \par}
+          \vspace{0.2em}
+          {\normalsize \texttt{\href{\affiliationurl}{\affiliationdomain}} \par}
+          \vspace{2em}
         }
-        \\makeatother
+        \makeatother
 
 When using multi-format mode:
   - Verify that `bibliography` and `link-citations` are set.
   - Add format-specific metadata files under `metadata-files` (e.g.
     `_include/format.pdf.yml` for PDF-only overrides).
+  - Guard the metadata input with `\IfFileExists`, declaring the macros the
+    header uses in the other branch.  sdbs writes the values; a render that
+    never reaches sdbs compiles with them empty instead of failing.
   - Test each format individually: `quarto render file.qmd --to pdf`
   - See the riscv_space.qmd template in the research directory for a
     complete working example.

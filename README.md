@@ -86,7 +86,7 @@ metadata:
 
 - `document-outside-root`: a document that resolves out of the docs root is skipped, which is what a symlinked document looks like.
 - `input-missing`: a header input that does not exist and whose name does not follow the `*_metadata.tex` convention is reported, since nothing here creates it.
-- `reference-missing`: a header that names a generated macro with no reference gets the reference inserted, and a header with no editable line is reported.
+- `reference-missing`: a header that names a generated macro with no reference gets the reference inserted behind `\IfFileExists`, and a header with no editable line is reported.
 - `invalid-front-matter`: front matter that does not parse stops generation for that document rather than writing a file of empty macros.
 - `declared-metadata-missing`: a `metadata-files` entry the tree does not carry is reported and skipped.
 - `affiliation-url-from-author-key`: an affiliation with no url takes the url the same author entry declares at author level.
@@ -100,6 +100,8 @@ metadata:
 A repair that a disabled case depends on is held back with it, so the affiliation keys are supplied together or not at all.
 
 The contract the step judges is the macro list its generator writes. A header is examined for those names and for the reference that gives them a path into the document, and for nothing else, so a header that names a command the generator does not declare passes in silence. A passing step is a statement about the metadata contract, and not about a document's LaTeX.
+
+A header may guard the input with `\IfFileExists` and declare the macros it uses in the other branch. sdbs supplies the values, and a render that never reaches sdbs compiles with them empty rather than failing on an absent file. The reference repair inserts that guarded form, so a document the step repairs keeps rendering without sdbs.
 
 ## Documentation
 
