@@ -47,17 +47,30 @@ exclude:
   # Jupyter cache created during code cell execution.
   - "**/.jupyter_cache"
 
-# Metadata healing (optional)
-# The pre-build metadata step generates the LaTeX file a document's title page
-# inputs and heals an inconsistency between a document's declarations and what
-# the Quarto render needs, mostly on the PDF path.  Every case is named, so one
-# can be switched off on its own, and every repair can be switched off at once.
+# Metadata checks (optional)
+# The pre-build metadata step writes the LaTeX file a document's title page
+# inputs, from the front matter keys it resolves: version-prefix, version-mark,
+# author (name, email, role, orcid) and affiliations (name, url, domain).  It
+# heals the mismatches between those declarations and what the Quarto render
+# needs, mostly on the PDF path.  No project script and no pre-render hook are
+# involved: the step runs for sdb pre, sdb build, sdb render, and sdb pub.
 #
-# Cases: document-outside-root, input-missing, reference-missing,
-# invalid-front-matter, declared-metadata-missing,
-# affiliation-url-from-author-key, affiliation-url-from-domain,
-# affiliation-domain-from-url, affiliation-blank, reference-outside-root,
-# shared-target, metadata-file-missing-or-stale
+# Every check is a named case.  Switch one off under "disabled", or hold back
+# every repair at once with "report_only".  An unknown name is reported with
+# the list below, so a typo does not silently leave a case on.
+#
+#   document-outside-root             report   a document resolving out of the docs root
+#   input-missing                     report   a header input nothing here creates
+#   reference-missing                 repair   insert the \input line a header needs
+#   invalid-front-matter              report   front matter that does not parse
+#   declared-metadata-missing         report   a metadata-files entry the tree lacks
+#   affiliation-url-from-author-key   repair   take the url the author entry declares
+#   affiliation-url-from-domain       repair   url := https://<domain>
+#   affiliation-domain-from-url       repair   domain := the host of the url
+#   affiliation-blank                 report   a link the header cannot fill
+#   reference-outside-root            report   a reference resolving out of the root
+#   shared-target                     report   several documents on one generated file
+#   metadata-file-missing-or-stale    repair   write the generated file
 metadata:
   disabled: []
   report_only: false
