@@ -52,10 +52,12 @@ class TestCheckDefaults:
             assert code == 0
             mock_check.assert_called_once()
 
-    def test_check_cleanup_uncited(self) -> None:
+    def test_check_cleanup_uncited(self, tmp_path: Path) -> None:
+        docs_root = tmp_path / "mydocs"
+        docs_root.mkdir()
         with patch("sdb.check.run_check") as mock_check:
             mock_check.return_value = True
-            code = _run_check(["/tmp/mydocs", "--cleanup-uncited"])
+            code = _run_check([str(docs_root), "--cleanup-uncited"])
             assert code == 0
             kwargs = mock_check.call_args.kwargs
             assert kwargs["validate_only"] is False

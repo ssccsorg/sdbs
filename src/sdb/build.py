@@ -575,10 +575,22 @@ def _run_default_sequence(
     phase: str,
 ) -> None:
     """Run a sequence of default steps, each either a callable or a
-    subprocess command list."""
+    subprocess command list.
+
+    A step that raises or exits non-zero is reported and does not stop the
+    steps after it, because an absent optional tool must not fail a build.
+    What happened is counted and logged at the end, so a run where a step
+    failed does not read like a run where every step worked.  The count is of
+    steps that raised or exited non-zero; a step that reports a problem and
+    returns is counted as completed, because that step's own log is where the
+    problem is stated.
+    """
     logger.info(
         "Running %d default %s step(s)...", len(steps), phase.lower()
     )
+    completed = 0
+    skipped: List[str] = []
+    failed: List[str] = []
     for step in steps:
         if callable(step):
             logger.info(
@@ -587,13 +599,17 @@ def _run_default_sequence(
             try:
                 step(docs_root)
             except Exception as e:
+                failed.append(step.__name__)
                 logger.warning(
                     "%s: %s raised: %s, continuing...",
                     phase, step.__name__, e,
                 )
+            else:
+                completed += 1
         else:
             executable = step[0]
             if not shutil.which(executable):
+                skipped.append(executable)
                 logger.info(
                     "%s: '%s' not found in PATH, skipping.", phase, executable
                 )
@@ -608,20 +624,32 @@ def _run_default_sequence(
                 if result.stderr:
                     logger.warning(result.stderr.strip())
                 if result.returncode != 0:
+                    failed.append(executable)
                     logger.warning(
                         "%s command '%s' failed with exit code "
                         "%d, continuing...",
                         phase, executable, result.returncode,
                     )
                 else:
+                    completed += 1
                     logger.info(
                         "%s command '%s' succeeded.", phase, " ".join(step)
                     )
             except Exception as e:
+                failed.append(executable)
                 logger.warning(
                     "%s command '%s' raised: %s, continuing...",
                     phase, executable, e,
                 )
+
+    summary = f"{phase}: {completed} of {len(steps)} step(s) completed"
+    if skipped:
+        summary += f", {len(skipped)} skipped ({', '.join(skipped)})"
+    if failed:
+        summary += f", {len(failed)} failed ({', '.join(failed)})"
+        logger.warning(summary)
+    else:
+        logger.info(summary)
 
 
 def _run_config_commands(

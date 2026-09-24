@@ -51,6 +51,23 @@ def _setup_logging() -> None:
         root.setLevel(logging.INFO)
 
 
+def _require_docs_root(docs_root: Path, command: str) -> None:
+    """Stop when the named docs root is not a directory.
+
+    Every command takes the docs root from the command line, so a typo or a
+    wrong working directory would otherwise walk no documents, report success,
+    and leave the failure to surface later as an unreadable render error.
+    """
+    if docs_root.is_dir():
+        return
+    print(
+        f"sdb {command}: docs root is not a directory: {docs_root}\n"
+        f"  Pass the directory the documents live in.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="sdb",
@@ -302,6 +319,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "build":
         _setup_logging()
         docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "build")
 
         # Load config
         config_path = args.config
@@ -363,8 +381,10 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "check":
         _setup_logging()
         from .check import run_check as check_fn
+        docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "check")
         success = check_fn(
-            docs_root=args.docs_root.resolve(),
+            docs_root=docs_root,
             validate_only=args.validate_only,
             cleanup_uncited=args.cleanup_uncited,
         )
@@ -373,6 +393,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "pre":
         _setup_logging()
         docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "pre")
 
         config_path = docs_root / "build.yml"
         if config_path.exists():
@@ -432,6 +453,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "clean":
         _setup_logging()
         docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "clean")
         success = build_module.clean_quarto_artifacts(docs_root)
         sys.exit(0 if success else 1)
 

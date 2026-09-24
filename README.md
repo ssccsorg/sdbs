@@ -62,6 +62,8 @@ sdb pub map --all                  # render all matches without prompting
 sdb clean docs
 ```
 
+Every command that takes a docs root stops when the path is not a directory, and names the path it rejected. A command that would otherwise walk no documents and report success fails instead, so a typo or a wrong working directory is visible where it happens rather than later as a render error in a document that was never processed.
+
 ## Pre-build Sequence
 
 `pre` and every `build` invoke the same built-in pre-build sequence before rendering. The sequence runs in five phases.
@@ -105,6 +107,8 @@ A new case has to reach every list that names the cases: the `CASE_*` constant, 
 The contract the step judges is the macro list its generator writes. A header is examined for those names and for the reference that gives them a path into the document, and for nothing else, so a header that names a command the generator does not declare passes in silence. A passing step is a statement about the metadata contract, and not about a document's LaTeX.
 
 A header may guard the input with `\IfFileExists` and declare the macros it uses in the other branch. sdbs supplies the values, and a render that never reaches sdbs compiles with them empty rather than failing on an absent file. The reference repair inserts that guarded form, so a document the step repairs keeps rendering without sdbs.
+
+The sequence tolerates a step that fails, because an absent optional tool must not fail a build. It logs a count when it finishes, such as `Pre-build: 4 of 4 step(s) completed`, and a step that raised or exited non-zero is named in that line. A skipped step is named too, since a tool missing from `PATH` is normal rather than a failure.
 
 ## Documentation
 
