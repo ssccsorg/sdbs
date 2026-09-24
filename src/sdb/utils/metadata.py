@@ -42,9 +42,9 @@ remain.  Neither changes a document in the corpus today.
 - A file referenced by several documents is written from the first of them
   in path order and the choice is reported at info level, while a project
   hook writes it from whichever document rendered last.  Sharing is normal
-  here: five ssccs philosophy documents and three es documents point at one
-  file each, and ``mtep/_files/_metadata.tex`` is shared by two documents
-  that disagree about ``version-mark``.
+  here: several documents in a series point at one
+  file each, and one such file is shared by two documents that disagree
+  about ``version-mark``.
 - ``version-prefix`` and ``version-mark`` are read from the merged metadata,
   so a project could set them in a shared ``metadata-files`` entry.  The
   generator scripts read only the document's own front matter, and no

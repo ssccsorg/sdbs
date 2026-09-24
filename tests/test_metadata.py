@@ -36,101 +36,101 @@ from sdb.utils.metadata import (
 )
 
 AUTHOR_YML = """author:
-  - name: Taeho Lee
-    email: lee@ssccs.org
+  - name: Example Author
+    email: lee@example.org
     role: "Founder & Architect"
     affiliations:
-      - name: Project Test (pre-incorporation)
-        url: https://test.ssccs.org
-        domain: test.ssccs.org
+      - name: Project Alpha (pre-incorporation)
+        url: https://test.example.org
+        domain: test.example.org
 """
 
-# ssccs/docs/_include/author.yml carries no role and a foundation name.
-SSCCS_AUTHOR = """author:
-  - name: SSCCS Foundation
-    email: contact@ssccs.org
+# An author file that carries no role and a foundation name.
+FOUNDATION_AUTHOR = """author:
+  - name: Example Foundation
+    email: contact@example.org
     affiliations:
-      - name: SSCCS Foundation
-        domain: ssccs.org
-        url: https://ssccs.org
+      - name: Example Foundation
+        domain: example.org
+        url: https://example.org
 """
 
-# es/docs/_include/author.founder.yml stores the ampersand already escaped.
-ES_FOUNDER = """author:
-  - name: Taeho Lee
-    orcid: 0009-0006-8767-8069
-    email: lee@ssccs.org
+# An author file that stores the ampersand already escaped.
+ESCAPED_FOUNDER = """author:
+  - name: Example Author
+    orcid: 0000-0000-0000-0000
+    email: lee@example.org
     role: "Founder \\\\& Architect"
     affiliations:
-      - name: SSCCS Foundation
-        domain: ssccs.org
-        url: https://ssccs.org
+      - name: Example Foundation
+        domain: example.org
+        url: https://example.org
 """
 
-# ct/docs/_include/author.founder.yml stores it raw.
-CT_FOUNDER = """author:
-  - name: Taeho Lee
-    email: chton@ssccs.org
+# An author file that stores it raw.
+RAW_FOUNDER = """author:
+  - name: Example Author
+    email: author@example.org
     role: "Founder & Architect"
     affiliations:
-      - name: Project Chton (pre-incorporation)
-        domain: ssccs.org
-        url: https://ssccs.org
+      - name: Project Beta (pre-incorporation)
+        domain: example.org
+        url: https://example.org
 """
 
-# ktema/docs/_include/author.ktema.yml, which whitepaper.qmd resolves.
-KTEMA_AUTHOR = """author:
-  - name: Taeho Lee
+# An author file whitepaper.qmd resolves: the affiliation name sits beside a
+# domain and url.
+WHITEPAPER_AUTHOR = """author:
+  - name: Example Author
     role: "Founder and Architect"
     affiliations:
-      - name: Ktema Systems (Pre-incorporation)
-        domain: ktema.systems
-        url: https://ktema.systems
+      - name: Example Systems (Pre-incorporation)
+        domain: example.systems
+        url: https://example.systems
 """
 
-# mtep/_include/author.founder.yml states the url at author level, beside an
-# affiliations entry that declares only a name.
+# An author file that states the url at author level, beside an affiliations
+# entry that declares only a name.
 AUTHOR_URL_KEY = """author:
-  - name: Taeho Lee
+  - name: Example Author
     corresponding: true
-    email: lee@ssccs.org
+    email: lee@example.org
     role: "Founder & Architect"
-    affiliation-name: Project Rem (Pre-Incorporation)
-    affiliation-url: https://rem.ssccs.org
+    affiliation-name: Project Gamma (Pre-Incorporation)
+    affiliation-url: https://gamma.example.org
     affiliations:
-      - name: Project Rem (Pre-Incorporation)
-linkedin: https://www.linkedin.com/in/stells
+      - name: Project Gamma (Pre-Incorporation)
 """
 
-# ct/docs/_include/author.founder.yml declares a name and nothing else.
+# An author file that declares a name and nothing else.
 AUTHOR_BLANK = """author:
-  - name: Taeho Lee
+  - name: Example Author
     corresponding: true
-    email: chton@ssccs.org
+    email: author@example.org
     role: "Founder & Architect"
     affiliations:
-      - name: Project Chton (pre-incorporation)
+      - name: Project Beta (pre-incorporation)
 """
 
 # An affiliation that declares a domain but no url.
 AUTHOR_DOMAIN_ONLY = """author:
-  - name: Taeho Lee
-    email: lee@ssccs.org
+  - name: Example Author
+    email: lee@example.org
     affiliations:
-      - name: Ktema Systems (Pre-incorporation)
-        domain: ktema.systems
+      - name: Example Systems (Pre-incorporation)
+        domain: example.systems
 """
 
 # An affiliation that declares a url but no domain.
 AUTHOR_URL_ONLY = """author:
-  - name: Taeho Lee
-    email: lee@ssccs.org
+  - name: Example Author
+    email: lee@example.org
     affiliations:
-      - name: Ktema Systems (Pre-incorporation)
-        url: https://ktema.systems
+      - name: Example Systems (Pre-incorporation)
+        url: https://example.systems
 """
 
-# The header ktema/docs/pitch.qmd carries: the affiliation link is what
+# The header the pitch document carries: the affiliation link is what
 # consumes the two values the declaration has to supply.
 AFFILIATION_HEADER = (
     "{\\normalsize \\texttt{\\href{\\affiliationurl}"
@@ -203,7 +203,7 @@ class TestEscapeValue:
         )
 
     def test_plain_text_unchanged(self) -> None:
-        assert escape_value("Taeho Lee") == "Taeho Lee"
+        assert escape_value("Example Author") == "Example Author"
 
     def test_command_with_an_argument_survives(self) -> None:
         """A value that already carries LaTeX is not half-escaped."""
@@ -219,24 +219,24 @@ class TestEscapeValue:
         assert escape_value(r"100\% of them") == r"100\% of them"
 
     def test_url_keeps_its_shape(self) -> None:
-        assert escape_value("https://test.ssccs.org") == "https://test.ssccs.org"
+        assert escape_value("https://test.example.org") == "https://test.example.org"
 
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            ("Taeho Lee", "Taeho Lee"),
-            ("SSCCS Foundation", "SSCCS Foundation"),
-            ("contact@ssccs.org", "contact@ssccs.org"),
-            ("0009-0006-8767-8069", "0009-0006-8767-8069"),
+            ("Example Author", "Example Author"),
+            ("Example Foundation", "Example Foundation"),
+            ("contact@example.org", "contact@example.org"),
+            ("0000-0000-0000-0000", "0000-0000-0000-0000"),
             ("Founder & Architect", r"Founder \& Architect"),
             (r"Founder \& Architect", r"Founder \& Architect"),
             (
-                "Kletos (A product of Ktema Systems, Pre-incorporation)",
-                "Kletos (A product of Ktema Systems, Pre-incorporation)",
+                "Widget (A product of Example Systems, Pre-incorporation)",
+                "Widget (A product of Example Systems, Pre-incorporation)",
             ),
-            ("kletos_pitch", r"kletos\_pitch"),
-            ("kletos.ktema.systems", "kletos.ktema.systems"),
-            ("https://kletos.ktema.systems", "https://kletos.ktema.systems"),
+            ("widget_pitch", r"widget\_pitch"),
+            ("widget.example.systems", "widget.example.systems"),
+            ("https://widget.example.systems", "https://widget.example.systems"),
             ("100%_done", r"100\%\_done"),
             (
                 "a#b$c{d}e~f^g",
@@ -385,26 +385,26 @@ class TestRenderMetadataTex:
     def test_escapes_specials_in_text_values(self, tmp_path: Path) -> None:
         rendered = self._render(tmp_path)
         assert "\\authorrole}{Founder \\& Architect}" in rendered
-        assert "\\affiliationurl}{https://test.ssccs.org}" in rendered
+        assert "\\affiliationurl}{https://test.example.org}" in rendered
 
-    def test_ssccs_style_author_without_role(self, tmp_path: Path) -> None:
-        """ssccs/docs/_include/author.yml declares no role and a foundation."""
-        rendered = self._render(tmp_path, front=SSCCS_AUTHOR)
-        assert "\\authorname}{SSCCS Foundation}" in rendered
+    def test_author_without_a_role(self, tmp_path: Path) -> None:
+        """The author file declares no role and a foundation."""
+        rendered = self._render(tmp_path, front=FOUNDATION_AUTHOR)
+        assert "\\authorname}{Example Foundation}" in rendered
         assert "\\authorrole}{}" in rendered
-        assert "\\affiliationname}{SSCCS Foundation}" in rendered
-        assert "\\affiliationdomain}{ssccs.org}" in rendered
+        assert "\\affiliationname}{Example Foundation}" in rendered
+        assert "\\affiliationdomain}{example.org}" in rendered
 
-    def test_es_style_role_already_escaped(self, tmp_path: Path) -> None:
-        """es stores the role escaped, and the escape must survive intact."""
-        rendered = self._render(tmp_path, front=ES_FOUNDER)
+    def test_role_already_escaped(self, tmp_path: Path) -> None:
+        """The role is stored escaped, and the escape must survive intact."""
+        rendered = self._render(tmp_path, front=ESCAPED_FOUNDER)
         assert "\\authorrole}{Founder \\& Architect}" in rendered
-        assert "\\orcid}{0009-0006-8767-8069}" in rendered
+        assert "\\orcid}{0000-0000-0000-0000}" in rendered
         assert "textbackslash" not in rendered
 
-    def test_ct_style_role_raw(self, tmp_path: Path) -> None:
-        """ct stores the raw ampersand, which the writer has to escape."""
-        rendered = self._render(tmp_path, front=CT_FOUNDER)
+    def test_role_raw(self, tmp_path: Path) -> None:
+        """The raw ampersand is stored, which the writer has to escape."""
+        rendered = self._render(tmp_path, front=RAW_FOUNDER)
         assert "\\authorrole}{Founder \\& Architect}" in rendered
         assert "textbackslash" not in rendered
 
@@ -423,7 +423,7 @@ class TestRenderMetadataTex:
         assert "\\backgroundsetup" not in self._render(tmp_path, extra="")
 
     @pytest.mark.parametrize(
-        "prefix", ["kletos_pitch", "ktema_pitch", "es_pitchdeck", "doc_prefix"]
+        "prefix", ["widget_pitch", "example_pitch", "sample_pitchdeck", "doc_prefix"]
     )
     def test_version_prefixes_from_the_corpus(self, tmp_path: Path, prefix: str) -> None:
         """Every prefix in the corpus carries an underscore, so the stamp
@@ -468,7 +468,7 @@ class TestGenerateMetadataTex:
         assert generate_metadata_tex(tmp_path) is True
         assert target.is_file()
         rendered = target.read_text(encoding="utf-8")
-        assert "Project Test (pre-incorporation)" in rendered
+        assert "Project Alpha (pre-incorporation)" in rendered
 
     def test_fresh_file_is_left_alone(self, tmp_path: Path) -> None:
         target = self._project(tmp_path)
@@ -482,11 +482,11 @@ class TestGenerateMetadataTex:
         generate_metadata_tex(tmp_path)
         target.write_text("% stale marker\n", encoding="utf-8")
         author = tmp_path / "_include" / "author.yml"
-        _write(author, AUTHOR_YML.replace("Taeho Lee", "Taeho Lee (edited)"))
+        _write(author, AUTHOR_YML.replace("Example Author", "Example Author (edited)"))
         future = time.time() + 10
         os.utime(author, (future, future))
         generate_metadata_tex(tmp_path)
-        assert "Taeho Lee (edited)" in target.read_text(encoding="utf-8")
+        assert "Example Author (edited)" in target.read_text(encoding="utf-8")
 
     def test_names_macro_without_reference_is_repaired(self, tmp_path: Path) -> None:
         """A header that asks for the contract with no reference is the
@@ -506,7 +506,7 @@ class TestGenerateMetadataTex:
         assert document.startswith("---\nmetadata-files:")
 
         written = (tmp_path / "_files" / "doc_metadata.tex").read_text(encoding="utf-8")
-        assert "\\affiliationname}{Project Test (pre-incorporation)}" in written
+        assert "\\affiliationname}{Project Alpha (pre-incorporation)}" in written
         # The stamp has to describe the repaired text, not the text before it.
         digest = hashlib.sha256(document.encode("utf-8")).hexdigest()[:6]
         assert digest in written.splitlines()[0]
@@ -523,8 +523,8 @@ class TestGenerateMetadataTex:
 
     def test_shared_target_is_reported(self, tmp_path: Path, caplog) -> None:
         """Several documents in a directory may share one generated file, as
-        the ssccs philosophy series and the es documents do.  The choice of
-        which document supplies the stamp has to be stated once."""
+        a series of documents does.  Which document supplies the stamp is
+        stated once."""
         for name in ("a.qmd", "b.qmd", "c.qmd"):
             _write(tmp_path / name, _document())
         with caplog.at_level(logging.INFO):
@@ -670,8 +670,8 @@ class TestDocumentScenarios:
         _write(tmp_path / name, document)
         return tmp_path
 
-    def test_kletos_pitch_is_repaired(self, tmp_path, caplog) -> None:
-        r"""kletos/docs/pitch.qmd named three macros with no reference line, so
+    def test_pitch_is_repaired(self, tmp_path, caplog) -> None:
+        r"""The pitch document named three macros with no reference line, so
         LuaLaTeX reported an undefined \affiliationname one line below
         \maketitle.  The header is repaired and the file it needs is written."""
         document = _document(
@@ -729,8 +729,8 @@ class TestDocumentScenarios:
         assert document.count("\\input{") == 1
         assert not (tmp_path / "_files").exists()
 
-    def test_ktema_whitepaper_needs_no_named_macro(self, tmp_path) -> None:
-        r"""ktema/docs/whitepaper.qmd names no macro: the watermark block the
+    def test_whitepaper_needs_no_named_macro(self, tmp_path) -> None:
+        r"""whitepaper.qmd names no macro: the watermark block the
         generated file carries is what consumes \version, so the reference
         alone has to be enough."""
         self._project(tmp_path, _document(reference="./_files/wp_metadata.tex"))
@@ -739,13 +739,13 @@ class TestDocumentScenarios:
         assert "\\newcommand{\\version}" in written
         assert "\\backgroundsetup" in written
 
-    def test_ssccs_pt_names_version_in_a_beamer_header(self, tmp_path, caplog) -> None:
-        r"""ssccs/docs/works/pt.qmd is beamer and consumes \version in its
+    def test_beamer_header_names_version(self, tmp_path, caplog) -> None:
+        r"""A beamer document consumes \version in its
         title template without asking for the watermark."""
         document = _document(
             reference="./_files/pt_metadata.tex",
             fmt="beamer",
-            prefix="ssccs",
+            prefix="foundation",
             version_mark=False,
             header_extra="{\\scriptsize \\texttt{\\color{lightgray}\\version} \\par}",
         )
@@ -753,24 +753,24 @@ class TestDocumentScenarios:
         with caplog.at_level(logging.WARNING):
             assert generate_metadata_tex(tmp_path) is True
         written = (tmp_path / "_files" / "pt_metadata.tex").read_text(encoding="utf-8")
-        assert written.startswith("\\newcommand{\\version}{ssccs-")
+        assert written.startswith("\\newcommand{\\version}{foundation-")
         assert "\\backgroundsetup" not in written
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
-    def test_ssccs_nested_document_writes_beside_itself(self, tmp_path) -> None:
+    def test_nested_document_writes_beside_itself(self, tmp_path) -> None:
         """A nested document keeps its generated file next to itself, as
-        projects/syntagma/tagma/map/index.qmd does."""
+        projects/section/chapter/map/index.qmd does."""
         document = _document(
             reference="./_files/kv_metadata.tex",
             metadata_files=("../../../../_include/author.yml",),
         )
         _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
         _write(
-            tmp_path / "projects" / "syntagma" / "tagma" / "map" / "index.qmd",
+            tmp_path / "projects" / "section" / "chapter" / "map" / "index.qmd",
             document,
         )
         generate_metadata_tex(tmp_path)
-        nested = tmp_path / "projects" / "syntagma" / "tagma" / "map"
+        nested = tmp_path / "projects" / "section" / "chapter" / "map"
         assert (nested / "_files" / "kv_metadata.tex").is_file()
         assert not (tmp_path / "_files").exists()
 
@@ -782,24 +782,24 @@ class TestDocumentScenarios:
         assert (tmp_path / "_files" / "doc_metadata.tex").is_file()
 
     def test_stale_after_an_author_change(self, tmp_path) -> None:
-        """ktema/docs/_files/wp_metadata.tex still declares SSCCS Foundation
-        while whitepaper.qmd resolves author.ktema.yml."""
-        _write(tmp_path / "_include" / "author.yml", SSCCS_AUTHOR)
+        """wp_metadata.tex still declares Example Foundation while
+        whitepaper.qmd resolves the author file."""
+        _write(tmp_path / "_include" / "author.yml", FOUNDATION_AUTHOR)
         _write(
             tmp_path / "whitepaper.qmd",
             _document(reference="./_files/wp_metadata.tex"),
         )
         generate_metadata_tex(tmp_path)
         target = tmp_path / "_files" / "wp_metadata.tex"
-        assert "SSCCS Foundation" in target.read_text(encoding="utf-8")
+        assert "Example Foundation" in target.read_text(encoding="utf-8")
 
-        _write(tmp_path / "_include" / "author.yml", KTEMA_AUTHOR)
+        _write(tmp_path / "_include" / "author.yml", WHITEPAPER_AUTHOR)
         future = time.time() + 10
         os.utime(tmp_path / "_include" / "author.yml", (future, future))
         generate_metadata_tex(tmp_path)
         rewritten = target.read_text(encoding="utf-8")
-        assert "Ktema Systems (Pre-incorporation)" in rewritten
-        assert "SSCCS Foundation" not in rewritten
+        assert "Example Systems (Pre-incorporation)" in rewritten
+        assert "Example Foundation" not in rewritten
 
     def test_output_of_a_project_hook_survives(self, tmp_path) -> None:
         """A project hook writes the same path at render time.  Its output is
@@ -1012,7 +1012,7 @@ class TestDegradedInputs:
             generate_metadata_tex(tmp_path)
         assert any("missing metadata file" in r.message for r in caplog.records)
         written = (tmp_path / "_files" / "doc_metadata.tex").read_text(encoding="utf-8")
-        assert "\\authorname}{Taeho Lee}" in written
+        assert "\\authorname}{Example Author}" in written
 
     def test_document_without_front_matter_is_ignored(self, tmp_path) -> None:
         _write(tmp_path / "doc.qmd", "# Heading\n\nBody.\n")
@@ -1133,8 +1133,8 @@ class TestAffiliationDerivation:
         ) == ("https://author.example", "affiliation-url-from-author-key")
 
     def test_url_comes_from_the_domain_with_https(self) -> None:
-        assert derive_affiliation_url({}, {"domain": "ktema.systems"}) == (
-            "https://ktema.systems",
+        assert derive_affiliation_url({}, {"domain": "example.systems"}) == (
+            "https://example.systems",
             "affiliation-url-from-domain",
         )
 
@@ -1148,13 +1148,13 @@ class TestAffiliationDerivation:
         )
 
     def test_domain_comes_from_the_url(self) -> None:
-        assert derive_affiliation_domain({}, "https://ktema.systems/x") == (
-            "ktema.systems",
+        assert derive_affiliation_domain({}, "https://example.systems/x") == (
+            "example.systems",
             "affiliation-domain-from-url",
         )
 
     def test_domain_from_a_url_without_a_host_is_not_derived(self) -> None:
-        assert derive_affiliation_domain({}, "ktema.systems") == (None, None)
+        assert derive_affiliation_domain({}, "example.systems") == (None, None)
 
     def test_blank_values_are_treated_as_absent(self) -> None:
         assert derive_affiliation_url(
@@ -1172,7 +1172,7 @@ class TestAffiliationDerivation:
         assert supply_affiliation_declaration(
             author, ["affiliationurl"], MetadataPolicy(), tmp_path
         ) is True
-        assert "url: https://rem.ssccs.org" in author.read_text(encoding="utf-8")
+        assert "url: https://gamma.example.org" in author.read_text(encoding="utf-8")
 
     def test_the_macro_names_may_be_a_one_shot_iterable(self, tmp_path: Path) -> None:
         """The caller's macro names are consulted for both keys, so a
@@ -1185,8 +1185,8 @@ class TestAffiliationDerivation:
             tmp_path,
         ) is True
         declared = author.read_text(encoding="utf-8")
-        assert "url: https://rem.ssccs.org" in declared
-        assert "domain: rem.ssccs.org" in declared
+        assert "url: https://gamma.example.org" in declared
+        assert "domain: gamma.example.org" in declared
 
 
 class TestAffiliationDeclaration:
@@ -1198,19 +1198,19 @@ class TestAffiliationDeclaration:
         return tmp_path / "_include" / "author.yml"
 
     def test_url_and_domain_from_the_author_key(self, tmp_path, caplog) -> None:
-        """mtep/_include/author.founder.yml states the url at author level,
-        beside an affiliations entry that declares only a name."""
+        """The author file states the url at author level, beside an
+        affiliations entry that declares only a name."""
         author = self._project(tmp_path, AUTHOR_URL_KEY)
         with caplog.at_level(logging.INFO):
             assert generate_metadata_tex(tmp_path) is True
         declared = author.read_text(encoding="utf-8")
-        assert "\n        url: https://rem.ssccs.org\n" in declared
-        assert "\n        domain: rem.ssccs.org\n" in declared
+        assert "\n        url: https://gamma.example.org\n" in declared
+        assert "\n        domain: gamma.example.org\n" in declared
         rendered = (tmp_path / "_files" / "doc_metadata.tex").read_text(
             encoding="utf-8"
         )
-        assert "\\newcommand{\\affiliationurl}{https://rem.ssccs.org}" in rendered
-        assert "\\newcommand{\\affiliationdomain}{rem.ssccs.org}" in rendered
+        assert "\\newcommand{\\affiliationurl}{https://gamma.example.org}" in rendered
+        assert "\\newcommand{\\affiliationdomain}{gamma.example.org}" in rendered
         message = " ".join(str(r.message) for r in caplog.records)
         assert "Metadata[affiliation-url-from-author-key]:" in message
         assert "Metadata[affiliation-domain-from-url]:" in message
@@ -1220,7 +1220,7 @@ class TestAffiliationDeclaration:
         with caplog.at_level(logging.INFO):
             assert generate_metadata_tex(tmp_path) is True
         declared = author.read_text(encoding="utf-8")
-        assert "\n        url: https://ktema.systems\n" in declared
+        assert "\n        url: https://example.systems\n" in declared
         # The domain is declared, so it is not derived beside the url.
         assert declared.count("domain:") == 1
         assert "Metadata[affiliation-url-from-domain]:" in " ".join(
@@ -1232,7 +1232,7 @@ class TestAffiliationDeclaration:
         with caplog.at_level(logging.INFO):
             assert generate_metadata_tex(tmp_path) is True
         declared = author.read_text(encoding="utf-8")
-        assert "\n        domain: ktema.systems\n" in declared
+        assert "\n        domain: example.systems\n" in declared
         assert "Metadata[affiliation-domain-from-url]:" in " ".join(
             str(r.message) for r in caplog.records
         )
@@ -1242,19 +1242,19 @@ class TestAffiliationDeclaration:
         author = self._project(
             tmp_path,
             "author:\n  - name: T\n    affiliations:\n"
-            "          - name: Ktema Systems\n"
-            "            domain: ktema.systems\n",
+            "          - name: Example Systems\n"
+            "            domain: example.systems\n",
         )
         assert generate_metadata_tex(tmp_path) is True
-        assert "\n            url: https://ktema.systems\n" in author.read_text(
+        assert "\n            url: https://example.systems\n" in author.read_text(
             encoding="utf-8"
         )
 
     def test_blank_affiliation_is_reported_and_left_alone(
         self, tmp_path, caplog
     ) -> None:
-        """ct/docs/_include/author.founder.yml declares a name and nothing
-        else, so there is nothing here to derive from."""
+        """The author file declares a name and nothing else, so there is
+        nothing here to derive from."""
         author = self._project(tmp_path, AUTHOR_BLANK)
         before = author.read_text(encoding="utf-8")
         with caplog.at_level(logging.WARNING):

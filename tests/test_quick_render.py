@@ -25,8 +25,8 @@ def qmd_tree(tmp_path: Path) -> Path:
         root/
           docs/
             projects/
-              syntagma/
-                tagma/
+              section/
+                chapter/
                   map/
                     index.qmd
                   index.qmd

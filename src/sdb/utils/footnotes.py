@@ -1,7 +1,7 @@
 r"""Clean duplicate footnote reference tags in .qmd files.
 
 Pandoc/Quarto markdown expects each footnote label to be referenced once
-in the body.  Repeated uses of the same tag (for example ``[^tagma]``)
+in the body.  Repeated uses of the same tag (for example ``[^note]``)
 produce malformed output, so the default pre-build sequence removes
 every use after the first.
 

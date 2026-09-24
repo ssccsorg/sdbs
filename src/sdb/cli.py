@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> None:
         help="Locate .qmd files by short name and render them directly",
         description="Search the current directory tree for .qmd files whose stem "
         "matches one or more short names (e.g. 'map' → "
-        "docs/projects/syntagma/tagma/map/index.qmd) and render them by calling the "
+        "docs/projects/section/chapter/map/index.qmd) and render them by calling the "
         "underlying tool directly, without the full SDBS preprocessing pipeline "
         "(include resolution, footnote cleanup, formatting, and the latest-docs "
         "list are skipped).  The metadata file a PDF or beamer header consumes is "
@@ -202,7 +202,7 @@ def main(argv: list[str] | None = None) -> None:
             "Examples:\n"
             "  sdb render map\n"
             "  sdb render map --to pdf\n"
-            "  sdb render tagma/map\n"
+            "  sdb render chapter/map\n"
             "  sdb render map id wp\n"
         ),
     )
@@ -211,7 +211,7 @@ def main(argv: list[str] | None = None) -> None:
         type=str,
         nargs="+",
         help="One or more short names or path fragments to match against .qmd "
-        "file stems (e.g. 'map', 'whitepaper', 'tagma/map')",
+        "file stems (e.g. 'map', 'whitepaper', 'chapter/map')",
     )
     render_parser.add_argument(
         "--to", "-t", dest="format", type=str, default=None,

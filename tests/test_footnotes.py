@@ -14,9 +14,9 @@ class TestStripDuplicateFootnoteRefs:
     """Core text-level behavior of strip_duplicate_footnote_refs."""
 
     def test_keeps_first_use_removes_rest(self) -> None:
-        text = "Text[^tagma] and more[^tagma] again[^tagma].\n"
+        text = "Text[^note] and more[^note] again[^note].\n"
         cleaned, removed = strip_duplicate_footnote_refs(text)
-        assert cleaned == "Text[^tagma] and more again.\n"
+        assert cleaned == "Text[^note] and more again.\n"
         assert removed == 2
 
     def test_no_duplicates_is_noop(self) -> None:
@@ -50,10 +50,10 @@ class TestStripDuplicateFootnoteRefs:
         assert removed == 1
 
     def test_front_matter_untouched(self) -> None:
-        text = "---\ntitle: [^tagma]\n---\n\nText[^tagma] and[^tagma].\n"
+        text = "---\ntitle: [^note]\n---\n\nText[^note] and[^note].\n"
         cleaned, removed = strip_duplicate_footnote_refs(text)
         assert cleaned == (
-            "---\ntitle: [^tagma]\n---\n\nText[^tagma] and.\n"
+            "---\ntitle: [^note]\n---\n\nText[^note] and.\n"
         )
         assert removed == 1
 
@@ -188,16 +188,16 @@ class TestStripDuplicateFootnoteRefs:
             "title: Example\n"
             "---\n\n"
             "# Heading\n\n"
-            "First use[^tagma] and second use[^tagma].\n\n"
+            "First use[^note] and second use[^note].\n\n"
             "```bash\n"
-            "echo [^tagma]\n"
+            "echo [^note]\n"
             "```\n\n"
-            "[^tagma]: The definition.\n"
+            "[^note]: The definition.\n"
         )
         cleaned, removed = strip_duplicate_footnote_refs(text)
-        assert "[^tagma]: The definition." in cleaned
-        assert "echo [^tagma]" in cleaned
-        assert cleaned.count("[^tagma]") == 3
+        assert "[^note]: The definition." in cleaned
+        assert "echo [^note]" in cleaned
+        assert cleaned.count("[^note]") == 3
         assert removed == 1
 
     def test_bom_front_matter_untouched(self) -> None:
