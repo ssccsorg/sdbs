@@ -1,11 +1,11 @@
 # Shared Quarto configuration applied to all formats.
 # Included by _quarto-website.yml for website builds and referenced
 # automatically by Quarto when rendering any .qmd file in this directory.
-
-project:
-  # Script executed by Quarto before each render. Useful for dynamic
-  # content generation or environment setup.
-  pre-render: python3 _quarto_pre-render.py
+#
+# There is no project pre-render hook.  The LaTeX metadata file a title page
+# consumes is written by sdbs's pre-build sequence, so it is generated for
+# sdb build, sdb pre, sdb render, and sdb pub without a project script.  See
+# the metadata block in build.yml for the checks that sequence applies.
 
 # Path to the CSL (Citation Style Language) file used for formatting
 # citations and bibliographies. IEEE style is the default.

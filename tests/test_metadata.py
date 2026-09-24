@@ -808,7 +808,7 @@ class TestDocumentScenarios:
         generate_metadata_tex(tmp_path)
         target = tmp_path / "_files" / "doc_metadata.tex"
         hook_output = (
-            "% written by _quarto_pre-render.py\n"
+            "% written by a project hook\n"
             + target.read_text(encoding="utf-8")
         )
         target.write_text(hook_output, encoding="utf-8")

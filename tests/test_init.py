@@ -107,7 +107,6 @@ class TestScaffoldFullRun:
         extra_files = [
             "_include/_graphviz.py",
             "_include/_title_meta_items.qmd",
-            "_include/_generate_metadata_tex.py",
         ]
         for rel_path in extra_files:
             assert (temp_target / rel_path).exists(), (

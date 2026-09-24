@@ -15,11 +15,11 @@ the document asks for and nothing else, which is what lets it run before
 every build without touching a file a person owns.
 
 Holding the generation here makes it part of the default pre-build
-sequence, so a project no longer has to ship
-``_include/_generate_metadata_tex.py`` and wire a Quarto ``pre-render``
-hook for the file to exist.  ``src/sdb/templates/advanced/`` keeps its
-copy for projects rendered by Quarto alone; the macro list below is the
-one both are expected to write.
+sequence, so a project needs neither an ``_include/_generate_metadata_tex.py``
+of its own nor a Quarto ``pre-render`` hook for the file to exist.  The
+templates ship neither, and a tree that already carries a copy runs it only
+through the hook it wires itself.  The macro list below is what such a copy is
+expected to agree with.
 
 Two rules keep the step free of side effects.
 
@@ -36,8 +36,9 @@ Two rules keep the step free of side effects.
   project hook that writes the same path at render time stays quiet because
   its output is newer than the document.
 
-Two differences from the per-project ``_generate_metadata_tex.py`` scripts
-remain.  Neither changes a document in the corpus today.
+Two differences from the per-project ``_generate_metadata_tex.py`` scripts,
+which a tree carrying one still runs through its own hook, remain.  Neither
+changes a document in the corpus today.
 
 - A file referenced by several documents is written from the first of them
   in path order and the choice is reported at info level, while a project

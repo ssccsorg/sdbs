@@ -19,7 +19,6 @@ DEFAULT_TEMPLATE_MAP: dict[str, str] = {
     "build.yml": "build.yml",
     "_quarto.yml": "_quarto.yml",
     "_quarto-website.yml": "_quarto-website.yml",
-    "_quarto_pre-render.py": "_quarto_pre-render.py",
     "_include/author.yml": "_include/author.yml",
     "_include/format.html.yml": "_include/format.html.yml",
     "_include/format.pdf.yml": "_include/format.pdf.yml",
@@ -29,12 +28,11 @@ DEFAULT_TEMPLATE_MAP: dict[str, str] = {
     ".gitignore": "_gitignore",
 }
 
-# Advanced template map (adds graphviz, metadata, and multi-format examples)
+# Advanced template map (adds graphviz and multi-format examples)
 ADVANCED_TEMPLATE_MAP: dict[str, str] = {
     **DEFAULT_TEMPLATE_MAP,
     "_include/_graphviz.py": "_include/_graphviz.py",
     "_include/_title_meta_items.qmd": "_include/_title_meta_items.qmd",
-    "_include/_generate_metadata_tex.py": "_include/_generate_metadata_tex.py",
 }
 
 
