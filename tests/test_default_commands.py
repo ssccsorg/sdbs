@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -35,6 +36,11 @@ class TestDefaultCommandConstants:
 
     def test_pre_build_has_rumdl(self) -> None:
         assert ["rumdl", "fmt", ".", "--silent", "--disable", "MD036"] in _DEFAULT_PRE_BUILD
+
+    def test_metadata_generation_runs_last(self) -> None:
+        """The version stamp must cover the text after formatting."""
+        from sdb.utils.metadata import generate_metadata_tex
+        assert _DEFAULT_PRE_BUILD[-1] is generate_metadata_tex
 
     def test_post_render_has_generate_llms(self) -> None:
         from sdb.utils.llms import generate_llms_txt
@@ -241,3 +247,75 @@ class TestBuildTargetsDefaultPrePost:
             f"Expected 1 default post-render call, got {len(post_calls)}"
         )
         assert post_calls[0]["steps"] is _DEFAULT_POST_RENDER
+
+
+class TestDefaultSequenceSummary:
+    """A step that did not work is counted, so the run does not read as clean.
+
+    The sequence tolerates a failing step on purpose, because an absent
+    optional tool must not fail a build.  The summary is what keeps that
+    tolerance from looking like success.
+    """
+
+    @staticmethod
+    def _summary(caplog) -> str:
+        matches = [
+            str(r.message)
+            for r in caplog.records
+            if "step(s) completed" in str(r.message)
+        ]
+        assert len(matches) == 1, matches
+        return matches[0]
+
+    def test_a_step_that_raises_is_reported(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        def boom(_root: Path) -> None:
+            raise RuntimeError("no")
+
+        def fine(_root: Path) -> None:
+            return None
+
+        with caplog.at_level(logging.INFO):
+            _run_default_sequence([fine, boom], tmp_path, "Pre-build")
+        summary = self._summary(caplog)
+        assert "1 of 2 step(s) completed" in summary
+        assert "1 failed (boom)" in summary
+        assert caplog.records[-1].levelno == logging.WARNING
+
+    def test_a_clean_run_is_summarized_at_info(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        def fine(_root: Path) -> None:
+            return None
+
+        def also_fine(_root: Path) -> None:
+            return None
+
+        with caplog.at_level(logging.INFO):
+            _run_default_sequence([fine, also_fine], tmp_path, "Post-render")
+        summary = self._summary(caplog)
+        assert "2 of 2 step(s) completed" in summary
+        assert "failed" not in summary
+        assert caplog.records[-1].levelno == logging.INFO
+
+    def test_a_missing_executable_is_skipped_not_failed(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        tool = "sdb-no-such-tool-at-all"
+        with caplog.at_level(logging.INFO):
+            _run_default_sequence([[tool]], tmp_path, "Pre-build")
+        summary = self._summary(caplog)
+        assert f"0 of 1 step(s) completed, 1 skipped ({tool})" in summary
+        assert "failed" not in summary
+        assert caplog.records[-1].levelno == logging.INFO
+
+    def test_a_command_that_exits_nonzero_is_failed(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        with caplog.at_level(logging.INFO):
+            _run_default_sequence([["false"]], tmp_path, "Pre-build")
+        summary = self._summary(caplog)
+        assert "0 of 1 step(s) completed" in summary
+        assert "1 failed (false)" in summary
+        assert caplog.records[-1].levelno == logging.WARNING

@@ -2,7 +2,7 @@
 Quick render: locate one or more .qmd files by short name and render them.
 
 Provides a convenience subcommand ``sdb render <name>`` so that, for example,
-``sdb render map`` finds ``docs/projects/syntagma/tagma/map.qmd`` and runs
+``sdb render map`` finds ``docs/projects/section/chapter/map.qmd`` and runs
 ``quarto render`` on it automatically.
 """
 
@@ -12,6 +12,8 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from sdb.utils.metadata import generate_metadata_for
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +106,7 @@ def find_qmd_files(
 
     Args:
         pattern:          Short name or path fragment to search for
-                          (e.g. ``"map"``, or ``"tagma/map"``).
+                          (e.g. ``"map"``, or ``"chapter/map"``).
         root:             Directory to search under.  Defaults to the current
                           working directory.
         exclude_patterns: Optional list of gitignore-style glob patterns to
@@ -368,6 +370,11 @@ def quick_render(
     if selected is None:
         return False
 
+    try:
+        generate_metadata_for(selected, root or Path.cwd())
+    except Exception as exc:  # a build input must not stop the render
+        logger.warning("Metadata generation failed: %s", exc)
+
     success = True
     for qmd in selected:
         if not render_qmd(qmd, cwd=root, format=format):
@@ -468,6 +475,13 @@ def resolve_and_render(
                 logger.info("Cancelled.")
                 return (False, [])
             print("Invalid choice. Enter 1, 2, or q.")
+
+    # The metadata file is a build input rather than a byproduct, so it is
+    # generated before Quarto reads the document headers.
+    try:
+        generate_metadata_for(file_order, root)
+    except Exception as exc:  # a build input must not stop the render
+        logger.warning("Metadata generation failed: %s", exc)
 
     # Render
     success = True

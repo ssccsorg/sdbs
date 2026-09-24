@@ -51,6 +51,23 @@ def _setup_logging() -> None:
         root.setLevel(logging.INFO)
 
 
+def _require_docs_root(docs_root: Path, command: str) -> None:
+    """Stop when the named docs root is not a directory.
+
+    Every command takes the docs root from the command line, so a typo or a
+    wrong working directory would otherwise walk no documents, report success,
+    and leave the failure to surface later as an unreadable render error.
+    """
+    if docs_root.is_dir():
+        return
+    print(
+        f"sdb {command}: docs root is not a directory: {docs_root}\n"
+        f"  Pass the directory the documents live in.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="sdb",
@@ -185,9 +202,14 @@ def main(argv: list[str] | None = None) -> None:
         help="Locate .qmd files by short name and render them directly",
         description="Search the current directory tree for .qmd files whose stem "
         "matches one or more short names (e.g. 'map' → "
-        "docs/projects/syntagma/tagma/map/index.qmd) and render them by calling the "
+        "docs/projects/section/chapter/map/index.qmd) and render them by calling the "
         "underlying tool directly, without the full SDBS preprocessing pipeline "
-        "(no include resolution, no metadata generation, no pre-render steps).\n\n"
+        "(include resolution, footnote cleanup, formatting, and the latest-docs "
+        "list are skipped).  The metadata file a PDF or beamer header consumes is "
+        "a build input rather than preprocessing, so the step that writes it runs "
+        "here as well: it writes the file for the selected documents when it is "
+        "missing or stale, inserts the reference a header that names a metadata "
+        "macro needs, and supplies the affiliation keys a header links with.\n\n"
         "Multiple patterns can be given to render several documents in sequence "
         "(e.g. 'sdb render map id').  Contrast this with 'sdb build', which runs "
         "the full SDBS pipeline before rendering.  Use 'render' when you only "
@@ -197,7 +219,7 @@ def main(argv: list[str] | None = None) -> None:
             "Examples:\n"
             "  sdb render map\n"
             "  sdb render map --to pdf\n"
-            "  sdb render tagma/map\n"
+            "  sdb render chapter/map\n"
             "  sdb render map id wp\n"
         ),
     )
@@ -206,7 +228,7 @@ def main(argv: list[str] | None = None) -> None:
         type=str,
         nargs="+",
         help="One or more short names or path fragments to match against .qmd "
-        "file stems (e.g. 'map', 'whitepaper', 'tagma/map')",
+        "file stems (e.g. 'map', 'whitepaper', 'chapter/map')",
     )
     render_parser.add_argument(
         "--to", "-t", dest="format", type=str, default=None,
@@ -297,6 +319,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "build":
         _setup_logging()
         docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "build")
 
         # Load config
         config_path = args.config
@@ -358,8 +381,10 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "check":
         _setup_logging()
         from .check import run_check as check_fn
+        docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "check")
         success = check_fn(
-            docs_root=args.docs_root.resolve(),
+            docs_root=docs_root,
             validate_only=args.validate_only,
             cleanup_uncited=args.cleanup_uncited,
         )
@@ -368,6 +393,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "pre":
         _setup_logging()
         docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "pre")
 
         config_path = docs_root / "build.yml"
         if config_path.exists():
@@ -427,6 +453,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "clean":
         _setup_logging()
         docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "clean")
         success = build_module.clean_quarto_artifacts(docs_root)
         sys.exit(0 if success else 1)
 

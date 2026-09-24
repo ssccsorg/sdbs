@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -24,8 +25,8 @@ def qmd_tree(tmp_path: Path) -> Path:
         root/
           docs/
             projects/
-              syntagma/
-                tagma/
+              section/
+                chapter/
                   map/
                     index.qmd
                   index.qmd
@@ -488,6 +489,28 @@ class TestSelectQmdFiles:
 class TestQuickRender:
     """Tests for the orchestration layer."""
 
+    @patch("sdb.utils.quick_render.generate_metadata_for")
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_generates_metadata_before_rendering(
+        self, mock_render: MagicMock, mock_metadata: MagicMock, qmd_tree: Path
+    ) -> None:
+        """The preview path writes the metadata file Quarto's header reads."""
+        mock_render.return_value = True
+        quick_render("report", root=qmd_tree, prompt=False)
+        mock_metadata.assert_called_once()
+        paths, docs_root = mock_metadata.call_args[0]
+        assert [p.name for p in paths] == ["report.qmd"]
+        assert docs_root == qmd_tree
+
+    @patch("sdb.utils.quick_render.generate_metadata_for")
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_no_match_generates_nothing(
+        self, mock_render: MagicMock, mock_metadata: MagicMock, qmd_tree: Path
+    ) -> None:
+        """No selected document means no metadata work."""
+        quick_render("nonexistent", root=qmd_tree)
+        mock_metadata.assert_not_called()
+
     @patch("sdb.utils.quick_render.render_qmd")
     def test_single_match_renders(self, mock_render: MagicMock, qmd_tree: Path) -> None:
         """Single match calls render_qmd once."""
@@ -497,6 +520,20 @@ class TestQuickRender:
         mock_render.assert_called_once()
         args, _ = mock_render.call_args
         assert args[0].name == "report.qmd"
+
+    @patch("sdb.utils.quick_render.generate_metadata_for")
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_metadata_failure_does_not_stop_the_render(
+        self, mock_render: MagicMock, mock_metadata: MagicMock,
+        qmd_tree: Path, caplog,
+    ) -> None:
+        """A build input must not take the preview down with it."""
+        mock_metadata.side_effect = RuntimeError("boom")
+        mock_render.return_value = True
+        with caplog.at_level(logging.WARNING):
+            assert quick_render("report", root=qmd_tree, prompt=False) is True
+        mock_render.assert_called_once()
+        assert any("Metadata generation failed" in r.message for r in caplog.records)
 
     @patch("sdb.utils.quick_render.render_qmd")
     def test_no_match(self, mock_render: MagicMock, qmd_tree: Path) -> None:
@@ -686,6 +723,20 @@ class TestQuickRender:
 class TestResolveAndRender:
     """Tests for the shared multi-pattern pipeline."""
 
+    @patch("sdb.utils.quick_render.generate_metadata_for")
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_generates_metadata_for_selected_documents(
+        self, mock_render: MagicMock, mock_metadata: MagicMock, qmd_tree: Path
+    ) -> None:
+        """The shared render and publish pipeline generates what it renders."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_render.return_value = True
+        resolve_and_render(["report"], qmd_tree, prompt=False)
+        mock_metadata.assert_called_once()
+        paths, docs_root = mock_metadata.call_args[0]
+        assert [p.name for p in paths] == ["report.qmd"]
+        assert docs_root == qmd_tree
+
     @patch("sdb.utils.quick_render.render_qmd")
     def test_single_pattern_success(
         self, mock_render: MagicMock, qmd_tree: Path
@@ -699,6 +750,22 @@ class TestResolveAndRender:
         assert success is True
         assert len(paths) == 1
         assert paths[0].name == "report.qmd"
+
+    @patch("sdb.utils.quick_render.generate_metadata_for")
+    @patch("sdb.utils.quick_render.render_qmd")
+    def test_metadata_failure_does_not_stop_the_render(
+        self, mock_render: MagicMock, mock_metadata: MagicMock,
+        qmd_tree: Path, caplog,
+    ) -> None:
+        """The shared pipeline reports the failure and renders anyway."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_metadata.side_effect = RuntimeError("boom")
+        mock_render.return_value = True
+        with caplog.at_level(logging.WARNING):
+            success, paths = resolve_and_render(["report"], qmd_tree, prompt=False)
+        assert success is True
+        assert len(paths) == 1
+        assert any("Metadata generation failed" in r.message for r in caplog.records)
 
     @patch("sdb.utils.quick_render.render_qmd")
     def test_no_match(self, mock_render: MagicMock, qmd_tree: Path) -> None:

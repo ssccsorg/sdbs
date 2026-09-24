@@ -42,6 +42,7 @@ from sdb.resolve import resolve_all
 from sdb.utils.footnotes import clean_duplicate_footnotes
 from sdb.utils.latest import generate_latest_docs
 from sdb.utils.llms import generate_llms_txt
+from sdb.utils.metadata import generate_metadata_for, generate_metadata_tex
 
 logger = logging.getLogger(__name__)
 
@@ -552,11 +553,14 @@ def refresh_cache_for_target(
 
 
 # Default pre-build sequence (always runs first, before user config)
+# The metadata step runs last so the version stamp it writes covers the
+# document text after path resolution and formatting have had their turn.
 _DEFAULT_PRE_BUILD: List[Callable[[Path], Any] | List[str]] = [
     generate_latest_docs,
     resolve_all,
     clean_duplicate_footnotes,
     ["rumdl", "fmt", ".", "--silent", "--disable", "MD036"],
+    generate_metadata_tex,
 ]
 
 # Default post-render sequence (always runs after build)
@@ -571,10 +575,22 @@ def _run_default_sequence(
     phase: str,
 ) -> None:
     """Run a sequence of default steps, each either a callable or a
-    subprocess command list."""
+    subprocess command list.
+
+    A step that raises or exits non-zero is reported and does not stop the
+    steps after it, because an absent optional tool must not fail a build.
+    What happened is counted and logged at the end, so a run where a step
+    failed does not read like a run where every step worked.  The count is of
+    steps that raised or exited non-zero; a step that reports a problem and
+    returns is counted as completed, because that step's own log is where the
+    problem is stated.
+    """
     logger.info(
         "Running %d default %s step(s)...", len(steps), phase.lower()
     )
+    completed = 0
+    skipped: List[str] = []
+    failed: List[str] = []
     for step in steps:
         if callable(step):
             logger.info(
@@ -583,13 +599,17 @@ def _run_default_sequence(
             try:
                 step(docs_root)
             except Exception as e:
+                failed.append(step.__name__)
                 logger.warning(
                     "%s: %s raised: %s, continuing...",
                     phase, step.__name__, e,
                 )
+            else:
+                completed += 1
         else:
             executable = step[0]
             if not shutil.which(executable):
+                skipped.append(executable)
                 logger.info(
                     "%s: '%s' not found in PATH, skipping.", phase, executable
                 )
@@ -604,20 +624,32 @@ def _run_default_sequence(
                 if result.stderr:
                     logger.warning(result.stderr.strip())
                 if result.returncode != 0:
+                    failed.append(executable)
                     logger.warning(
                         "%s command '%s' failed with exit code "
                         "%d, continuing...",
                         phase, executable, result.returncode,
                     )
                 else:
+                    completed += 1
                     logger.info(
                         "%s command '%s' succeeded.", phase, " ".join(step)
                     )
             except Exception as e:
+                failed.append(executable)
                 logger.warning(
                     "%s command '%s' raised: %s, continuing...",
                     phase, executable, e,
                 )
+
+    summary = f"{phase}: {completed} of {len(steps)} step(s) completed"
+    if skipped:
+        summary += f", {len(skipped)} skipped ({', '.join(skipped)})"
+    if failed:
+        summary += f", {len(failed)} failed ({', '.join(failed)})"
+        logger.warning(summary)
+    else:
+        logger.info(summary)
 
 
 def _run_config_commands(
@@ -1563,6 +1595,26 @@ def build_single_target(
 # ---------------------------------------------------------------------------
 
 
+def prepare_isolated_docs(temp_docs: Path, qmd: Optional[str]) -> None:
+    """Write the metadata file a target's own header needs inside a copy.
+
+    The isolated copy excludes ``_files/``, since that is generated output, so
+    the file a title page inputs has to be written again here.  A project
+    pre-render hook used to write it during the render, and the built-in step
+    owns it now.  This is the one render path the pre-build sequence cannot
+    reach, since that sequence runs against the original tree.
+    """
+    if not qmd:
+        return
+    document = temp_docs / qmd
+    if not document.is_file():
+        return
+    try:
+        generate_metadata_for([document], temp_docs)
+    except Exception as exc:  # a build input must not stop the render
+        logger.warning(f"Metadata generation failed for {document}: {exc}")
+
+
 def _render_target_isolated(
     target: str,
     output_dir: Optional[Path],
@@ -1798,6 +1850,7 @@ def build_targets(
                 return ignored
 
             shutil.copytree(docs_root, temp_docs, ignore=_strict_ignore)
+            prepare_isolated_docs(temp_docs, TARGET_CONFIG.get(t, {}).get("qmd"))
             return t, temp_docs
 
         target_temp_dirs: Dict[str, Path] = {}

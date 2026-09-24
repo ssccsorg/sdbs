@@ -76,42 +76,42 @@ class TestMatchesExclude:
         assert matches_exclude("README.md", EXCLUDE_PATTERNS) is True
 
     def test_nested_readme_matches(self) -> None:
-        assert matches_exclude("projects/syntagma/README.md", EXCLUDE_PATTERNS) is True
+        assert matches_exclude("projects/section/README.md", EXCLUDE_PATTERNS) is True
 
     def test_llms_md_matches(self) -> None:
-        assert matches_exclude("projects/nexus/foo.llms.md", EXCLUDE_PATTERNS) is True
+        assert matches_exclude("projects/subject/foo.llms.md", EXCLUDE_PATTERNS) is True
 
     def test_plain_llms_md_does_not_match(self) -> None:
-        assert matches_exclude("projects/nexus/llms.md", EXCLUDE_PATTERNS) is False
+        assert matches_exclude("projects/subject/llms.md", EXCLUDE_PATTERNS) is False
 
     def test_include_dir_matches(self) -> None:
         assert matches_exclude("_include/header.qmd", EXCLUDE_PATTERNS) is True
 
     def test_nested_include_dir_matches(self) -> None:
-        assert matches_exclude("projects/syntagma/_include/author.yml", EXCLUDE_PATTERNS) is True
+        assert matches_exclude("projects/section/_include/author.yml", EXCLUDE_PATTERNS) is True
 
     def test_utils_dir_matches(self) -> None:
         assert matches_exclude("_utils/build.py", EXCLUDE_PATTERNS) is True
 
     def test_output_files_dir_matches(self) -> None:
-        assert matches_exclude("tagma/index_files/figure.pdf", EXCLUDE_PATTERNS) is True
+        assert matches_exclude("chapter/index_files/figure.pdf", EXCLUDE_PATTERNS) is True
 
     def test_cached_dir_matches(self) -> None:
-        assert matches_exclude("tagma/index_cached/cache.db", EXCLUDE_PATTERNS) is True
+        assert matches_exclude("chapter/index_cached/cache.db", EXCLUDE_PATTERNS) is True
 
     def test_libs_dir_matches(self) -> None:
         assert matches_exclude("paper/_libs/vendor.js", EXCLUDE_PATTERNS) is True
 
     def test_normal_qmd_does_not_match(self) -> None:
-        assert matches_exclude("projects/syntagma/tagma/index.qmd", EXCLUDE_PATTERNS) is False
+        assert matches_exclude("projects/section/chapter/index.qmd", EXCLUDE_PATTERNS) is False
 
     def test_normal_index_qmd_does_not_match(self) -> None:
-        assert matches_exclude("projects/syntagma/index.qmd", EXCLUDE_PATTERNS) is False
+        assert matches_exclude("projects/section/index.qmd", EXCLUDE_PATTERNS) is False
 
     def test_custom_pattern_appended(self) -> None:
         patterns = EXCLUDE_PATTERNS + ["**/_*.qmd"]
         assert matches_exclude("_updated_docs_list.qmd", patterns) is True
-        assert matches_exclude("projects/syntagma/index.qmd", patterns) is False
+        assert matches_exclude("projects/section/index.qmd", patterns) is False
 
 
 class TestIsSystemIgnored:
@@ -133,7 +133,7 @@ class TestIsSystemIgnored:
         assert _is_system_ignored("__pycache__/module.pyc") is True
 
     def test_normal_path_not_ignored(self) -> None:
-        assert _is_system_ignored("projects/syntagma/tagma/index.qmd") is False
+        assert _is_system_ignored("projects/section/chapter/index.qmd") is False
 
 
 class TestDocToHtml:

@@ -795,6 +795,11 @@ class TitleMetaResolver(_BaseResolver):
 
         doc_dir = file_path.parent.resolve()
         include_abs = (root / self.INCLUDE_FILE).resolve()
+        if not include_abs.is_file():
+            # The include cannot resolve, so a document that gains it fails the
+            # render on a missing file.  The template is only added where the
+            # project carries it, which is what the default template lacks.
+            return 0
         correct_rel = self._compute_rel_path(doc_dir, include_abs)
         directive = f"\n{{{{< include {correct_rel} >}}}}\n"
 

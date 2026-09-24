@@ -36,7 +36,7 @@ RUN sed -i 's/archive.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.li
     && rm -rf /tmp/c2patool*
 
 # Install binary
-RUN uv tool install rumdl==0.1.86
+RUN uv tool install rumdl
 
 # Install TinyTeX and LaTeX packages
 RUN /opt/quarto/bin/quarto install tinytex --no-prompt \

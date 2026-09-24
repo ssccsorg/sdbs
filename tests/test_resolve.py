@@ -39,6 +39,17 @@ class TestTitleMetaResolver:
         result = self.resolver.fix_one_file(qmd, tmp_path, dry_run=True, verbose=False)
         assert result == 1
 
+    def test_no_include_added_without_the_template(self, tmp_path: Path) -> None:
+        """A project that carries no _title_meta_items.qmd gains no include for
+        it, because a document that gains one then fails the render on a file
+        that cannot be resolved.  This is the state the default template
+        starts in, since it ships no such file."""
+        qmd = tmp_path / "guide" / "index.qmd"
+        qmd.parent.mkdir()
+        qmd.write_text("---\ntitle: Guide\n---\n\nContent\n")
+        result = self.resolver.fix_one_file(qmd, tmp_path, dry_run=True, verbose=False)
+        assert result == 0
+
     def test_does_not_match_string_in_yaml(self, tmp_path: Path) -> None:
         """_title_meta_items.qmd appearing in YAML metadata-files alone
         (without an actual include directive) triggers insertion."""

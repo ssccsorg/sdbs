@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from sdb.cli import main
 
 
@@ -97,8 +99,10 @@ class TestBuildCommand:
             code = _run_main(["build", ".", "--website"])
             assert code == 0
 
-    def test_build_with_targets(self) -> None:
-        """sdb build docs whitepaper --website -j 4 -> targets=['whitepaper'], website=True, jobs=4."""
+    def test_build_with_targets(self, tmp_path: Path) -> None:
+        """sdb build <dir> whitepaper --website -j 4 -> targets=['whitepaper'], website=True, jobs=4."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
         with (
             patch("sdb.cli.build_module.initialize_config"),
             patch("sdb.cli.build_module.parse_targets") as mock_parse,
@@ -110,7 +114,7 @@ class TestBuildCommand:
             mock_validate.return_value = ["whitepaper"]
             mock_build.return_value = True
             code = _run_main(
-                ["build", "docs", "whitepaper", "--website", "-j", "4"]
+                ["build", str(docs_root), "whitepaper", "--website", "-j", "4"]
             )
             assert code == 0
             mock_parse.assert_called_once_with(["whitepaper"])
@@ -132,19 +136,23 @@ class TestBuildCommand:
             # The 'all' target expands to BUILD_FUNCTIONS keys
             mock_build.assert_called_once()
 
-    def test_clean_exit_zero(self) -> None:
-        """sdb clean docs triggers clean_quarto_artifacts."""
+    def test_clean_exit_zero(self, tmp_path: Path) -> None:
+        """sdb clean <dir> triggers clean_quarto_artifacts."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
         with patch("sdb.cli.build_module.clean_quarto_artifacts") as mock_clean:
             mock_clean.return_value = True
-            code = _run_main(["clean", "docs"])
+            code = _run_main(["clean", str(docs_root)])
             assert code == 0
-            mock_clean.assert_called_once_with(Path("docs").resolve())
+            mock_clean.assert_called_once_with(docs_root.resolve())
 
-    def test_clean_exit_one(self) -> None:
+    def test_clean_exit_one(self, tmp_path: Path) -> None:
         """When clean fails, exit code is 1."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
         with patch("sdb.cli.build_module.clean_quarto_artifacts") as mock_clean:
             mock_clean.return_value = False
-            code = _run_main(["clean", "docs"])
+            code = _run_main(["clean", str(docs_root)])
             assert code == 1
 
 
@@ -184,14 +192,54 @@ class TestPreCommand:
             args = mock_seq.call_args
             assert args[0][2] == "Pre-build"
 
-    def test_pre_with_docs_root(self) -> None:
-        """sdb pre /tmp/docs -> resolved docs_root passed to _run_default_sequence."""
+    def test_pre_with_docs_root(self, tmp_path: Path) -> None:
+        """sdb pre <dir> -> the resolved docs_root reaches _run_default_sequence."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
         with patch("sdb.build._run_default_sequence") as mock_seq:
-            code = _run_main(["pre", "/tmp/docs"])
+            code = _run_main(["pre", str(docs_root)])
             assert code == 0
             mock_seq.assert_called_once()
             args = mock_seq.call_args
-            assert str(args[0][1]).endswith("/tmp/docs")
+            assert Path(args[0][1]) == docs_root.resolve()
+
+
+class TestMissingDocsRoot:
+    """A docs root that is not a directory stops the command.
+
+    Every command takes the docs root from the command line, so a wrong path
+    has to stop the command rather than walk nothing and report success.
+    """
+
+    @pytest.mark.parametrize(
+        "command, delegated",
+        [
+            ("pre", "sdb.build._run_default_sequence"),
+            ("check", "sdb.check.run_check"),
+            ("build", "sdb.build.build_targets"),
+            ("clean", "sdb.build.clean_quarto_artifacts"),
+        ],
+    )
+    def test_a_missing_root_stops_before_the_work(
+        self, tmp_path: Path, command: str, delegated: str, capsys
+    ) -> None:
+        absent = tmp_path / "absent"
+        with patch(delegated) as mock_work:
+            code = _run_main([command, str(absent)])
+        assert code == 1
+        mock_work.assert_not_called()
+        captured = capsys.readouterr()
+        assert f"sdb {command}: docs root is not a directory" in captured.err
+        assert "absent" in captured.err
+
+    def test_a_file_is_not_a_docs_root(self, tmp_path: Path) -> None:
+        """A path that exists and is a document is still not a docs root."""
+        document = tmp_path / "doc.qmd"
+        document.write_text("---\ntitle: x\n---\n", encoding="utf-8")
+        with patch("sdb.build._run_default_sequence") as mock_seq:
+            code = _run_main(["pre", str(document)])
+        assert code == 1
+        mock_seq.assert_not_called()
 
 
 class TestInvalidCommand:

@@ -358,7 +358,7 @@ def format_title(rel_path: str, docs_root: Path) -> str:
 
 
 def breadcrumb(rel_path: str, title: str) -> str:
-    """Return a capitalized path breadcrumb like ``Projects > Nexus > ``."""
+    """Return a capitalized path breadcrumb like ``Projects > Subject > ``."""
     parts = Path(rel_path).parts
     if len(parts) <= 1:
         return ""
