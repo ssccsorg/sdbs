@@ -82,6 +82,7 @@ exclude:
 #   document-outside-root             report   a document resolving out of the docs root
 #   input-missing                     report   a header input nothing here creates
 #   reference-missing                 repair   insert the \input line a header needs
+#   reference-unguarded               repair   put that line behind \IfFileExists
 #   invalid-front-matter              report   front matter that does not parse
 #   declared-metadata-missing         report   a metadata-files entry the tree lacks
 #   affiliation-url-from-author-key   repair   take the url the author entry declares

@@ -87,6 +87,7 @@ metadata:
 - `document-outside-root`: a document that resolves out of the docs root is skipped, which is what a symlinked document looks like.
 - `input-missing`: a header input that does not exist and whose name does not follow the `*_metadata.tex` convention is reported, since nothing here creates it.
 - `reference-missing`: a header that names a generated macro with no reference gets the reference inserted behind `\IfFileExists`, and a header with no editable line is reported.
+- `reference-unguarded`: an input that is not behind `\IfFileExists` is put there, with the macros the header uses declared empty, so a render that never reaches sdbs compiles; a reference in a form the step cannot rewrite is reported.
 - `invalid-front-matter`: front matter that does not parse stops generation for that document rather than writing a file of empty macros.
 - `declared-metadata-missing`: a `metadata-files` entry the tree does not carry is reported and skipped.
 - `affiliation-url-from-author-key`: an affiliation with no url takes the url the same author entry declares at author level.
