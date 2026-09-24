@@ -9,11 +9,13 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
 import pytest
 
+from sdb.utils import metadata as metadata_module
 from sdb.utils.metadata import (
     CASE_ORDER,
     GENERATED_MACROS,
@@ -1625,3 +1627,109 @@ class TestCaseTags:
             for m in records
         )
         assert any(m.endswith("(FIXING)") for m in records)
+
+
+# ---------------------------------------------------------------------------
+# The case inventory is written in five places, and adding a case must reach
+# all of them: the CASE_* constant, CASE_ORDER, the ordering block in the
+# module, the inventory comment in both templates an init copies, and the
+# README list.  Nothing else would notice a forgotten one, and a case that is
+# documented nowhere is invisible to a reader while being on by default.
+# ---------------------------------------------------------------------------
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+README_PATH = _REPO_ROOT / "README.md"
+TEMPLATES_DIR = Path(metadata_module.__file__).resolve().parents[1] / "templates"
+
+# A template line is "#   <case>   report|repair   <detail>", where the third
+# column is what separates an inventory line from the prose around it.
+_TEMPLATE_CASE_LINE = re.compile(
+    r"^#\s{2,}([a-z][a-z0-9-]*)\s{2,}(?:report|repair)\s+\S", re.MULTILINE
+)
+# An ordering line in the module is "#   1. <case>            <constraint>".
+_ORDERING_CASE_LINE = re.compile(
+    r"^#\s+\d+\.\s+([a-z][a-z0-9-]*)\s", re.MULTILINE
+)
+# A README line is "- `<case>`: <detail>".
+_README_CASE_LINE = re.compile(r"^- `([a-z][a-z0-9-]*)`:", re.MULTILINE)
+
+
+def _case_constants() -> dict[str, str]:
+    """Every ``CASE_*`` string constant, by constant name."""
+    return {
+        name: value
+        for name, value in vars(metadata_module).items()
+        if name.startswith("CASE_") and name != "CASE_ORDER"
+        and isinstance(value, str)
+    }
+
+
+def _readme_inventory(text: str) -> set[str]:
+    """The case names listed in the README's Metadata Cases section."""
+    _, _, after = text.partition("### Metadata Cases")
+    body = after.partition("\n## ")[0]
+    return set(_README_CASE_LINE.findall(body))
+
+
+def _inventory_diff(path: Path, listed: set[str]) -> str:
+    """A failure message that names the direction of every mismatch."""
+    expected = set(CASE_ORDER)
+    lines = [f"{path} does not match CASE_ORDER"]
+    for label, difference in (
+        ("not listed", expected - listed),
+        ("listed but not a case", listed - expected),
+    ):
+        if difference:
+            lines.append(f"  {label}: " + ", ".join(sorted(difference)))
+    return "\n".join(lines)
+
+
+class TestCaseInventory:
+    """The constants, the order, and every list that names the cases agree."""
+
+    def test_every_constant_is_in_the_order(self) -> None:
+        constants = _case_constants()
+        missing = sorted(set(constants.values()) - set(CASE_ORDER))
+        assert not missing, (
+            "CASE_* constants absent from CASE_ORDER: " + ", ".join(missing)
+        )
+
+    def test_the_order_names_only_constants(self) -> None:
+        constants = _case_constants()
+        unknown = sorted(set(CASE_ORDER) - set(constants.values()))
+        assert not unknown, (
+            "CASE_ORDER entries with no CASE_* constant: " + ", ".join(unknown)
+        )
+
+    def test_no_two_constants_share_a_name(self) -> None:
+        values = list(_case_constants().values())
+        duplicates = sorted({v for v in values if values.count(v) > 1})
+        assert not duplicates, (
+            "two CASE_* constants share a name: " + ", ".join(duplicates)
+        )
+
+    def test_the_order_has_no_duplicate(self) -> None:
+        duplicates = sorted(
+            name for name in set(CASE_ORDER) if CASE_ORDER.count(name) > 1
+        )
+        assert not duplicates, (
+            "duplicate CASE_ORDER entries: " + ", ".join(duplicates)
+        )
+
+    def test_the_ordering_block_names_every_case(self) -> None:
+        source = Path(metadata_module.__file__).read_text(encoding="utf-8")
+        listed = set(_ORDERING_CASE_LINE.findall(source))
+        assert listed == set(CASE_ORDER), _inventory_diff(
+            Path(metadata_module.__file__), listed
+        )
+
+    @pytest.mark.parametrize("template", ["default", "advanced"])
+    def test_the_template_inventory_names_every_case(self, template: str) -> None:
+        path = TEMPLATES_DIR / template / "build.yml"
+        listed = set(_TEMPLATE_CASE_LINE.findall(path.read_text(encoding="utf-8")))
+        assert listed == set(CASE_ORDER), _inventory_diff(path, listed)
+
+    def test_the_readme_inventory_names_every_case(self) -> None:
+        text = README_PATH.read_text(encoding="utf-8")
+        assert "### Metadata Cases" in text
+        listed = _readme_inventory(text)
+        assert listed == set(CASE_ORDER), _inventory_diff(README_PATH, listed)

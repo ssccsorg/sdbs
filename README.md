@@ -100,6 +100,8 @@ metadata:
 
 A repair that a disabled case depends on is held back with it, so the affiliation keys are supplied together or not at all.
 
+A new case has to reach every list that names the cases: the `CASE_*` constant, `CASE_ORDER`, the ordering block in `src/sdb/utils/metadata.py`, the inventory comment in both `src/sdb/templates/*/build.yml`, and the list above. `TestCaseInventory` in `tests/test_metadata.py` compares each of them against `CASE_ORDER`, so a list left behind fails the suite rather than leaving a case that no reader can find.
+
 The contract the step judges is the macro list its generator writes. A header is examined for those names and for the reference that gives them a path into the document, and for nothing else, so a header that names a command the generator does not declare passes in silence. A passing step is a statement about the metadata contract, and not about a document's LaTeX.
 
 A header may guard the input with `\IfFileExists` and declare the macros it uses in the other branch. sdbs supplies the values, and a render that never reaches sdbs compiles with them empty rather than failing on an absent file. The reference repair inserts that guarded form, so a document the step repairs keeps rendering without sdbs.
