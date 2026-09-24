@@ -1285,6 +1285,43 @@ class TestAffiliationDeclaration:
         assert author.read_text(encoding="utf-8") == before
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
+    def test_an_inline_affiliation_is_reported_and_left_alone(
+        self, tmp_path, caplog
+    ) -> None:
+        """A supplied key goes into a metadata-files entry, because that is
+        what the generator reads, so a document that declares the affiliation
+        itself is reported rather than edited."""
+        document = (
+            "---\n"
+            'title: "Test"\n'
+            "author:\n"
+            "  - name: Taeho Lee\n"
+            "    affiliations:\n"
+            "      - name: Ktema Systems\n"
+            "metadata-files:\n"
+            "  - ./_include/other.yml\n"
+            "format:\n"
+            "  pdf:\n"
+            "    include-in-header:\n"
+            "      text: |\n"
+            "        \\input{./_files/doc_metadata.tex}\n"
+            f"        {AFFILIATION_HEADER}\n"
+            "---\n"
+            "\n"
+            "Body.\n"
+        )
+        _write(tmp_path / "_include" / "other.yml", "csl: x\n")
+        _write(tmp_path / "doc.qmd", document)
+        with caplog.at_level(logging.WARNING):
+            assert generate_metadata_tex(tmp_path) is True
+        assert (tmp_path / "doc.qmd").read_text(encoding="utf-8") == document
+        rendered = (tmp_path / "_files" / "doc_metadata.tex").read_text(
+            encoding="utf-8"
+        )
+        assert "\\newcommand{\\affiliationurl}{}" in rendered
+        message = " ".join(str(r.message) for r in caplog.records)
+        assert "Metadata[affiliation-blank]:" in message
+
     def test_second_pass_changes_nothing(self, tmp_path) -> None:
         author = self._project(tmp_path, AUTHOR_URL_KEY)
         generate_metadata_tex(tmp_path)

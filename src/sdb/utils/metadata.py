@@ -27,9 +27,9 @@ Two rules keep the step free of side effects.
   the docs root.  It generates the path a document references, inserts the
   reference a header needs but does not declare, which is the inconsistency
   that would otherwise reach LuaLaTeX as an undefined control sequence, and
-  adds the affiliation keys an ``affiliations`` entry is missing.  Every write
-  adds to a file the document already names, and a Quarto configuration is
-  never edited.
+  adds the affiliation keys a declared ``metadata-files`` entry is missing.
+  Every write adds to a file the document already names, and a Quarto
+  configuration is never edited.
 - It writes the generated file only when the target is missing or older than
   the document and the files the document resolves through
   ``metadata-files``.  A repeated run converges after the first pass, and a
@@ -332,7 +332,9 @@ def _did(case: str, detail: str) -> None:
 #
 # A supplied key goes into the declared file rather than into the generated
 # one, because the declared file is what the generator reads: a Quarto-only
-# render, which reads the same file, is healed by the same write.
+# render, which reads the same file, is healed by the same write.  The declared
+# file is the ``metadata-files`` entry, so an affiliation the document declares
+# in its own front matter is reported and left alone rather than edited.
 #
 # A case fires only for a macro the document's own header names, so a document
 # that does not link an affiliation is never the reason a declared file is
