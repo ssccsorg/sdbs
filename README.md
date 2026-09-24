@@ -75,6 +75,8 @@ Every command that takes a docs root stops when the path is not a directory, and
 
 The sequence is idempotent. Running `sdb pre docs` on an already-clean tree changes nothing. Documents rendered through `sdb render` or `sdb pub` skip this sequence, since those commands call the underlying renderer directly without preprocessing.
 
+The sequence tolerates a step that fails, because an absent optional tool must not fail a build. It logs a count when it finishes, such as `Pre-build: 4 of 4 step(s) completed`, and a step that raised or exited non-zero is named in that line. A skipped step is named too, since a tool missing from `PATH` is normal rather than a failure.
+
 ## Documentation
 
 - [SDBS](https://docs.ssccs.org/projects/sdbs/index.html): the project index, covering the build architecture, the parallel build model, and the LLMs pipeline.
