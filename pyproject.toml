@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [
-    { name = "SSCCS Foundation", email = "contact@ssccs.org" },
+    { name = "SSCCS Initiative", email = "contact@ssccs.org" },
 ]
 keywords = ["quarto", "documentation", "build-system", "orchestration"]
 classifiers = [
