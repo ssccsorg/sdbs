@@ -21,8 +21,6 @@ docker pull ghcr.io/ssccsorg/sdbs:latest
 docker run --rm -v $(pwd)/docs:/work -w /work ghcr.io/ssccsorg/sdbs:latest sdb build docs --website
 ```
 
-The image is the complete distribution: Quarto, the renderer, and the sdbs package with its deploy channels installed. To build it from this repository and verify the deploy engine inside it, without a registry, a store, or a CI pipeline, run `./docker.sh check`, which builds the image and then runs a dry-run deploy inside it. `./docker.sh build` builds the image alone.
-
 ### Try the example project
 
 ```bash

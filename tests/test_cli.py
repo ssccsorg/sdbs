@@ -326,3 +326,51 @@ class TestDistCommand:
         """The rename removed the old name rather than aliasing it."""
         code = _run_main(["pub", "map"])
         assert code != 0
+
+
+class TestDeployEndToEnd:
+    """The deploy command, wired through the real engine and the s3 channel.
+
+    These run the command end to end, so they cover the composition the mocked
+    dispatch tests leave out: the registry, the config load, and the channel's
+    own validation.
+    """
+
+    CONFIG = (
+        "deploy:\n"
+        "  - name: docs-private\n"
+        "    plugin: s3\n"
+        "    source: _site\n"
+        "    options:\n"
+        "      bucket: check-bucket\n"
+    )
+
+    def _docs_with_site(self, tmp_path: Path) -> Path:
+        docs = tmp_path / "docs"
+        (docs / "_site").mkdir(parents=True)
+        (docs / "_site" / "index.html").write_text("<html></html>", encoding="utf-8")
+        (docs / "build.yml").write_text(self.CONFIG, encoding="utf-8")
+        return docs
+
+    def test_a_dry_run_reaches_the_channel(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("S3_ENDPOINT", "https://example.invalid")
+        monkeypatch.setenv("AWS_REGION", "region-1")
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "check")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "check")
+        code = _run_main(["deploy", str(self._docs_with_site(tmp_path)), "--dry-run"])
+        assert code == 0
+
+    def test_a_channel_that_cannot_run_fails(self, tmp_path: Path, monkeypatch) -> None:
+        # No endpoint and no region: the channel refuses before any upload.
+        monkeypatch.delenv("S3_ENDPOINT", raising=False)
+        monkeypatch.delenv("AWS_REGION", raising=False)
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "check")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "check")
+        code = _run_main(["deploy", str(self._docs_with_site(tmp_path)), "--dry-run"])
+        assert code == 1
+
+    def test_no_channels_is_a_failure(self, tmp_path: Path) -> None:
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        code = _run_main(["deploy", str(docs)])
+        assert code == 1
