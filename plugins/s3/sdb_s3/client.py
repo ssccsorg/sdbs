@@ -3,8 +3,7 @@ A minimal S3-compatible client for the deploy channels.
 
 Covers the operations a private upload needs: put an object, list the keys
 under a prefix, delete a key, and mint a presigned GET URL. Requests are
-signed with :mod:`sdb.utils.s3sig` and sent with ``requests``, which the
-package already depends on.
+signed with :mod:`.signer` and sent with ``requests``.
 """
 
 from __future__ import annotations

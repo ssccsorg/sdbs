@@ -60,7 +60,7 @@ sdb dist map --all                  # render all matches without prompting
 
 # Upload built artifacts to an external deploy channel
 sdb deploy docs
-sdb deploy docs --channel private-docs
+sdb deploy docs --require-all
 sdb deploy docs --dry-run
 
 # Remove Quarto build artifacts (_cached/, _files/, html, pdf...)
