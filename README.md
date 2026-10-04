@@ -55,14 +55,57 @@ sdb render map
 sdb render map --to pdf            # render to a specific format
 
 # Render and collect PDF artifacts (PDF, LaTeX, figures, media)
-sdb pub map
-sdb pub map --all                  # render all matches without prompting
+sdb dist map
+sdb dist map --all                  # render all matches without prompting
+
+# Upload built artifacts to an external deploy channel
+sdb deploy docs
+sdb deploy docs --channel private-docs
+sdb deploy docs --dry-run
 
 # Remove Quarto build artifacts (_cached/, _files/, html, pdf...)
 sdb clean docs
 ```
 
 Every command that takes a docs root stops when the path is not a directory, and names the path it rejected. A command that would otherwise walk no documents and report success fails instead, so a typo or a wrong working directory is visible where it happens rather than later as a render error in a document that was never processed.
+
+## External Deploy Channels
+
+`sdb deploy` runs the channels declared under `deploy:` in `build.yml`. A channel names a plugin and a source directory and moves that source to an external store. Built-in channels register in `src/sdb/deploy.py`; an external package adds one by exposing a `DeployPlugin` under the `sdb.deploy` entry point group, so a new destination needs no change to the driver.
+
+Deploy runs as its own invocation, separate from the render. The render container executes project-controlled Quarto and Jupyter code, so it stays free of upload credentials; the deploy invocation receives the credentials and walks the built artifact without running project code.
+
+Channels are private by default. The `s3` channel sends no object ACL and refuses a `visibility: public` request unless `--allow-public` is passed, so a reachable destination is an explicit decision rather than a default.
+
+```yaml
+deploy:
+  - name: private-docs
+    plugin: s3
+    source: _site
+    options:
+      bucket: example-private
+      prefix: project/docs
+      endpoint: https://<account-id>.r2.cloudflarestorage.com
+      visibility: private
+      delete: true
+      auth:
+        mode: access
+        domain: https://private.example.com
+```
+
+The channel reads the endpoint from `options.endpoint` or the `S3_ENDPOINT` environment variable, and the credentials from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, whose names `options.access_key_id_env` and `options.secret_access_key_env` can override. Destination values and credentials never live in the repository.
+
+The `auth` block records how a client reaches the deployed tree.
+
+- `mode: none` uploads and reports nothing.
+- `mode: access` reports the `domain`, which is expected to sit behind Cloudflare Access. Access gates every request at the edge and sets a session cookie, so a website's relative links keep working and a reader authenticates once in a browser. This is the fit for a private site.
+- `mode: presigned` mints a time-limited GET URL for each path in `objects` and needs `domain` and `expires_seconds`. This fits a single file, since each object needs its own signature and a page's relative links are not presigned.
+
+`delete: true` mirrors the source by removing remote keys absent from it, and needs a `prefix`, or an explicit `allow_unscoped_delete`, because a delete at the bucket root would remove every object outside the source.
+
+R2 objects are private unless the bucket is exposed through a domain, which is a Cloudflare account setting outside this tool. The channel therefore guarantees only that it never sets an ACL and refuses a public request, and points the operator at the domain-based gate rather than creating it.
+
+The `s3` channel signs its requests with the standard library rather than a cloud SDK. `tests/test_s3sig.py` pins the signer against the published AWS SigV4 vectors, so a wrong canonical request fails a test instead of a deploy.
 
 ## Pre-build Sequence
 
@@ -74,7 +117,7 @@ Every command that takes a docs root stops when the path is not a directory, and
 - Formatting: run `rumdl fmt` with MD036 disabled.
 - Metadata: write the `_metadata.tex` a document references from its PDF or beamer header, taking the values from the document's front matter and the files it lists under `metadata-files:`. The step heals the mismatches between those declarations and what the render needs. A header that names a metadata macro without referencing a generated file gets that reference inserted, which is the inconsistency that would otherwise reach LuaLaTeX as an undefined control sequence. An `affiliations` entry that declares no url or domain gets the key supplied in the `metadata-files` entry that declares it, which is what the `\href` on the title page reads; a document that declares the affiliation in its own front matter is reported and left alone. An incomplete affiliation renders an empty link rather than failing, so that case reports it. The generated file itself is written when it is missing or older than its inputs. It runs last so the version stamp covers the text after resolution and formatting, and it reports a document whose header offers no line to edit. Every case is named, so one can be switched off on its own under `metadata.disabled` in `build.yml`, and `metadata.report_only` turns every repair off at once.
 
-The sequence is idempotent. Running `sdb pre docs` on an already-clean tree changes nothing. Documents rendered through `sdb render` or `sdb pub` skip this sequence, since those commands call the underlying renderer directly without preprocessing. They do run the metadata step for the documents they select, which writes the file a header consumes, inserts the reference a header needs, puts an unguarded input behind `\IfFileExists`, and supplies the affiliation keys a header links with, because the renderer reads that file from the document header and a preview of a new document would otherwise fail on a missing input. A preview can therefore edit the document it selects, which it did not before.
+The sequence is idempotent. Running `sdb pre docs` on an already-clean tree changes nothing. Documents rendered through `sdb render` or `sdb dist` skip this sequence, since those commands call the underlying renderer directly without preprocessing. They do run the metadata step for the documents they select, which writes the file a header consumes, inserts the reference a header needs, puts an unguarded input behind `\IfFileExists`, and supplies the affiliation keys a header links with, because the renderer reads that file from the document header and a preview of a new document would otherwise fail on a missing input. A preview can therefore edit the document it selects, which it did not before.
 
 ### Metadata Cases
 

@@ -849,11 +849,11 @@ class TestResolveAndRender:
 
 
 # ============================================================================
-# publish_artifacts / _collect_one
+# dist_artifacts / _collect_one
 # ============================================================================
 
 
-class TestPublishArtifacts:
+class TestDistArtifacts:
     """Tests for PDF artifact collection."""
 
     def test_collect_one_copies_pdf(self, tmp_path: Path) -> None:
@@ -902,23 +902,23 @@ class TestPublishArtifacts:
         assert (dest / "doc_files" / "figure-pdf" / "fig1.pdf").exists()
         assert (dest / "_files" / "style.css").exists()
 
-    def test_publish_artifacts_creates_folder(self, tmp_path: Path) -> None:
-        """publish_artifacts creates folder alongside the QMD."""
-        from sdb.utils.quick_render import publish_artifacts
+    def test_dist_artifacts_creates_folder(self, tmp_path: Path) -> None:
+        """dist_artifacts creates folder alongside the QMD."""
+        from sdb.utils.quick_render import dist_artifacts
         qmd = tmp_path / "report.qmd"
         qmd.write_text("---\n")
         pdf = tmp_path / "report.pdf"
         pdf.write_text("%PDF")
-        result = publish_artifacts([qmd])
+        result = dist_artifacts([qmd])
         assert result >= 1
         assert (tmp_path / "report" / "report.pdf").exists()
 
-    def test_publish_no_artifacts_warns(self, tmp_path: Path) -> None:
-        """publish_artifacts warns when no artifacts are found."""
-        from sdb.utils.quick_render import publish_artifacts
+    def test_dist_no_artifacts_warns(self, tmp_path: Path) -> None:
+        """dist_artifacts warns when no artifacts are found."""
+        from sdb.utils.quick_render import dist_artifacts
         qmd = tmp_path / "orphan.qmd"
         qmd.write_text("---\n")
-        result = publish_artifacts([qmd])
+        result = dist_artifacts([qmd])
         assert result == 0
 
 

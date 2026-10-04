@@ -53,7 +53,7 @@ exclude:
 # author (name, email, role, orcid) and affiliations (name, url, domain).  It
 # heals the mismatches between those declarations and what the Quarto render
 # needs, mostly on the PDF path.  No project script and no pre-render hook are
-# involved: the step runs for sdb pre, sdb build, sdb render, and sdb pub.
+# involved: the step runs for sdb pre, sdb build, sdb render, and sdb dist.
 #
 # Every check is a named case.  Switch one off under "disabled", or hold back
 # every repair at once with "report_only".  An unknown name is reported with
@@ -75,3 +75,35 @@ exclude:
 metadata:
   disabled: []
   report_only: false
+
+# External deploy channels (optional)
+# `sdb deploy <docs_root>` runs each channel, as a separate step from the build
+# so the render container never holds upload credentials.  The built-in channel
+# is `s3`, for an S3-compatible store such as Cloudflare R2.
+#
+# Channels are private by default: the s3 channel sends no object ACL and
+# refuses `visibility: public` unless --allow-public is passed.  Destination
+# values and credentials come from the environment, never from this file.
+#
+# Generic keys:   name (required), plugin (required), source (default _site),
+#                 enabled (default true)
+# Plugin options: bucket (required), prefix, endpoint (or S3_ENDPOINT),
+#                 region (default auto), visibility (private|public),
+#                 delete (mirror the source), allow_unscoped_delete (confirm a
+#                 delete at the bucket root), and auth for client access:
+#                 mode none|access|presigned, domain, expires_seconds, objects.
+#
+# deploy:
+#   - name: private-docs
+#     plugin: s3
+#     source: _site
+#     options:
+#       bucket: example-private
+#       prefix: project/docs
+#       endpoint: https://<account-id>.r2.cloudflarestorage.com
+#       visibility: private
+#       delete: true
+#       auth:
+#         mode: access
+#         domain: https://private.example.com
+deploy: []

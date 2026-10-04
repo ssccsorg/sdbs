@@ -218,6 +218,7 @@ class TestMissingDocsRoot:
             ("check", "sdb.check.run_check"),
             ("build", "sdb.build.build_targets"),
             ("clean", "sdb.build.clean_quarto_artifacts"),
+            ("deploy", "sdb.deploy.run_deploy"),
         ],
     )
     def test_a_missing_root_stops_before_the_work(
@@ -253,4 +254,78 @@ class TestInvalidCommand:
     def test_unknown_command(self) -> None:
         """Running sdb with an unrecognised command should exit non-zero."""
         code = _run_main(["nonexistent"])
+        assert code != 0
+
+
+class TestDeployCommand:
+    """Tests for the ``sdb deploy`` subcommand."""
+
+    def test_deploy_defaults(self, tmp_path: Path) -> None:
+        """sdb deploy <dir> runs every channel without a filter."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
+        with patch("sdb.deploy.run_deploy") as mock_deploy:
+            mock_deploy.return_value = True
+            code = _run_main(["deploy", str(docs_root)])
+            assert code == 0
+            kwargs = mock_deploy.call_args.kwargs
+            assert kwargs["channels"] is None
+            assert kwargs["dry_run"] is False
+            assert kwargs["allow_public"] is False
+
+    def test_deploy_channel_and_flags(self, tmp_path: Path) -> None:
+        """--channel, --dry-run, and --allow-public reach run_deploy."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
+        with patch("sdb.deploy.run_deploy") as mock_deploy:
+            mock_deploy.return_value = True
+            code = _run_main(
+                [
+                    "deploy",
+                    str(docs_root),
+                    "--channel",
+                    "private-docs",
+                    "--dry-run",
+                    "--allow-public",
+                ]
+            )
+            assert code == 0
+            kwargs = mock_deploy.call_args.kwargs
+            assert kwargs["channels"] == ["private-docs"]
+            assert kwargs["dry_run"] is True
+            assert kwargs["allow_public"] is True
+
+    def test_deploy_failure_exit_code(self, tmp_path: Path) -> None:
+        """A channel that fails makes the command exit non-zero."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
+        with patch("sdb.deploy.run_deploy") as mock_deploy:
+            mock_deploy.return_value = False
+            code = _run_main(["deploy", str(docs_root)])
+            assert code == 1
+
+
+class TestDistCommand:
+    """Tests for the ``sdb dist`` subcommand (the renamed pub)."""
+
+    def test_dist_collects_artifacts(self, tmp_path: Path) -> None:
+        """sdb dist renders the matches and assembles their artifacts."""
+        rendered = [tmp_path / "map.qmd"]
+        with (
+            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
+            patch(
+                "sdb.utils.quick_render.resolve_and_render",
+                return_value=(True, rendered),
+            ) as mock_resolve,
+            patch("sdb.utils.quick_render.dist_artifacts") as mock_dist,
+        ):
+            mock_dist.return_value = 1
+            code = _run_main(["dist", "map"])
+            assert code == 0
+            assert mock_resolve.call_args.kwargs["format"] == "pdf"
+            mock_dist.assert_called_once_with(rendered)
+
+    def test_pub_is_no_longer_a_command(self) -> None:
+        """The rename removed the old name rather than aliasing it."""
+        code = _run_main(["pub", "map"])
         assert code != 0

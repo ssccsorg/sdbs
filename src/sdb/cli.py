@@ -7,7 +7,8 @@ Subcommands:
   check    Validate links, citations, and cross-references.
   pre      Run pre-render steps (latest docs, path resolution, formatting).
   render   Locate .qmd files by short name and render them directly (no preprocessing).
-  pub      Render and publish PDF artifacts for short name matches.
+  dist     Render and collect PDF artifacts for short name matches.
+  deploy   Upload built artifacts to external deploy channels.
   clean    Remove Quarto build artifacts.
 """
 
@@ -239,32 +240,74 @@ def main(argv: list[str] | None = None) -> None:
         help="Render all matching files without prompting",
     )
 
-    # --- pub (render + collect PDF artifacts) ---
-    pub_parser = subparsers.add_parser(
-        "pub",
-        help="Render and publish PDF artifacts for short name matches",
+    # --- dist (render + collect PDF artifacts) ---
+    dist_parser = subparsers.add_parser(
+        "dist",
+        help="Render and assemble PDF artifacts for short name matches",
         description="Same as 'sdb render' but additionally collects PDF-related "
         "artifacts after rendering: PDF, LaTeX source, figure-pdf, mediabag, "
         "and shared _files/ into a folder named after each matched file.\n\n"
-        "Use this command when you need to distribute or archive the rendered "
-        "PDF along with its supporting files (figures, media, sources).\n\n"
+        "This assembles a local distribution artifact and uploads nothing; use "
+        "'sdb deploy' to move a built tree to an external channel.\n\n"
         "When multiple files match, prompts for selection unless --all is given.",
         epilog=(
             "Examples:\n"
-            "  sdb pub map\n"
-            "  sdb pub map id --all\n"
+            "  sdb dist map\n"
+            "  sdb dist map id --all\n"
         ),
     )
-    pub_parser.add_argument(
+    dist_parser.add_argument(
         "patterns",
         type=str,
         nargs="+",
         help="One or more short names or path fragments to match against .qmd "
         "file stems",
     )
-    pub_parser.add_argument(
+    dist_parser.add_argument(
         "--all", "-a", action="store_true",
         help="Render all matching files without prompting",
+    )
+
+    # --- deploy (external channels) ---
+    deploy_parser = subparsers.add_parser(
+        "deploy",
+        help="Upload built artifacts to external deploy channels",
+        description="Run the deploy channels configured under 'deploy:' in build.yml. "
+        "Each channel names a plugin and a source directory, and reads its "
+        "destination and credentials from the configuration and the environment. "
+        "The first built-in channel is 's3' for S3-compatible private upload; "
+        "external plugins register under the 'sdb.deploy' entry point group.\n\n"
+        "Deploy is a separate step from the render, so the render container, "
+        "which executes project code, never holds upload credentials.",
+        epilog=(
+            "Examples:\n"
+            "  sdb deploy docs\n"
+            "  sdb deploy docs --channel ssccs-docs-private\n"
+            "  sdb deploy docs --dry-run\n"
+        ),
+    )
+    deploy_parser.add_argument(
+        "docs_root",
+        type=Path,
+        nargs="?",
+        default=Path("."),
+        help="Path to the docs directory (default: current directory)",
+    )
+    deploy_parser.add_argument(
+        "--channel", "-C", action="append", default=None,
+        help="Deploy only the named channel (repeatable)",
+    )
+    deploy_parser.add_argument(
+        "--config", "-c", type=Path, default=None,
+        help="Path to the YAML configuration file (default: build.yml in the docs root)",
+    )
+    deploy_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Report what each channel would upload without contacting the store",
+    )
+    deploy_parser.add_argument(
+        "--allow-public", action="store_true",
+        help="Confirm a channel that asks for visibility: public",
     )
 
     # --- clean ---
@@ -424,12 +467,12 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(0 if success else 1)
 
-    elif args.command == "pub":
+    elif args.command == "dist":
         _setup_logging()
         from .utils.quick_render import (
+            dist_artifacts,
             find_build_yml,
             load_exclude_patterns,
-            publish_artifacts,
             resolve_and_render,
         )
 
@@ -446,8 +489,30 @@ def main(argv: list[str] | None = None) -> None:
             format="pdf",
         )
         if rendered:
-            n = publish_artifacts(rendered)
-            logging.info("Published %d artifact(s) for %d file(s).", n, len(rendered))
+            n = dist_artifacts(rendered)
+            logging.info("Assembled %d artifact(s) for %d file(s).", n, len(rendered))
+        sys.exit(0 if success else 1)
+
+    elif args.command == "deploy":
+        _setup_logging()
+        from .deploy import run_deploy
+
+        docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "deploy")
+
+        config_path = args.config
+        if config_path is None:
+            default_config = docs_root / "build.yml"
+            if default_config.exists():
+                config_path = default_config
+
+        success = run_deploy(
+            docs_root,
+            config_path=config_path,
+            channels=args.channel,
+            dry_run=args.dry_run,
+            allow_public=args.allow_public,
+        )
         sys.exit(0 if success else 1)
 
     elif args.command == "clean":
