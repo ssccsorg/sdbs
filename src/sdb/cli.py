@@ -495,7 +495,8 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.command == "deploy":
         _setup_logging()
-        from .deploy import run_deploy
+        from .deploy import DeployRegistry, run_deploy
+        from .plugins import builtin_plugins
 
         docs_root = args.docs_root.resolve()
         _require_docs_root(docs_root, "deploy")
@@ -506,12 +507,16 @@ def main(argv: list[str] | None = None) -> None:
             if default_config.exists():
                 config_path = default_config
 
+        # The command line is the composition root: it supplies the channels
+        # sdbs ships, and run_deploy adds those an external package registered.
+        registry = DeployRegistry.discover(builtin_plugins())
         success = run_deploy(
             docs_root,
             config_path=config_path,
             channels=args.channel,
             dry_run=args.dry_run,
             allow_public=args.allow_public,
+            registry=registry,
         )
         sys.exit(0 if success else 1)
 

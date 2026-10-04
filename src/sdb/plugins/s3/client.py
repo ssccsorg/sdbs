@@ -15,11 +15,16 @@ from typing import List, Optional
 
 import requests
 
-from . import s3sig
+from ...deploy import DeployError
+from . import signer as s3sig
 
 
-class S3Error(RuntimeError):
-    """A request the store rejected, or a response that cannot be read."""
+class S3Error(DeployError):
+    """A request the store rejected, or a response that cannot be read.
+
+    It derives from the engine's error so the driver reports a failed channel
+    from one catch, without the engine importing anything S3-specific.
+    """
 
 
 class S3Client:

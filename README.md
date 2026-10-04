@@ -71,7 +71,7 @@ Every command that takes a docs root stops when the path is not a directory, and
 
 ## External Deploy Channels
 
-`sdb deploy` runs the channels declared under `deploy:` in `build.yml`. A channel names a plugin and a source directory and moves that source to an external store. Built-in channels register in `src/sdb/deploy.py`; an external package adds one by exposing a `DeployPlugin` under the `sdb.deploy` entry point group, so a new destination needs no change to the driver.
+`sdb deploy` runs the channels declared under `deploy:` in `build.yml`. A channel names a plugin and a source directory and moves that source to an external store. The engine lives in `src/sdb/deploy.py` and knows only the shape a channel satisfies: a `name`, a `validate`, and a `deploy`. It resolves channels by duck typing, so an external package provides one without importing sdbs, and discovers it through the `sdb.deploy` entry point group. The channels sdbs ships live under `src/sdb/plugins/`, and the command line composes them with the discovered ones, so the engine imports no channel itself.
 
 Deploy runs as its own invocation, separate from the render. The render container executes project-controlled Quarto and Jupyter code, so it stays free of upload credentials; the deploy invocation receives the credentials and walks the built artifact without running project code.
 
@@ -106,6 +106,39 @@ The `auth` block records how a client reaches the deployed tree.
 R2 objects are private unless the bucket is exposed through a domain, which is a Cloudflare account setting outside this tool. The channel therefore guarantees only that it never sets an ACL and refuses a public request, and points the operator at the domain-based gate rather than creating it.
 
 The `s3` channel signs its requests with the standard library rather than a cloud SDK. `tests/test_s3sig.py` pins the signer against the published AWS SigV4 vectors, so a wrong canonical request fails a test instead of a deploy.
+
+### Writing a channel
+
+A channel is a small object. An external package registers it through the `sdb.deploy` entry point group and needs no sdbs import unless it wants the shared helpers the engine exposes, `resolve_source` and `iter_source_files`. The example below is complete enough to register.
+
+```python
+# mypkg/channel.py
+from sdb.deploy import DeployError, DeployResult, iter_source_files, resolve_source
+
+
+class MyChannel:
+    name = "myservice"
+
+    def validate(self, target, context):
+        if not target.options.get("token_env"):
+            raise DeployError(f"{target.name}: options.token_env is required")
+        resolve_source(context.docs_root, target.source)
+
+    def deploy(self, target, context):
+        files = iter_source_files(resolve_source(context.docs_root, target.source))
+        if context.dry_run:
+            return DeployResult(name=target.name, plugin=self.name, uploaded=len(files))
+        # Perform the upload here, then report what happened.
+        return DeployResult(name=target.name, plugin=self.name, uploaded=len(files))
+```
+
+```toml
+# mypkg/pyproject.toml
+[project.entry-points."sdb.deploy"]
+myservice = "mypkg.channel:MyChannel"
+```
+
+The entry point may name the class or an instance; `sdb deploy` instantiates a class with no arguments. A channel signals failure by raising `sdb.deploy.DeployError` or a subclass, and the engine reports it as a named channel failure and continues to the next one. `validate` must have no side effects, because it runs before the upload and under `--dry-run`.
 
 ## Pre-build Sequence
 

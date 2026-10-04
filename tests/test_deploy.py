@@ -1,7 +1,15 @@
-"""Tests for the deploy channel seam and the s3 channel."""
+"""
+Tests for the deploy engine, its protocol seam, and the reference s3 channel.
+
+The engine and its channels are separate modules, so these tests also pin that
+importing the engine does not pull a channel in.
+"""
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -14,14 +22,14 @@ from sdb.deploy import (
     DeployRegistry,
     DeployResult,
     DeployTarget,
-    S3DeployPlugin,
-    _object_key,
-    _source_files,
+    iter_source_files,
     load_deploy_targets,
     run_deploy,
 )
+from sdb.plugins import builtin_plugins
+from sdb.plugins.s3 import S3DeployPlugin, _object_key
 
-ENDPOINT = "https://account.r2.cloudflarestorage.com"
+ENDPOINT = "https://account.example.com"
 
 
 def _write_build_yml(docs_root: Path, body: str) -> Path:
@@ -47,8 +55,24 @@ class _RecordingPlugin(DeployPlugin):
         )
 
 
+class TestEngineSeparation:
+    def test_the_engine_does_not_import_a_channel(self) -> None:
+        """Importing sdb.deploy must not pull any sdb.plugins module in."""
+        code = (
+            "import sys, sdb.deploy\n"
+            "loaded = [m for m in sys.modules if m.startswith('sdb.plugins')]\n"
+            "assert not loaded, loaded\n"
+        )
+        subprocess.run(
+            [sys.executable, "-c", code],
+            check=True,
+            env=dict(os.environ),
+            capture_output=True,
+        )
+
+
 class TestConfig:
-    def test_a_missing_file_yields_no_targets(self, tmp_path: Path) -> None:
+    def test_a_missing_file_yields_no_targets(self) -> None:
         assert load_deploy_targets(None) == []
 
     def test_defaults_are_applied(self, tmp_path: Path) -> None:
@@ -120,17 +144,27 @@ class TestConfig:
 
 
 class TestRegistry:
-    def test_discover_includes_the_s3_channel(self) -> None:
-        registry = DeployRegistry.discover()
+    def test_discover_composes_builtins_and_entry_points(self) -> None:
+        registry = DeployRegistry.discover(builtin_plugins())
         assert "s3" in registry.names()
         assert isinstance(registry.get("s3"), S3DeployPlugin)
 
-    def test_a_plugin_without_a_name_is_rejected(self) -> None:
-        class Nameless(DeployPlugin):
-            pass
+    def test_a_plugin_missing_a_member_is_rejected(self) -> None:
+        class Nameless:
+            def validate(self, target, context): ...
+
+            def deploy(self, target, context): ...
 
         with pytest.raises(DeployError):
             DeployRegistry([Nameless()])
+
+        class NoDeploy:
+            name = "broken"
+
+            def validate(self, target, context): ...
+
+        with pytest.raises(DeployError):
+            DeployRegistry([NoDeploy()])
 
     def test_entry_point_plugins_are_discovered(self, monkeypatch) -> None:
         class External(DeployPlugin):
@@ -245,10 +279,7 @@ class TestS3Validation:
         target = _s3_target({"bucket": "b", "visibility": "public"})
         with pytest.raises(DeployError):
             plugin.validate(target, DeployContext(docs_root=tmp_path))
-        # The same target passes once the operator confirms it.
-        plugin.validate(
-            target, DeployContext(docs_root=tmp_path, allow_public=True)
-        )
+        plugin.validate(target, DeployContext(docs_root=tmp_path, allow_public=True))
 
     def test_a_missing_endpoint_is_rejected(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.delenv("S3_ENDPOINT", raising=False)
@@ -307,15 +338,11 @@ class TestS3Validation:
         (tmp_path / "_site").mkdir()
         plugin = S3DeployPlugin()
         context = DeployContext(docs_root=tmp_path)
-        # No prefix and no opt-in: refused, since the mirror could remove objects
-        # that belong to another writer in a shared bucket.
         with pytest.raises(DeployError):
             plugin.validate(_s3_target({"bucket": "b", "delete": True}), context)
-        # A prefix scopes the mirror.
         plugin.validate(
             _s3_target({"bucket": "b", "delete": True, "prefix": "p"}), context
         )
-        # An explicit opt-in allows a dedicated bucket root.
         plugin.validate(
             _s3_target(
                 {"bucket": "b", "delete": True, "allow_unscoped_delete": True}
@@ -338,9 +365,7 @@ class TestS3DryRun:
 
         plugin = S3DeployPlugin()
         target = _s3_target({"bucket": "b", "prefix": "project/docs"})
-        result = plugin.deploy(
-            target, DeployContext(docs_root=tmp_path, dry_run=True)
-        )
+        result = plugin.deploy(target, DeployContext(docs_root=tmp_path, dry_run=True))
         assert result.uploaded == 2
         assert result.ok is True
 
@@ -350,20 +375,20 @@ class TestHelpers:
         assert _object_key("p/docs", "a/b.html") == "p/docs/a/b.html"
         assert _object_key("", "a/b.html") == "a/b.html"
 
-    def test_source_files_are_relative_and_sorted(self, tmp_path: Path) -> None:
+    def test_iter_source_files_are_relative_and_sorted(self, tmp_path: Path) -> None:
         (tmp_path / "b.txt").write_text("b", encoding="utf-8")
         (tmp_path / "a.txt").write_text("a", encoding="utf-8")
         (tmp_path / "sub").mkdir()
         (tmp_path / "sub" / "c.txt").write_text("c", encoding="utf-8")
-        files = _source_files(tmp_path)
+        files = iter_source_files(tmp_path)
         assert [relative for relative, _ in files] == ["a.txt", "b.txt", "sub/c.txt"]
 
 
 class TestS3Client:
-    def test_a_transport_error_becomes_an_s3_error(self, monkeypatch) -> None:
+    def test_a_transport_error_becomes_a_deploy_error(self, monkeypatch) -> None:
         import requests
 
-        from sdb.utils.s3 import S3Client, S3Error
+        from sdb.plugins.s3.client import S3Client, S3Error
 
         client = S3Client(
             endpoint="https://example.test",
@@ -375,12 +400,14 @@ class TestS3Client:
         def boom(*args, **kwargs):
             raise requests.ConnectionError("no route to host")
 
-        monkeypatch.setattr("sdb.utils.s3.requests.request", boom)
+        monkeypatch.setattr("sdb.plugins.s3.client.requests.request", boom)
         with pytest.raises(S3Error):
             client.put_object("a.txt", b"data")
+        # The engine recognizes the failure from its own error type.
+        assert issubclass(S3Error, DeployError)
 
     def test_list_keys_parses_a_list_response(self) -> None:
-        from sdb.utils.s3 import _parse_list_keys, _parse_next_token
+        from sdb.plugins.s3.client import _parse_list_keys, _parse_next_token
 
         payload = (
             b'<?xml version="1.0" encoding="UTF-8"?>'

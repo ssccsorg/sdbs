@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from sdb.utils import s3sig
+from sdb.plugins.s3 import signer as s3sig
 
 # get-vanilla, from the AWS SigV4 test suite.
 VANILLA_ACCESS_KEY = "AKIDEXAMPLE"
