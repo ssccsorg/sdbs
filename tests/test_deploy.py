@@ -6,10 +6,14 @@ project's activation, and the driver that runs a plugin as a subprocess.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+import sdb.deploy
 from sdb.deploy import (
     DeployError,
     discover,
@@ -229,3 +233,49 @@ class TestRunDeploy:
         run_deploy(root, dry_run=False)
         request = json.loads((plugin / "request.json").read_text(encoding="utf-8"))
         assert request["dry_run"] is False
+
+
+class TestEngineIsolation:
+    """The engine names no vendor and no plugin, and loads neither.
+
+    sdbs invokes a plugin as a subprocess and reads no plugin code, so a
+    provider constant or a plugin import that reaches the engine is a
+    regression of the boundary this module exists to hold.
+    """
+
+    _FORBIDDEN = (
+        "cloudflare",
+        "cloudflarestorage",
+        "amazonaws",
+        "boto3",
+        "minio",
+        "wasabi",
+        "backblaze",
+        "sdb_s3",
+    )
+
+    def test_the_engine_sources_name_no_vendor_or_plugin(self) -> None:
+        package = Path(sdb.deploy.__file__).parent
+        findings: list[str] = []
+        for path in sorted(package.rglob("*.py")):
+            text = path.read_text(encoding="utf-8").lower()
+            for token in self._FORBIDDEN:
+                if token in text:
+                    findings.append(f"{path.name}: {token}")
+        assert findings == []
+
+    def test_importing_the_engine_loads_no_plugin(self) -> None:
+        # A fresh interpreter, because this process already holds the plugin
+        # from the tests that exercise it.
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys, sdb.deploy; print('sdb_s3' in sys.modules)",
+            ],
+            capture_output=True,
+            text=True,
+            env=dict(os.environ),
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "False"
