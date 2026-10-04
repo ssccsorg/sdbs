@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from sdb_s3.channel import PluginError, handle
-from sdb_s3.client import S3Client, S3Error
+from channel import PluginError, handle
+from client import S3Client, S3Error
 
 
 def _artifact(tmp_path: Path, names: tuple[str, ...] = ("index.html",)) -> Path:

@@ -1,8 +1,11 @@
 """
-The plugin entry point: one JSON request on stdin, one JSON result on stdout.
+The s3 deploy plugin: one JSON request on stdin, one JSON result on stdout.
 
-The exit code carries success or failure, and a failure also writes a result
-with ``ok: false`` and a message.
+An external tool, unrelated to sdbs: it reads one JSON request, uploads the
+named artifact directory to an S3-compatible object store, and writes one JSON
+result. The store endpoint, region, and credentials come from the environment,
+so nothing secret crosses the request. The exit code carries success or
+failure, and a failure also writes a result with ``ok: false`` and a message.
 """
 
 from __future__ import annotations
@@ -10,8 +13,8 @@ from __future__ import annotations
 import json
 import sys
 
-from .channel import WIRE_API, PluginError, handle
-from .client import S3Error
+from channel import WIRE_API, PluginError, handle
+from client import S3Error
 
 
 def main() -> int:

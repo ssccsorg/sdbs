@@ -66,10 +66,10 @@ def _make_project(tmp_path: Path, config: str, artifact: bool = True) -> Path:
 
 class TestManifest:
     def test_a_valid_manifest_loads(self, tmp_path: Path) -> None:
-        directory = _write_manifest(tmp_path / "s3", "s3", ["python3", "-m", "sdb_s3"])
+        directory = _write_manifest(tmp_path / "s3", "s3", ["python3", "__main__.py"])
         manifest = load_manifest(directory / "manifest.yml")
         assert manifest.name == "s3"
-        assert manifest.command == ["python3", "-m", "sdb_s3"]
+        assert manifest.command == ["python3", "__main__.py"]
         assert manifest.root == directory
 
     def test_a_missing_name_is_rejected(self, tmp_path: Path) -> None:
@@ -248,7 +248,7 @@ class TestRunDeploy:
 
 
 class TestEngineIsolation:
-    """The engine names no vendor and no plugin, and loads neither.
+    """The engine names no vendor and loads no plugin.
 
     sdbs invokes a plugin as a subprocess and reads no plugin code, so a
     provider constant or a plugin import that reaches the engine is a
@@ -263,10 +263,9 @@ class TestEngineIsolation:
         "minio",
         "wasabi",
         "backblaze",
-        "sdb_s3",
     )
 
-    def test_the_engine_sources_name_no_vendor_or_plugin(self) -> None:
+    def test_the_engine_sources_name_no_vendor(self) -> None:
         package = Path(sdb.deploy.__file__).parent
         findings: list[str] = []
         for path in sorted(package.rglob("*.py")):
@@ -278,16 +277,24 @@ class TestEngineIsolation:
 
     def test_importing_the_engine_loads_no_plugin(self) -> None:
         # A fresh interpreter, because this process already holds the plugin
-        # from the tests that exercise it.
+        # from the tests that exercise it. The check reads the loaded module
+        # files, so it holds whatever the plugin's modules are named.
+        code = (
+            "import pathlib, sys; import sdb.deploy; "
+            "print(sum(1 for m in sys.modules.values() "
+            "if getattr(m, '__file__', None) "
+            "and 'plugins' in pathlib.Path(m.__file__).parts))"
+        )
+        environment = dict(os.environ)
+        environment["PYTHONPATH"] = os.pathsep.join(
+            [entry for entry in sys.path if entry]
+            + ([environment["PYTHONPATH"]] if environment.get("PYTHONPATH") else [])
+        )
         result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "import sys, sdb.deploy; print('sdb_s3' in sys.modules)",
-            ],
+            [sys.executable, "-c", code],
             capture_output=True,
             text=True,
-            env=dict(os.environ),
+            env=environment,
         )
         assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == "False"
+        assert result.stdout.strip() == "0"

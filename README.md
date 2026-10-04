@@ -79,7 +79,7 @@ A plugin lives in its own directory with a `manifest.yml` at that root:
 manifest: 1
 name: s3
 description: Upload an artifact directory to an S3-compatible object store
-command: [python3, -m, sdb_s3]
+command: [python3, __main__.py]
 ```
 
 The project that uses sdbs activates a plugin in `_deploy.yml` at its root:
@@ -126,7 +126,7 @@ The plugin signs its requests with the standard library rather than a cloud SDK.
 
 ### Writing a plugin
 
-A plugin is a program in any language. Put a `manifest.yml` at its root, read the one JSON request from stdin, write one JSON result to stdout, and exit non-zero on failure. The s3 plugin under `plugins/s3` is a complete example: `manifest.yml`, `sdb_s3/__main__.py` for the stdio contract, and `sdb_s3/channel.py` for the work.
+A plugin is a program in any language. Put a `manifest.yml` at its root, read the one JSON request from stdin, write one JSON result to stdout, and exit non-zero on failure. The s3 plugin under `plugins/s3` is a complete example: `manifest.yml`, `__main__.py` for the stdio contract, and `channel.py` for the work, with `client.py` and `signer.py` beside them.
 
 ## Pre-build Sequence
 

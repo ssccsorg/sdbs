@@ -3,7 +3,7 @@ A minimal S3-compatible client for the deploy channels.
 
 Covers the operations a private upload needs: put an object, list the keys
 under a prefix, delete a key, and mint a presigned GET URL. Requests are
-signed with :mod:`.signer` and sent with ``requests``.
+signed with :mod:`signer` and sent with ``requests``.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import List, Optional
 
 import requests
 
-from . import signer as s3sig
+import signer as s3sig
 
 
 class S3Error(RuntimeError):

@@ -14,8 +14,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .client import S3Client, S3Error
-from .signer import MAX_PRESIGN_EXPIRES
+from client import S3Client, S3Error
+from signer import MAX_PRESIGN_EXPIRES
 
 WIRE_API = 1
 ENDPOINT_ENV = "S3_ENDPOINT"
