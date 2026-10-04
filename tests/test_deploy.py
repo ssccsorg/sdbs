@@ -143,6 +143,18 @@ class TestDiscovery:
         index = discover(tmp_path)
         assert index["s3"].root == first / "s3"
 
+    def test_the_plugin_path_env_beats_the_project_directory(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # An explicit location beats the convention, so a deployment that
+        # names a plugin path can replace a plugin the project ships under the
+        # same name.
+        shared = tmp_path / "shared"
+        _make_plugin(shared, "s3", _OK_PLUGIN)
+        monkeypatch.setenv("SDB_PLUGIN_PATH", str(shared))
+        _make_plugin(tmp_path / "plugins", "s3", _FAIL_PLUGIN)
+        assert discover(tmp_path)["s3"].root == shared / "s3"
+
     def test_list_plugins_is_sorted(self, tmp_path: Path) -> None:
         _make_plugin(tmp_path / "plugins", "zeta", _OK_PLUGIN)
         _make_plugin(tmp_path / "plugins", "alpha", _OK_PLUGIN)
