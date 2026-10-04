@@ -1,277 +1,313 @@
 """
-The deploy engine: a provider-neutral host for deploy channels.
+External deploy plugins.
 
-A deploy channel moves a built tree to an external store. The engine knows the
-protocol a channel satisfies and nothing about any store: a channel is anything
-with a ``name``, a ``validate``, and a ``deploy``, checked by duck typing, so an
-external package provides one without importing or subclassing sdbs. The
-the ``sdb.deploy`` entry point group is how those external channels are discovered;
-the channels sdbs ships, under :mod:`sdb_plugins` at the repository root, are
-registered by the command line, which is the composition root.
+A deploy plugin is an external tool, unrelated to sdbs. It lives in its own
+directory, declares its contract in a ``manifest.yml`` at that root, and is
+invoked as a subprocess. sdbs carries no plugin code and imports no plugin: it
+reads a manifest, runs the command, and reads the result.
 
-``deploy`` runs as its own invocation, apart from the render. The render
-container executes project-controlled Quarto and Jupyter code, so it stays free
-of upload credentials; this step receives the credentials and walks the built
-artifact without running project code.
+Activation belongs to the project that uses sdbs, in a ``_deploy.yml`` at that
+project's root. A plugin named there and found on the plugin path is invoked;
+a plugin named there and not found is skipped, unless the activation sets
+``require: true`` or the run passes ``--require-all``.
+
+The contract across the process boundary is one JSON request on the plugin's
+stdin and one JSON result on its stdout, with the exit code carrying success or
+failure. Credentials travel in the environment, never on the command line or in
+the request.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import subprocess
 from dataclasses import dataclass, field
-from importlib.metadata import entry_points
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Protocol, Tuple
+from typing import Any, Dict, List, Optional
 
 from .config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
-ENTRY_POINT_GROUP = "sdb.deploy"
-DEFAULT_SOURCE = "_site"
+MANIFEST_NAME = "manifest.yml"
+CONFIG_NAME = "_deploy.yml"
+PLUGIN_PATH_ENV = "SDB_PLUGIN_PATH"
+DEFAULT_PLUGINS_DIR = "plugins"
+MANIFEST_API = 1
+WIRE_API = 1
 
 
 class DeployError(RuntimeError):
-    """A channel cannot run: its configuration, credentials, or source."""
+    """A manifest, a configuration, or a plugin run that cannot proceed."""
 
 
 @dataclass
-class DeployTarget:
-    """One configured channel: what to deploy, with which plugin."""
+class PluginManifest:
+    """The contract a plugin declares at its root."""
 
     name: str
+    command: List[str]
+    root: Path
+    env: Dict[str, str] = field(default_factory=dict)
+    description: str = ""
+    path: Optional[Path] = None
+
+
+@dataclass
+class Activation:
+    """One channel a project asks for, from its ``_deploy.yml``."""
+
     plugin: str
-    source: str = DEFAULT_SOURCE
-    enabled: bool = True
+    artifact: str
     options: Dict[str, Any] = field(default_factory=dict)
+    require: bool = False
 
 
-@dataclass
-class DeployContext:
-    """The run a channel sees: where the docs root is and how to behave."""
-
-    docs_root: Path
-    dry_run: bool = False
-
-
-@dataclass
-class DeployResult:
-    name: str
-    plugin: str
-    uploaded: int = 0
-    deleted: int = 0
-    urls: List[str] = field(default_factory=list)
-    ok: bool = True
-    message: str = ""
-
-
-class DeployPlugin(Protocol):
-    """The channel contract.
-
-    A channel satisfies this by shape: a ``name``, and a ``validate`` and a
-    ``deploy`` that take a :class:`DeployTarget` and a :class:`DeployContext`.
-    The registry checks those members rather than an imported base class, so a
-    channel stays free of any sdbs import and of any provider.
-    """
-
-    name: str
-
-    def validate(self, target: DeployTarget, context: DeployContext) -> None:
-        """Raise :class:`DeployError` when the channel cannot run. No side effects."""
-
-    def deploy(self, target: DeployTarget, context: DeployContext) -> DeployResult:
-        ...
+def load_manifest(manifest_path: Path) -> PluginManifest:
+    raw = ConfigManager.load_yaml_file(manifest_path)
+    if not raw:
+        raise DeployError(f"{manifest_path}: the manifest is empty or not readable")
+    api = raw.get("manifest")
+    if api != MANIFEST_API:
+        raise DeployError(
+            f"{manifest_path}: manifest api {api!r} is not the supported {MANIFEST_API}"
+        )
+    name = str(raw.get("name") or "").strip()
+    if not name:
+        raise DeployError(f"{manifest_path}: 'name' is required")
+    command = raw.get("command")
+    if not isinstance(command, list) or not command or not all(
+        isinstance(part, str) for part in command
+    ):
+        raise DeployError(f"{manifest_path}: 'command' must be a non-empty list of strings")
+    env = raw.get("env") or {}
+    if not isinstance(env, dict) or not all(isinstance(k, str) for k in env):
+        raise DeployError(f"{manifest_path}: 'env' must be a mapping")
+    return PluginManifest(
+        name=name,
+        command=list(command),
+        root=manifest_path.parent,
+        env={str(k): str(v) for k, v in env.items()},
+        description=str(raw.get("description") or ""),
+        path=manifest_path,
+    )
 
 
-class DeployRegistry:
-    """The set of channels a run resolves a target's ``plugin`` against."""
-
-    def __init__(self, plugins: Optional[Iterable[DeployPlugin]] = None) -> None:
-        self._plugins: Dict[str, DeployPlugin] = {}
-        for plugin in plugins or []:
-            self.register(plugin)
-
-    def register(self, plugin: DeployPlugin) -> None:
-        problem = _plugin_problem(plugin)
-        if problem:
-            raise DeployError(
-                f"deploy plugin {getattr(plugin, 'name', '')!r}: {problem}"
-            )
-        self._plugins[plugin.name] = plugin
-
-    def get(self, name: str) -> Optional[DeployPlugin]:
-        return self._plugins.get(name)
-
-    def names(self) -> List[str]:
-        return sorted(self._plugins)
-
-    @classmethod
-    def discover(cls, builtins: Iterable[DeployPlugin] = ()) -> "DeployRegistry":
-        """Compose the given built-ins with the externally registered channels."""
-        registry = cls(builtins)
-        for plugin in _entry_point_plugins():
-            registry.register(plugin)
-        return registry
+def plugin_dirs(project_root: Path, extra: Optional[List[str]] = None) -> List[Path]:
+    """The directories searched for plugins, in order, first match wins."""
+    dirs: List[Path] = []
+    for value in (extra or []):
+        dirs.append(Path(value))
+    env = os.environ.get(PLUGIN_PATH_ENV, "")
+    for value in env.split(os.pathsep):
+        if value:
+            dirs.append(Path(value))
+    dirs.append(project_root / DEFAULT_PLUGINS_DIR)
+    return dirs
 
 
-def _plugin_problem(plugin: Any) -> Optional[str]:
-    name = getattr(plugin, "name", "")
-    if not isinstance(name, str) or not name:
-        return "no name"
-    for method in ("validate", "deploy"):
-        if not callable(getattr(plugin, method, None)):
-            return f"no callable {method}()"
-    return None
-
-
-def _entry_point_plugins() -> Iterable[DeployPlugin]:
-    try:
-        discovered = entry_points(group=ENTRY_POINT_GROUP)
-    except TypeError:  # pragma: no cover - Python < 3.10 selects differently
-        discovered = entry_points().get(ENTRY_POINT_GROUP, [])  # type: ignore[attr-defined]
-    for entry in discovered:
-        try:
-            loaded = entry.load()
-            plugin = loaded() if isinstance(loaded, type) else loaded
-        except Exception as error:
-            logger.warning("Could not load deploy plugin %s: %s", entry.name, error)
+def discover(
+    project_root: Path, extra: Optional[List[str]] = None
+) -> Dict[str, PluginManifest]:
+    """Index every plugin that declares a manifest, by name."""
+    index: Dict[str, PluginManifest] = {}
+    for directory in plugin_dirs(project_root, extra):
+        if not directory.is_dir():
             continue
-        problem = _plugin_problem(plugin)
-        if problem:
-            logger.warning("Deploy entry point %s: %s", entry.name, problem)
-            continue
-        yield plugin
+        for child in sorted(directory.iterdir()):
+            manifest_path = child / MANIFEST_NAME
+            if not manifest_path.is_file():
+                continue
+            manifest = load_manifest(manifest_path)
+            if manifest.name in index:
+                logger.debug(
+                    "Deploy: plugin %r at %s is shadowed by %s",
+                    manifest.name,
+                    manifest_path,
+                    index[manifest.name].path,
+                )
+                continue
+            index[manifest.name] = manifest
+    return index
 
 
-def load_deploy_targets(config_path: Optional[Path]) -> List[DeployTarget]:
-    """Read the ``deploy`` list from a build configuration file.
-
-    A missing file or a file without a ``deploy`` key yields no targets. A
-    malformed entry stops the load, naming the entry, because a channel a
-    reader cannot see is worse than a run that refuses to start.
-    """
-    raw = ConfigManager.load_yaml_file(config_path) if config_path else {}
+def load_activations(config_path: Path) -> List[Activation]:
+    """Read the ``deploy`` list from a project's ``_deploy.yml``."""
+    raw = ConfigManager.load_yaml_file(config_path)
     entries = raw.get("deploy") or []
     if not isinstance(entries, list):
-        raise DeployError("build.yml: 'deploy' must be a list of channels")
-    targets: List[DeployTarget] = []
-    seen = set()
+        raise DeployError(f"{config_path}: 'deploy' must be a list")
+    activations: List[Activation] = []
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
-            raise DeployError(f"build.yml: deploy entry {index} is not a mapping")
-        name = str(entry.get("name") or "").strip()
-        if not name:
-            raise DeployError(f"build.yml: deploy entry {index} has no name")
-        if name in seen:
-            raise DeployError(f"build.yml: deploy channel {name!r} is declared twice")
-        seen.add(name)
+            raise DeployError(f"{config_path}: deploy entry {index} is not a mapping")
         plugin = str(entry.get("plugin") or "").strip()
         if not plugin:
-            raise DeployError(f"build.yml: deploy channel {name!r} has no plugin")
+            raise DeployError(f"{config_path}: deploy entry {index} has no plugin")
+        artifact = str(entry.get("artifact") or "").strip()
+        if not artifact:
+            raise DeployError(
+                f"{config_path}: deploy entry {index} ({plugin}) has no artifact"
+            )
         options = entry.get("options") or {}
         if not isinstance(options, dict):
             raise DeployError(
-                f"build.yml: deploy channel {name!r}: options must be a mapping"
+                f"{config_path}: deploy entry {index} ({plugin}): options must be a mapping"
             )
-        targets.append(
-            DeployTarget(
-                name=name,
+        activations.append(
+            Activation(
                 plugin=plugin,
-                source=str(entry.get("source") or DEFAULT_SOURCE),
-                enabled=bool(entry.get("enabled", True)),
+                artifact=artifact,
                 options=options,
+                require=bool(entry.get("require", False)),
             )
         )
-    return targets
+    return activations
 
 
-def resolve_source(docs_root: Path, source: str) -> Path:
-    """Resolve a channel's source, relative to the docs root, and require it."""
-    candidate = Path(source)
-    if not candidate.is_absolute():
-        candidate = docs_root / candidate
-    candidate = candidate.resolve()
-    if not candidate.is_dir():
-        raise DeployError(f"deploy source is not a directory: {candidate}")
-    return candidate
+def invoke(manifest: PluginManifest, request: Dict[str, Any]) -> Dict[str, Any]:
+    """Run one plugin and return its JSON result."""
+    environment = dict(os.environ)
+    environment.update(manifest.env)
+    try:
+        process = subprocess.run(
+            manifest.command,
+            cwd=manifest.root,
+            env=environment,
+            input=json.dumps(request).encode("utf-8"),
+            capture_output=True,
+        )
+    except FileNotFoundError as error:
+        raise DeployError(
+            f"plugin {manifest.name!r}: command not found: {manifest.command[0]}"
+        ) from error
+    stderr = process.stderr.decode("utf-8", errors="replace").strip()
+    result: Optional[Dict[str, Any]] = None
+    try:
+        result = _read_result(process.stdout, manifest.name)
+    except DeployError:
+        result = None
+    if process.returncode != 0:
+        message = str(result.get("message") or "") if isinstance(result, dict) else ""
+        raise DeployError(
+            f"plugin {manifest.name!r} exited with {process.returncode}: "
+            + (message or stderr or "no message")
+        )
+    if result is None:
+        raise DeployError(f"plugin {manifest.name!r} produced no result")
+    return result
 
 
-def iter_source_files(source: Path) -> List[Tuple[str, Path]]:
-    """Return ``(relative posix path, path)`` for every file under a source.
-
-    A path that resolves outside the source is skipped, so a symlink in a built
-    tree cannot turn a deploy into a copy of a file that is not in it.
-    """
-    files: List[Tuple[str, Path]] = []
-    for path in sorted(source.rglob("*")):
-        if not path.is_file():
-            continue
-        if not path.resolve().is_relative_to(source):
-            logger.debug("Skipping %s: it resolves outside the source", path)
-            continue
-        files.append((path.relative_to(source).as_posix(), path))
-    return files
+def _read_result(stdout: bytes, name: str) -> Dict[str, Any]:
+    line = next(
+        (line for line in reversed(stdout.decode("utf-8", errors="replace").splitlines()) if line.strip()),
+        None,
+    )
+    if line is None:
+        raise DeployError(f"plugin {name!r} produced no result")
+    try:
+        result = json.loads(line)
+    except json.JSONDecodeError as error:
+        raise DeployError(f"plugin {name!r} did not produce JSON: {error}") from error
+    if not isinstance(result, dict) or result.get("deploy") != WIRE_API:
+        raise DeployError(
+            f"plugin {name!r}: result api {result.get('deploy')!r} is not the supported {WIRE_API}"
+        )
+    return result
 
 
 def run_deploy(
-    docs_root: Path,
+    project_root: Path,
     config_path: Optional[Path] = None,
-    channels: Optional[List[str]] = None,
     dry_run: bool = False,
-    registry: Optional[DeployRegistry] = None,
+    require_all: bool = False,
+    extra_plugin_dirs: Optional[List[str]] = None,
+    plugins: Optional[Dict[str, PluginManifest]] = None,
 ) -> bool:
-    """Run every selected channel and report whether all of them succeeded."""
-    registry = registry or DeployRegistry.discover()
-    if config_path is None:
-        candidate = docs_root / "build.yml"
-        config_path = candidate if candidate.exists() else None
+    """Run every activation in a project's ``_deploy.yml``.
+
+    A plugin that is named but not found is skipped unless it is required. A
+    plugin that is found and fails fails the run.
+    """
+    config_path = config_path or (project_root / CONFIG_NAME)
+    if not config_path.is_file():
+        logger.info("Deploy: no %s under %s; nothing to do", CONFIG_NAME, project_root)
+        return True
     try:
-        targets = load_deploy_targets(config_path)
+        activations = load_activations(config_path)
     except DeployError as error:
         logger.error("Deploy: %s", error)
         return False
 
-    if channels:
-        known = {target.name for target in targets}
-        unknown = [name for name in channels if name not in known]
-        if unknown:
-            logger.error("Deploy: unknown channel(s): %s", ", ".join(unknown))
-            return False
-        wanted = set(channels)
-        targets = [target for target in targets if target.name in wanted]
+    base = config_path.parent
+    index = plugins if plugins is not None else discover(project_root, extra_plugin_dirs)
 
-    targets = [target for target in targets if target.enabled]
-    if not targets:
-        logger.error("Deploy: no deploy channels are configured and enabled")
-        return False
-
-    context = DeployContext(docs_root=docs_root, dry_run=dry_run)
     ok = True
-    for target in targets:
-        plugin = registry.get(target.plugin)
-        if plugin is None:
+    for activation in activations:
+        artifact = Path(activation.artifact)
+        if not artifact.is_absolute():
+            artifact = base / artifact
+        artifact = artifact.resolve()
+        if not artifact.exists():
             logger.error(
-                "Deploy: channel %r names unknown plugin %r (known: %s)",
-                target.name,
-                target.plugin,
-                ", ".join(registry.names()) or "none",
+                "Deploy: %s: artifact does not exist: %s", activation.plugin, artifact
             )
             ok = False
             continue
+
+        manifest = index.get(activation.plugin)
+        if manifest is None:
+            if activation.require or require_all:
+                logger.error(
+                    "Deploy: plugin %r is required but no manifest was found on the plugin path",
+                    activation.plugin,
+                )
+                ok = False
+            else:
+                logger.info(
+                    "Deploy: plugin %r not found; skipped", activation.plugin
+                )
+            continue
+
+        request = {
+            "deploy": WIRE_API,
+            "plugin": activation.plugin,
+            "artifact": str(artifact),
+            "options": activation.options,
+            "dry_run": dry_run,
+        }
+        logger.info(
+            "Deploy %s [%s] %s", activation.plugin, manifest.path, artifact
+        )
         try:
-            plugin.validate(target, context)
-            result = plugin.deploy(target, context)
+            result = invoke(manifest, request)
         except DeployError as error:
-            logger.error("Deploy: channel %r failed: %s", target.name, error)
+            logger.error("Deploy: %s", error)
+            ok = False
+            continue
+        if not result.get("ok", False):
+            logger.error(
+                "Deploy: plugin %r reported failure: %s",
+                activation.plugin,
+                result.get("message") or "no message",
+            )
             ok = False
             continue
         logger.info(
-            "Deploy %s [%s]: %d uploaded, %d deleted",
-            result.name,
-            result.plugin,
-            result.uploaded,
-            result.deleted,
+            "Deploy %s: %s uploaded, %s deleted",
+            activation.plugin,
+            result.get("uploaded", 0),
+            result.get("deleted", 0),
         )
-        for url in result.urls:
-            logger.info("Deploy %s: %s", result.name, url)
+        for url in result.get("urls", []) or []:
+            logger.info("Deploy %s: %s", activation.plugin, url)
     return ok
+
+
+def list_plugins(
+    project_root: Path, extra_plugin_dirs: Optional[List[str]] = None
+) -> List[PluginManifest]:
+    index = discover(project_root, extra_plugin_dirs)
+    return [index[name] for name in sorted(index)]

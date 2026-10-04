@@ -69,76 +69,64 @@ sdb clean docs
 
 Every command that takes a docs root stops when the path is not a directory, and names the path it rejected. A command that would otherwise walk no documents and report success fails instead, so a typo or a wrong working directory is visible where it happens rather than later as a render error in a document that was never processed.
 
-## External Deploy Channels
+## External Deploy Plugins
 
-`sdb deploy` runs the channels declared under `deploy:` in `build.yml`. A channel names a plugin and a source directory and moves that source to an external store. The engine lives in `src/sdb/deploy.py` and knows only the shape a channel satisfies: a `name`, a `validate`, and a `deploy`. It resolves channels by duck typing, so an external package provides one without importing sdbs, and discovers it through the `sdb.deploy` entry point group. The channels sdbs ships live under `plugins/`, and the command line composes them with the discovered ones, so the engine imports no channel itself.
+`sdb deploy` runs the plugins a project activates. A plugin is an external tool, unrelated to sdbs: sdbs carries no plugin code and imports no plugin. It reads a manifest at the plugin's root, runs its command, and reads the result.
 
-Deploy runs as its own invocation, separate from the render. The render container executes project-controlled Quarto and Jupyter code, so it stays free of upload credentials; the deploy invocation receives the credentials and walks the built artifact without running project code.
+A plugin lives in its own directory with a `manifest.yml` at that root:
 
-Channels are private by default. The `s3` channel never sets an object ACL, so an object is reachable only if the bucket itself is exposed, which is a provider setting outside this tool; the channel gives no way to make one public.
+```yaml
+manifest: 1
+name: s3
+description: Upload an artifact directory to an S3-compatible object store
+command: [python3, -m, sdb_s3]
+```
+
+The project that uses sdbs activates a plugin in `_deploy.yml` at its root:
 
 ```yaml
 deploy:
-  - name: private-docs
-    plugin: s3
-    source: _site
+  - plugin: s3
+    artifact: docs/_site
     options:
       bucket: example-private
       prefix: project/docs
-      endpoint: https://<s3-endpoint>
-      region: <region>
-      delete: true
       auth:
         mode: access
         domain: https://private.example.com
 ```
 
-The channel reads the endpoint from `options.endpoint` or the `S3_ENDPOINT` environment variable, the region from `options.region` or `AWS_REGION`, and the credentials from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, whose names `options.access_key_id_env` and `options.secret_access_key_env` can override. The channel carries no default endpoint and no default region: a provider's values are the caller's, so they never live in the channel or in the repository.
+`artifact` is resolved against the directory holding `_deploy.yml`. A named plugin that is not found is skipped, since a plugin is optional; set `require: true` on the activation, or pass `--require-all`, to make a missing plugin fail instead.
 
-The `auth` block records how a client reaches the deployed tree.
+The plugin path is the directories searched for manifests, in order, first match wins: the `--plugin-path` values, then `SDB_PLUGIN_PATH`, then `<root>/plugins`. `sdb plugins` lists what it finds.
 
-- `mode: none` uploads and reports nothing.
-- `mode: access` reports the `domain`, which is expected to sit behind an authenticated edge, such as an identity-aware proxy or an SSO gate. The gate authorizes every request at the edge and sets a session cookie, so a website's relative links keep working and a reader authenticates once in a browser. This is the fit for a private site.
-- `mode: presigned` mints a time-limited GET URL for each path in `objects`, valid for `expires_seconds`, on the store endpoint. It needs no domain and fits a single file, since each object needs its own signature and a page's relative links are not presigned.
+Across the process boundary the contract is one JSON request on the plugin's stdin and one JSON result on its stdout, with the exit code carrying success or failure:
 
-`delete: true` mirrors the source by removing remote keys absent from it, and needs a `prefix`, or an explicit `allow_unscoped_delete`, because a delete at the bucket root would remove every object outside the source.
-
-An object is private unless the bucket itself is exposed, which is a setting on whichever provider the caller chose, outside this tool. The channel guarantees only that it sets no object ACL, so the provider's exposure setting is the control that decides reachability.
-
-The `s3` channel signs its requests with the standard library rather than a cloud SDK. `tests/test_s3sig.py` pins the signer against the published AWS SigV4 vectors, so a wrong canonical request fails a test instead of a deploy.
-
-### Writing a channel
-
-A channel is a small object. An external package registers it through the `sdb.deploy` entry point group and needs no sdbs import unless it wants the shared helpers the engine exposes, `resolve_source` and `iter_source_files`. The example below is complete enough to register.
-
-```python
-# mypkg/channel.py
-from sdb.deploy import DeployError, DeployResult, iter_source_files, resolve_source
-
-
-class MyChannel:
-    name = "myservice"
-
-    def validate(self, target, context):
-        if not target.options.get("token_env"):
-            raise DeployError(f"{target.name}: options.token_env is required")
-        resolve_source(context.docs_root, target.source)
-
-    def deploy(self, target, context):
-        files = iter_source_files(resolve_source(context.docs_root, target.source))
-        if context.dry_run:
-            return DeployResult(name=target.name, plugin=self.name, uploaded=len(files))
-        # Perform the upload here, then report what happened.
-        return DeployResult(name=target.name, plugin=self.name, uploaded=len(files))
+```json
+{"deploy": 1, "plugin": "s3", "artifact": "/abs/path", "options": {}, "dry_run": false}
+{"deploy": 1, "ok": true, "uploaded": 164, "deleted": 0, "urls": [], "message": ""}
 ```
 
-```toml
-# mypkg/pyproject.toml
-[project.entry-points."sdb.deploy"]
-myservice = "mypkg.channel:MyChannel"
-```
+The endpoint, the region, and the credentials travel in the environment, never on the command line or in the request, so a provider's values and its secrets stay with the project that deploys.
 
-The entry point may name the class or an instance; `sdb deploy` instantiates a class with no arguments. A channel signals failure by raising `sdb.deploy.DeployError` or a subclass, and the engine reports it as a named channel failure and continues to the next one. `validate` must have no side effects, because it runs before the upload and under `--dry-run`.
+Deploy runs as its own invocation, separate from the render. The render container executes project-controlled Quarto and Jupyter code, so it stays free of upload credentials; the deploy invocation receives the credentials and runs a plugin, which is a tool rather than project code.
+
+### The s3 plugin
+
+`plugins/s3` is a reference plugin. It uploads an artifact directory to an S3-compatible object store and names the S3 protocol rather than a provider. Its `options` are:
+
+- `bucket` (required) and `prefix`.
+- `endpoint` (or `S3_ENDPOINT`) and `region` (or `AWS_REGION`).
+- `delete` mirrors the artifact, removing remote keys absent from it. It needs a `prefix`, or `allow_unscoped_delete`, because a delete at the bucket root would remove every object outside the artifact.
+- `auth.mode` records how a client reaches the deployed tree. `none` reports nothing. `access` reports the `domain`, expected to sit behind an authenticated edge such as an identity-aware proxy or an SSO gate, which authorizes every request and keeps a website's relative links working. `presigned` mints a time-limited GET URL for each path in `objects`, valid for `expires_seconds`, on the store endpoint, which fits a single file.
+
+Credentials come from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. The plugin sends no object ACL, so an object is private unless the bucket itself is exposed, which is a provider setting outside this tool.
+
+The plugin signs its requests with the standard library rather than a cloud SDK. `tests/test_s3sig.py` pins the signer against the published AWS SigV4 vectors, so a wrong canonical request fails a test instead of a deploy.
+
+### Writing a plugin
+
+A plugin is a program in any language. Put a `manifest.yml` at its root, read the one JSON request from stdin, write one JSON result to stdout, and exit non-zero on failure. The s3 plugin under `plugins/s3` is a complete example: `manifest.yml`, `sdb_s3/__main__.py` for the stdio contract, and `sdb_s3/channel.py` for the work.
 
 ## Pre-build Sequence
 

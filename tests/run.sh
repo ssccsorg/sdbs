@@ -40,7 +40,7 @@ fail(){ printf "  ${RED}[FAIL]${NC} %s\n" "$1"; FAILED=1; }
 # Suite 1: Python unit tests
 # ------------------------------------------------------------------
 set +e
-PYTHONPATH="$SCRIPT_DIR/../src:$SCRIPT_DIR/../plugins/src" python3 -m pytest "$SCRIPT_DIR" \
+PYTHONPATH="$SCRIPT_DIR/../src:$SCRIPT_DIR/../plugins/s3" python3 -m pytest "$SCRIPT_DIR" \
   --ignore="$SCRIPT_DIR/workflow" \
   --ignore="$SCRIPT_DIR/command" \
   -v

@@ -86,10 +86,15 @@ RUN uv pip install --system --break-system-packages \
         pytest\
         pytest-timeout
 
-# Install SDBS
+# Install SDBS, the engine only. The reference plugins are not part of the
+# package; they are placed beside the image and named on the plugin path, the
+# same way a consumer provides a plugin for sdb to call.
 COPY . /tmp/sdb
 RUN uv pip install --system --break-system-packages /tmp/sdb \
+    && mkdir -p /usr/local/share/sdbs \
+    && cp -r /tmp/sdb/plugins /usr/local/share/sdbs/plugins \
     && rm -rf /tmp/sdb
+ENV SDB_PLUGIN_PATH=/usr/local/share/sdbs/plugins
 
 # Install third-party license notices for components redistributed in this image
 COPY NOTICE.md /usr/local/share/licenses/NOTICE.md

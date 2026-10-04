@@ -1,0 +1,14 @@
+manifest: 1
+name: s3
+description: Upload an artifact directory to an S3-compatible object store
+command: [python3, -m, sdb_s3]
+interface:
+  artifact: directory
+  options:
+    - bucket
+    - prefix
+    - endpoint
+    - region
+    - delete
+    - allow_unscoped_delete
+    - auth

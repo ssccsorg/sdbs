@@ -8,7 +8,8 @@ Subcommands:
   pre      Run pre-render steps (latest docs, path resolution, formatting).
   render   Locate .qmd files by short name and render them directly (no preprocessing).
   dist     Render and collect PDF artifacts for short name matches.
-  deploy   Upload built artifacts to external deploy channels.
+  deploy   Run the external deploy plugins a project activates.
+  plugins  List the deploy plugins found on the plugin path.
   clean    Remove Quarto build artifacts.
 """
 
@@ -268,42 +269,65 @@ def main(argv: list[str] | None = None) -> None:
         help="Render all matching files without prompting",
     )
 
-    # --- deploy (external channels) ---
+    # --- deploy (external plugins) ---
     deploy_parser = subparsers.add_parser(
         "deploy",
-        help="Upload built artifacts to external deploy channels",
-        description="Run the deploy channels configured under 'deploy:' in build.yml. "
-        "Each channel names a plugin and a source directory, and reads its "
-        "destination and credentials from the configuration and the environment. "
-        "The first built-in channel is 's3' for S3-compatible private upload; "
-        "external plugins register under the 'sdb.deploy' entry point group.\n\n"
-        "Deploy is a separate step from the render, so the render container, "
-        "which executes project code, never holds upload credentials.",
+        help="Run the external deploy plugins a project activates",
+        description="Read '_deploy.yml' in the project root and run each plugin it "
+        "names. A plugin is an external tool with a manifest.yml at its root, found "
+        "on the plugin path (SDB_PLUGIN_PATH, then <root>/plugins). A plugin that is "
+        "named but not found is skipped unless the activation sets require: true. "
+        "sdbs carries no plugin code.\n\n"
+        "The endpoint, region, and credentials come from the environment, so deploy "
+        "runs as its own step from the render, which executes project code.",
         epilog=(
             "Examples:\n"
             "  sdb deploy docs\n"
-            "  sdb deploy docs --channel ssccs-docs-private\n"
-            "  sdb deploy docs --dry-run\n"
+            "  sdb deploy . --dry-run\n"
+            "  sdb deploy . --require-all\n"
         ),
     )
     deploy_parser.add_argument(
-        "docs_root",
+        "root",
         type=Path,
         nargs="?",
         default=Path("."),
-        help="Path to the docs directory (default: current directory)",
-    )
-    deploy_parser.add_argument(
-        "--channel", "-C", action="append", default=None,
-        help="Deploy only the named channel (repeatable)",
+        help="Project root holding _deploy.yml (default: current directory)",
     )
     deploy_parser.add_argument(
         "--config", "-c", type=Path, default=None,
-        help="Path to the YAML configuration file (default: build.yml in the docs root)",
+        help="Path to the deploy configuration (default: <root>/_deploy.yml)",
+    )
+    deploy_parser.add_argument(
+        "--plugin-path", action="append", default=None,
+        help="Extra directory to search for plugin manifests (repeatable)",
     )
     deploy_parser.add_argument(
         "--dry-run", action="store_true",
-        help="Report what each channel would upload without contacting the store",
+        help="Ask each plugin to report without contacting its store",
+    )
+    deploy_parser.add_argument(
+        "--require-all", action="store_true",
+        help="Fail when an activated plugin is not found",
+    )
+
+    # --- plugins (introspect the plugin path) ---
+    plugins_parser = subparsers.add_parser(
+        "plugins",
+        help="List the deploy plugins found on the plugin path",
+        description="Scan the plugin path (SDB_PLUGIN_PATH, then <root>/plugins) and "
+        "list each plugin manifest: its name, its path, and its description.",
+    )
+    plugins_parser.add_argument(
+        "root",
+        type=Path,
+        nargs="?",
+        default=Path("."),
+        help="Project root whose plugins directory is searched (default: current directory)",
+    )
+    plugins_parser.add_argument(
+        "--plugin-path", action="append", default=None,
+        help="Extra directory to search for plugin manifests (repeatable)",
     )
 
     # --- clean ---
@@ -491,29 +515,32 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.command == "deploy":
         _setup_logging()
-        from .deploy import DeployRegistry, run_deploy
-        from sdb_plugins import builtin_plugins
+        from .deploy import run_deploy
 
-        docs_root = args.docs_root.resolve()
-        _require_docs_root(docs_root, "deploy")
-
-        config_path = args.config
-        if config_path is None:
-            default_config = docs_root / "build.yml"
-            if default_config.exists():
-                config_path = default_config
-
-        # The command line is the composition root: it supplies the channels
-        # sdbs ships, and run_deploy adds those an external package registered.
-        registry = DeployRegistry.discover(builtin_plugins())
+        root = args.root.resolve()
+        _require_docs_root(root, "deploy")
         success = run_deploy(
-            docs_root,
-            config_path=config_path,
-            channels=args.channel,
+            root,
+            config_path=args.config,
             dry_run=args.dry_run,
-            registry=registry,
+            require_all=args.require_all,
+            extra_plugin_dirs=args.plugin_path,
         )
         sys.exit(0 if success else 1)
+
+    elif args.command == "plugins":
+        _setup_logging()
+        from .deploy import list_plugins
+
+        root = args.root.resolve()
+        _require_docs_root(root, "plugins")
+        found = list_plugins(root, args.plugin_path)
+        if not found:
+            print("No plugins found on the plugin path.")
+            sys.exit(0)
+        for manifest in found:
+            print(f"{manifest.name}\t{manifest.path}\t{manifest.description}")
+        sys.exit(0)
 
     elif args.command == "clean":
         _setup_logging()
