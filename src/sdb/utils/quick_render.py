@@ -399,7 +399,7 @@ def resolve_and_render(
     """Resolve patterns, deduplicate, render, and return results.
 
     This is the shared pipeline used by both ``sdb render`` and
-    ``sdb pub``.
+    ``sdb dist``.
 
     Args:
         patterns:        List of short name / path fragment patterns.
@@ -507,7 +507,7 @@ def resolve_and_render(
 
 
 # ---------------------------------------------------------------------------
-# publish_artifacts — collect PDF-related artifacts after rendering
+# dist_artifacts — collect PDF-related artifacts after rendering
 # ---------------------------------------------------------------------------
 
 
@@ -561,7 +561,7 @@ def _collect_one(qmd_path: Path, dest: Path) -> list[Path]:
     return copied
 
 
-def publish_artifacts(qmd_paths: list[Path]) -> int:
+def dist_artifacts(qmd_paths: list[Path]) -> int:
     """Collect PDF-related artifacts for rendered QMD files.
 
     For each rendered QMD, creates a folder named after the file's stem
@@ -575,7 +575,7 @@ def publish_artifacts(qmd_paths: list[Path]) -> int:
         stem = qmd.stem
         dest = qmd.parent / stem
         dest.mkdir(parents=True, exist_ok=True)
-        logger.info("Publishing %s → %s", qmd, dest)
+        logger.info("Assembling %s → %s", qmd, dest)
         n = len(_collect_one(qmd, dest))
         total += n
         if n == 0:

@@ -218,6 +218,7 @@ class TestMissingDocsRoot:
             ("check", "sdb.check.run_check"),
             ("build", "sdb.build.build_targets"),
             ("clean", "sdb.build.clean_quarto_artifacts"),
+            ("deploy", "sdb.deploy.run_deploy"),
         ],
     )
     def test_a_missing_root_stops_before_the_work(
@@ -254,3 +255,138 @@ class TestInvalidCommand:
         """Running sdb with an unrecognised command should exit non-zero."""
         code = _run_main(["nonexistent"])
         assert code != 0
+
+
+class TestDeployCommand:
+    """Tests for the ``sdb deploy`` subcommand."""
+
+    def test_deploy_defaults(self, tmp_path: Path) -> None:
+        root = tmp_path / "project"
+        root.mkdir()
+        with patch("sdb.deploy.run_deploy") as mock_deploy:
+            mock_deploy.return_value = True
+            code = _run_main(["deploy", str(root)])
+            assert code == 0
+            kwargs = mock_deploy.call_args.kwargs
+            assert kwargs["dry_run"] is False
+            assert kwargs["require_all"] is False
+
+    def test_deploy_flags(self, tmp_path: Path) -> None:
+        root = tmp_path / "project"
+        root.mkdir()
+        with patch("sdb.deploy.run_deploy") as mock_deploy:
+            mock_deploy.return_value = True
+            code = _run_main(
+                ["deploy", str(root), "--dry-run", "--require-all", "--plugin-path", "/x"]
+            )
+            assert code == 0
+            kwargs = mock_deploy.call_args.kwargs
+            assert kwargs["dry_run"] is True
+            assert kwargs["require_all"] is True
+            assert kwargs["extra_plugin_dirs"] == ["/x"]
+
+    def test_deploy_failure_exit_code(self, tmp_path: Path) -> None:
+        root = tmp_path / "project"
+        root.mkdir()
+        with patch("sdb.deploy.run_deploy") as mock_deploy:
+            mock_deploy.return_value = False
+            code = _run_main(["deploy", str(root)])
+            assert code == 1
+
+
+class TestDistCommand:
+    """Tests for the ``sdb dist`` subcommand (the renamed pub)."""
+
+    def test_dist_collects_artifacts(self, tmp_path: Path) -> None:
+        """sdb dist renders the matches and assembles their artifacts."""
+        rendered = [tmp_path / "map.qmd"]
+        with (
+            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
+            patch(
+                "sdb.utils.quick_render.resolve_and_render",
+                return_value=(True, rendered),
+            ) as mock_resolve,
+            patch("sdb.utils.quick_render.dist_artifacts") as mock_dist,
+        ):
+            mock_dist.return_value = 1
+            code = _run_main(["dist", "map"])
+            assert code == 0
+            assert mock_resolve.call_args.kwargs["format"] == "pdf"
+            mock_dist.assert_called_once_with(rendered)
+
+    def test_pub_is_no_longer_a_command(self) -> None:
+        """The rename removed the old name rather than aliasing it."""
+        code = _run_main(["pub", "map"])
+        assert code != 0
+
+
+class TestDeployEndToEnd:
+    """The deploy command, wired through the engine and an external plugin.
+
+    These run the command end to end, so they cover what the mocked dispatch
+    tests leave out: the config load, plugin discovery, and the subprocess run.
+    """
+
+    def _project(self, tmp_path: Path) -> Path:
+        root = tmp_path / "project"
+        site = root / "docs" / "_site"
+        site.mkdir(parents=True)
+        (site / "index.html").write_text("<html></html>", encoding="utf-8")
+        (root / "_deploy.yml").write_text(
+            "deploy:\n"
+            "  - plugin: echo\n"
+            "    artifact: docs/_site\n"
+            "    options:\n"
+            "      bucket: b\n",
+            encoding="utf-8",
+        )
+        plugin = root / "plugins" / "echo"
+        plugin.mkdir(parents=True)
+        (plugin / "manifest.yml").write_text(
+            "manifest: 1\nname: echo\ncommand:\n  - python3\n  - run.py\n",
+            encoding="utf-8",
+        )
+        (plugin / "run.py").write_text(
+            "import json, sys\n"
+            "json.loads(sys.stdin.read())\n"
+            "print(json.dumps({'deploy': 1, 'ok': True, 'uploaded': 1}))\n",
+            encoding="utf-8",
+        )
+        return root
+
+    def test_a_deploy_runs_through_the_cli(self, tmp_path: Path) -> None:
+        assert _run_main(["deploy", str(self._project(tmp_path))]) == 0
+
+    def test_a_missing_artifact_fails(self, tmp_path: Path) -> None:
+        root = self._project(tmp_path)
+        (root / "docs" / "_site" / "index.html").unlink()
+        (root / "docs" / "_site").rmdir()
+        assert _run_main(["deploy", str(root)]) == 1
+
+    def test_a_missing_optional_plugin_is_skipped(self, tmp_path: Path) -> None:
+        root = tmp_path / "project"
+        (root / "docs" / "_site").mkdir(parents=True)
+        (root / "_deploy.yml").write_text(
+            "deploy:\n  - plugin: absent\n    artifact: docs/_site\n", encoding="utf-8"
+        )
+        assert _run_main(["deploy", str(root)]) == 0
+
+
+class TestPluginsCommand:
+    """Tests for the ``sdb plugins`` subcommand."""
+
+    def test_it_lists_a_found_plugin(self, tmp_path: Path, capsys) -> None:
+        plugin = tmp_path / "plugins" / "echo"
+        plugin.mkdir(parents=True)
+        (plugin / "manifest.yml").write_text(
+            "manifest: 1\nname: echo\ndescription: echo it\ncommand: [python3]\n",
+            encoding="utf-8",
+        )
+        code = _run_main(["plugins", str(tmp_path)])
+        assert code == 0
+        assert "echo" in capsys.readouterr().out
+
+    def test_no_plugins_reports(self, tmp_path: Path, capsys) -> None:
+        code = _run_main(["plugins", str(tmp_path)])
+        assert code == 0
+        assert "No plugins" in capsys.readouterr().out

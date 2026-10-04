@@ -25,7 +25,7 @@ NC='\033[0m'
 
 printf "[test:unit] Running unit tests (excluding command/ and workflow/) ...\n\n"
 
-PYTHONPATH="$SCRIPT_DIR/../src" "$PYTHON" -m pytest "$SCRIPT_DIR" \
+PYTHONPATH="$SCRIPT_DIR/../src:$SCRIPT_DIR/../plugins/s3" "$PYTHON" -m pytest "$SCRIPT_DIR" \
   --ignore="$SCRIPT_DIR/command" \
   --ignore="$SCRIPT_DIR/workflow" \
   --tb=short \

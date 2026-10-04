@@ -7,7 +7,9 @@ Subcommands:
   check    Validate links, citations, and cross-references.
   pre      Run pre-render steps (latest docs, path resolution, formatting).
   render   Locate .qmd files by short name and render them directly (no preprocessing).
-  pub      Render and publish PDF artifacts for short name matches.
+  dist     Render and collect PDF artifacts for short name matches.
+  deploy   Run the external deploy plugins a project activates.
+  plugins  List the deploy plugins found on the plugin path.
   clean    Remove Quarto build artifacts.
 """
 
@@ -239,32 +241,93 @@ def main(argv: list[str] | None = None) -> None:
         help="Render all matching files without prompting",
     )
 
-    # --- pub (render + collect PDF artifacts) ---
-    pub_parser = subparsers.add_parser(
-        "pub",
-        help="Render and publish PDF artifacts for short name matches",
+    # --- dist (render + collect PDF artifacts) ---
+    dist_parser = subparsers.add_parser(
+        "dist",
+        help="Render and assemble PDF artifacts for short name matches",
         description="Same as 'sdb render' but additionally collects PDF-related "
         "artifacts after rendering: PDF, LaTeX source, figure-pdf, mediabag, "
         "and shared _files/ into a folder named after each matched file.\n\n"
-        "Use this command when you need to distribute or archive the rendered "
-        "PDF along with its supporting files (figures, media, sources).\n\n"
+        "This assembles a local distribution artifact and uploads nothing; use "
+        "'sdb deploy' to move a built tree to an external channel.\n\n"
         "When multiple files match, prompts for selection unless --all is given.",
         epilog=(
             "Examples:\n"
-            "  sdb pub map\n"
-            "  sdb pub map id --all\n"
+            "  sdb dist map\n"
+            "  sdb dist map id --all\n"
         ),
     )
-    pub_parser.add_argument(
+    dist_parser.add_argument(
         "patterns",
         type=str,
         nargs="+",
         help="One or more short names or path fragments to match against .qmd "
         "file stems",
     )
-    pub_parser.add_argument(
+    dist_parser.add_argument(
         "--all", "-a", action="store_true",
         help="Render all matching files without prompting",
+    )
+
+    # --- deploy (external plugins) ---
+    deploy_parser = subparsers.add_parser(
+        "deploy",
+        help="Run the external deploy plugins a project activates",
+        description="Read '_deploy.yml' in the project root and run each plugin it "
+        "names. A plugin is an external tool with a manifest.yml at its root, found "
+        "on the plugin path (SDB_PLUGIN_PATH, then <root>/plugins). A plugin that is "
+        "named but not found is skipped unless the activation sets require: true. "
+        "sdbs carries no plugin code.\n\n"
+        "The endpoint, region, and credentials come from the environment, so deploy "
+        "runs as its own step from the render, which executes project code.",
+        epilog=(
+            "Examples:\n"
+            "  sdb deploy docs\n"
+            "  sdb deploy . --dry-run\n"
+            "  sdb deploy . --require-all\n"
+        ),
+    )
+    deploy_parser.add_argument(
+        "root",
+        type=Path,
+        nargs="?",
+        default=Path("."),
+        help="Project root holding _deploy.yml (default: current directory)",
+    )
+    deploy_parser.add_argument(
+        "--config", "-c", type=Path, default=None,
+        help="Path to the deploy configuration (default: <root>/_deploy.yml)",
+    )
+    deploy_parser.add_argument(
+        "--plugin-path", action="append", default=None,
+        help="Extra directory to search for plugin manifests (repeatable)",
+    )
+    deploy_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Ask each plugin to report without contacting its store",
+    )
+    deploy_parser.add_argument(
+        "--require-all", action="store_true",
+        help="Fail when an activated plugin is not found",
+    )
+
+    # --- plugins (introspect the plugin path) ---
+    plugins_parser = subparsers.add_parser(
+        "plugins",
+        help="List the deploy plugins found on the plugin path",
+        description="Scan the plugin path (SDB_PLUGIN_PATH, then <root>/plugins) and "
+        "list each plugin manifest: its name, its path, and its description.",
+    )
+    plugins_parser.add_argument(
+        "root",
+        type=Path,
+        nargs="?",
+        default=Path("."),
+        help="Project root whose plugins directory is searched (default: current directory)",
+    )
+    plugins_parser.add_argument(
+        "--plugin-path", action="append", default=None,
+        help="Extra directory to search for plugin manifests (repeatable)",
     )
 
     # --- clean ---
@@ -424,12 +487,12 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(0 if success else 1)
 
-    elif args.command == "pub":
+    elif args.command == "dist":
         _setup_logging()
         from .utils.quick_render import (
+            dist_artifacts,
             find_build_yml,
             load_exclude_patterns,
-            publish_artifacts,
             resolve_and_render,
         )
 
@@ -446,9 +509,38 @@ def main(argv: list[str] | None = None) -> None:
             format="pdf",
         )
         if rendered:
-            n = publish_artifacts(rendered)
-            logging.info("Published %d artifact(s) for %d file(s).", n, len(rendered))
+            n = dist_artifacts(rendered)
+            logging.info("Assembled %d artifact(s) for %d file(s).", n, len(rendered))
         sys.exit(0 if success else 1)
+
+    elif args.command == "deploy":
+        _setup_logging()
+        from .deploy import run_deploy
+
+        root = args.root.resolve()
+        _require_docs_root(root, "deploy")
+        success = run_deploy(
+            root,
+            config_path=args.config,
+            dry_run=args.dry_run,
+            require_all=args.require_all,
+            extra_plugin_dirs=args.plugin_path,
+        )
+        sys.exit(0 if success else 1)
+
+    elif args.command == "plugins":
+        _setup_logging()
+        from .deploy import list_plugins
+
+        root = args.root.resolve()
+        _require_docs_root(root, "plugins")
+        found = list_plugins(root, args.plugin_path)
+        if not found:
+            print("No plugins found on the plugin path.")
+            sys.exit(0)
+        for manifest in found:
+            print(f"{manifest.name}\t{manifest.path}\t{manifest.description}")
+        sys.exit(0)
 
     elif args.command == "clean":
         _setup_logging()

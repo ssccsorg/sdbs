@@ -53,7 +53,7 @@ exclude:
 # author (name, email, role, orcid) and affiliations (name, url, domain).  It
 # heals the mismatches between those declarations and what the Quarto render
 # needs, mostly on the PDF path.  No project script and no pre-render hook are
-# involved: the step runs for sdb pre, sdb build, sdb render, and sdb pub.
+# involved: the step runs for sdb pre, sdb build, sdb render, and sdb dist.
 #
 # Every check is a named case.  Switch one off under "disabled", or hold back
 # every repair at once with "report_only".  An unknown name is reported with
@@ -75,3 +75,4 @@ exclude:
 metadata:
   disabled: []
   report_only: false
+
