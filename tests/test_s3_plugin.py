@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from sdb_s3.channel import PluginError, handle
+from sdb_s3.client import S3Client, S3Error
 
 
 def _artifact(tmp_path: Path, names: tuple[str, ...] = ("index.html",)) -> Path:
@@ -21,6 +22,33 @@ def _artifact(tmp_path: Path, names: tuple[str, ...] = ("index.html",)) -> Path:
 
 def _request(artifact: Path, dry_run: bool = True, **options) -> dict:
     return {"deploy": 1, "artifact": str(artifact), "options": options, "dry_run": dry_run}
+
+
+def _client(endpoint: str, bucket: str = "pdocs") -> S3Client:
+    return S3Client(
+        endpoint=endpoint,
+        bucket=bucket,
+        access_key="key",
+        secret_key="secret",
+        region="auto",
+    )
+
+
+class TestEndpoint:
+    """The account endpoint is given without the bucket.
+
+    A store's console shows a bucket URL with the bucket in the path, and the
+    client appends the bucket itself, so accepting such an endpoint would nest
+    the bucket twice and upload to the wrong keys.
+    """
+
+    def test_a_bucket_in_the_endpoint_is_rejected(self) -> None:
+        with pytest.raises(S3Error):
+            _client("https://account.r2.cloudflarestorage.com/pdocs")
+
+    def test_the_account_endpoint_builds_the_expected_path(self) -> None:
+        client = _client("https://account.r2.cloudflarestorage.com")
+        assert client._path_for_key("ktema/index.html") == "/pdocs/ktema/index.html"
 
 
 class TestDryRun:

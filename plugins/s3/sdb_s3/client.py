@@ -41,9 +41,15 @@ class S3Client:
             raise S3Error(f"endpoint must be an absolute URL, got {endpoint!r}")
         if not bucket:
             raise S3Error("bucket is required")
+        base_path = parts.path.rstrip("/")
+        if base_path.endswith(f"/{bucket}"):
+            raise S3Error(
+                f"endpoint {endpoint!r} ends with the bucket {bucket!r}; give the "
+                "account endpoint, since the client appends the bucket"
+            )
         self.scheme = parts.scheme
         self.host = parts.netloc
-        self.base_path = parts.path.rstrip("/")
+        self.base_path = base_path
         self.bucket = bucket
         self.access_key = access_key
         self.secret_key = secret_key
