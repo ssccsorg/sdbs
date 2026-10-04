@@ -85,24 +85,25 @@ deploy:
     options:
       bucket: example-private
       prefix: project/docs
-      endpoint: https://<account-id>.r2.cloudflarestorage.com
+      endpoint: https://<s3-endpoint>
+      region: <region>
       delete: true
       auth:
         mode: access
         domain: https://private.example.com
 ```
 
-The channel reads the endpoint from `options.endpoint` or the `S3_ENDPOINT` environment variable, and the credentials from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, whose names `options.access_key_id_env` and `options.secret_access_key_env` can override. Destination values and credentials never live in the repository.
+The channel reads the endpoint from `options.endpoint` or the `S3_ENDPOINT` environment variable, the region from `options.region` or `AWS_REGION`, and the credentials from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, whose names `options.access_key_id_env` and `options.secret_access_key_env` can override. The channel carries no default endpoint and no default region: a provider's values are the caller's, so they never live in the channel or in the repository.
 
 The `auth` block records how a client reaches the deployed tree.
 
 - `mode: none` uploads and reports nothing.
-- `mode: access` reports the `domain`, which is expected to sit behind Cloudflare Access. Access gates every request at the edge and sets a session cookie, so a website's relative links keep working and a reader authenticates once in a browser. This is the fit for a private site.
+- `mode: access` reports the `domain`, which is expected to sit behind an authenticated edge, such as an identity-aware proxy or an SSO gate. The gate authorizes every request at the edge and sets a session cookie, so a website's relative links keep working and a reader authenticates once in a browser. This is the fit for a private site.
 - `mode: presigned` mints a time-limited GET URL for each path in `objects`, valid for `expires_seconds`, on the store endpoint. It needs no domain and fits a single file, since each object needs its own signature and a page's relative links are not presigned.
 
 `delete: true` mirrors the source by removing remote keys absent from it, and needs a `prefix`, or an explicit `allow_unscoped_delete`, because a delete at the bucket root would remove every object outside the source.
 
-R2 objects are private unless the bucket is exposed through a domain, which is a Cloudflare account setting outside this tool. The channel therefore guarantees only that it never sets an ACL and refuses a public request, and points the operator at the domain-based gate rather than creating it.
+An object is private unless the bucket itself is exposed, which is a setting on whichever provider the caller chose, outside this tool. The channel guarantees only that it sets no object ACL, so the provider's exposure setting is the control that decides reachability.
 
 The `s3` channel signs its requests with the standard library rather than a cloud SDK. `tests/test_s3sig.py` pins the signer against the published AWS SigV4 vectors, so a wrong canonical request fails a test instead of a deploy.
 

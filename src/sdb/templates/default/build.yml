@@ -78,20 +78,21 @@ metadata:
 
 # External deploy channels (optional)
 # `sdb deploy <docs_root>` runs each channel, as a separate step from the build
-# so the render container never holds upload credentials.  The built-in channel
-# is `s3`, for an S3-compatible store such as Cloudflare R2.
+# so the render container never holds upload credentials.  The first channel is
+# `s3`, for a store that speaks the S3 protocol; a provider's endpoint, region,
+# and any edge authentication are the caller's, not the channel's.
 #
 # The s3 channel never sets a public ACL, so an object is private unless the
 # bucket itself is exposed, which is a provider setting outside this tool.
-# Destination values and credentials come from the environment, never here.
+# The endpoint, the region, and the credentials come from the environment.
 #
 # Generic keys:   name (required), plugin (required), source (default _site),
 #                 enabled (default true)
 # Plugin options: bucket (required), prefix, endpoint (or S3_ENDPOINT),
-#                 region (default auto), delete (mirror the source),
-#                 allow_unscoped_delete (confirm a
-#                 delete at the bucket root), and auth for client access:
-#                 mode none|access|presigned, domain, expires_seconds, objects.
+#                 region (or AWS_REGION), delete (mirror the source),
+#                 allow_unscoped_delete (confirm a delete at the bucket root),
+#                 and auth for client access: mode none|access|presigned,
+#                 domain, expires_seconds, objects.
 #
 # deploy:
 #   - name: private-docs
@@ -100,7 +101,8 @@ metadata:
 #     options:
 #       bucket: example-private
 #       prefix: project/docs
-#       endpoint: https://<account-id>.r2.cloudflarestorage.com
+#       endpoint: https://<s3-endpoint>
+#       region: <region>
 #       delete: true
 #       auth:
 #         mode: access

@@ -30,6 +30,17 @@ from sdb.plugins import builtin_plugins
 from sdb.plugins.s3 import S3DeployPlugin, _object_key
 
 ENDPOINT = "https://account.example.com"
+REGION = "region-1"
+
+
+@pytest.fixture
+def s3_env(monkeypatch):
+    """The endpoint, region, and credentials a channel reads from the environment."""
+    monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
+    monkeypatch.setenv("AWS_REGION", REGION)
+    return monkeypatch
 
 
 def _write_build_yml(docs_root: Path, body: str) -> Path:
@@ -295,19 +306,78 @@ def _s3_target(options: dict) -> DeployTarget:
 
 
 class TestS3Validation:
-    def test_a_missing_bucket_is_rejected(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
-        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
-        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
+    def test_a_missing_bucket_is_rejected(self, tmp_path: Path, s3_env) -> None:
         (tmp_path / "_site").mkdir()
         plugin = S3DeployPlugin()
         with pytest.raises(DeployError):
             plugin.validate(_s3_target({}), DeployContext(docs_root=tmp_path))
 
-    def test_a_presigned_object_must_be_in_the_source(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
-        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
-        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
+    def test_a_missing_endpoint_is_rejected(self, tmp_path: Path, s3_env) -> None:
+        s3_env.delenv("S3_ENDPOINT", raising=False)
+        (tmp_path / "_site").mkdir()
+        plugin = S3DeployPlugin()
+        with pytest.raises(DeployError):
+            plugin.validate(_s3_target({"bucket": "b"}), DeployContext(docs_root=tmp_path))
+
+    def test_a_missing_region_is_rejected(self, tmp_path: Path, s3_env) -> None:
+        s3_env.delenv("AWS_REGION", raising=False)
+        (tmp_path / "_site").mkdir()
+        plugin = S3DeployPlugin()
+        context = DeployContext(docs_root=tmp_path)
+        # No region anywhere: refused, since the protocol scope needs one.
+        with pytest.raises(DeployError):
+            plugin.validate(_s3_target({"bucket": "b"}), context)
+        # A region on the channel is enough, and a region in the environment too.
+        plugin.validate(_s3_target({"bucket": "b", "region": REGION}), context)
+        s3_env.setenv("AWS_REGION", REGION)
+        plugin.validate(_s3_target({"bucket": "b"}), context)
+
+    def test_missing_credentials_are_rejected(self, tmp_path: Path, s3_env) -> None:
+        s3_env.delenv("AWS_ACCESS_KEY_ID", raising=False)
+        s3_env.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+        (tmp_path / "_site").mkdir()
+        plugin = S3DeployPlugin()
+        with pytest.raises(DeployError):
+            plugin.validate(_s3_target({"bucket": "b"}), DeployContext(docs_root=tmp_path))
+
+    def test_a_missing_source_directory_is_rejected(self, tmp_path: Path, s3_env) -> None:
+        plugin = S3DeployPlugin()
+        with pytest.raises(DeployError):
+            plugin.validate(_s3_target({"bucket": "b"}), DeployContext(docs_root=tmp_path))
+
+    def test_an_unknown_auth_mode_is_rejected(self, tmp_path: Path, s3_env) -> None:
+        (tmp_path / "_site").mkdir()
+        plugin = S3DeployPlugin()
+        target = _s3_target({"bucket": "b", "auth": {"mode": "sso"}})
+        with pytest.raises(DeployError):
+            plugin.validate(target, DeployContext(docs_root=tmp_path))
+
+    def test_access_without_a_domain_is_rejected(self, tmp_path: Path, s3_env) -> None:
+        (tmp_path / "_site").mkdir()
+        plugin = S3DeployPlugin()
+        target = _s3_target({"bucket": "b", "auth": {"mode": "access"}})
+        with pytest.raises(DeployError):
+            plugin.validate(target, DeployContext(docs_root=tmp_path))
+
+    def test_presigned_without_objects_is_rejected(self, tmp_path: Path, s3_env) -> None:
+        (tmp_path / "_site").mkdir()
+        plugin = S3DeployPlugin()
+        target = _s3_target({"bucket": "b", "auth": {"mode": "presigned"}})
+        with pytest.raises(DeployError):
+            plugin.validate(target, DeployContext(docs_root=tmp_path))
+
+    def test_presigned_needs_no_domain(self, tmp_path: Path, s3_env) -> None:
+        """A presigned URL is minted on the store endpoint, so no domain is used."""
+        site = tmp_path / "_site"
+        site.mkdir()
+        (site / "a.pdf").write_text("pdf", encoding="utf-8")
+        plugin = S3DeployPlugin()
+        target = _s3_target(
+            {"bucket": "b", "auth": {"mode": "presigned", "objects": ["a.pdf"]}}
+        )
+        plugin.validate(target, DeployContext(docs_root=tmp_path))
+
+    def test_a_presigned_object_must_be_in_the_source(self, tmp_path: Path, s3_env) -> None:
         site = tmp_path / "_site"
         site.mkdir()
         (site / "present.pdf").write_text("pdf", encoding="utf-8")
@@ -336,10 +406,7 @@ class TestS3Validation:
                 context,
             )
 
-    def test_presign_seconds_must_be_in_range(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
-        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
-        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
+    def test_presign_seconds_must_be_in_range(self, tmp_path: Path, s3_env) -> None:
         site = tmp_path / "_site"
         site.mkdir()
         (site / "a.pdf").write_text("pdf", encoding="utf-8")
@@ -361,72 +428,9 @@ class TestS3Validation:
             context,
         )
 
-    def test_a_missing_endpoint_is_rejected(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.delenv("S3_ENDPOINT", raising=False)
-        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
-        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
-        (tmp_path / "_site").mkdir()
-        plugin = S3DeployPlugin()
-        with pytest.raises(DeployError):
-            plugin.validate(_s3_target({"bucket": "b"}), DeployContext(docs_root=tmp_path))
-
-    def test_missing_credentials_are_rejected(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
-        monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
-        monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
-        (tmp_path / "_site").mkdir()
-        plugin = S3DeployPlugin()
-        with pytest.raises(DeployError):
-            plugin.validate(_s3_target({"bucket": "b"}), DeployContext(docs_root=tmp_path))
-
-    def test_a_missing_source_directory_is_rejected(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
-        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
-        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
-        plugin = S3DeployPlugin()
-        with pytest.raises(DeployError):
-            plugin.validate(_s3_target({"bucket": "b"}), DeployContext(docs_root=tmp_path))
-
-    def test_presigned_without_objects_is_rejected(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
-        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
-        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
-        (tmp_path / "_site").mkdir()
-        plugin = S3DeployPlugin()
-        target = _s3_target({"bucket": "b", "auth": {"mode": "presigned"}})
-        with pytest.raises(DeployError):
-            plugin.validate(target, DeployContext(docs_root=tmp_path))
-
-    def test_presigned_needs_no_domain(self, tmp_path: Path, monkeypatch) -> None:
-        """A presigned URL is minted on the store endpoint, so no domain is used."""
-        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
-        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
-        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
-        site = tmp_path / "_site"
-        site.mkdir()
-        (site / "a.pdf").write_text("pdf", encoding="utf-8")
-        plugin = S3DeployPlugin()
-        target = _s3_target(
-            {"bucket": "b", "auth": {"mode": "presigned", "objects": ["a.pdf"]}}
-        )
-        plugin.validate(target, DeployContext(docs_root=tmp_path))
-
-    def test_access_without_a_domain_is_rejected(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
-        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
-        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
-        (tmp_path / "_site").mkdir()
-        plugin = S3DeployPlugin()
-        target = _s3_target({"bucket": "b", "auth": {"mode": "access"}})
-        with pytest.raises(DeployError):
-            plugin.validate(target, DeployContext(docs_root=tmp_path))
-
     def test_delete_at_the_root_needs_a_prefix_or_confirmation(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, s3_env
     ) -> None:
-        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
-        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
-        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
         (tmp_path / "_site").mkdir()
         plugin = S3DeployPlugin()
         context = DeployContext(docs_root=tmp_path)
@@ -445,11 +449,8 @@ class TestS3Validation:
 
 class TestS3DryRun:
     def test_dry_run_counts_without_contacting_the_store(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, s3_env
     ) -> None:
-        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
-        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
-        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
         site = tmp_path / "_site"
         (site / "assets").mkdir(parents=True)
         (site / "index.html").write_text("<html></html>", encoding="utf-8")
@@ -500,6 +501,7 @@ class TestS3Client:
             bucket="b",
             access_key="k",
             secret_key="s",
+            region=REGION,
         )
 
         def boom(*args, **kwargs):

@@ -28,7 +28,7 @@ class S3Error(DeployError):
 
 
 class S3Client:
-    """Path-style S3 client, which is the addressing Cloudflare R2 serves."""
+    """A path-style S3 client, signing each request with SigV4."""
 
     def __init__(
         self,
@@ -37,7 +37,7 @@ class S3Client:
         bucket: str,
         access_key: str,
         secret_key: str,
-        region: str = "auto",
+        region: str,
         service: str = "s3",
         session_token: Optional[str] = None,
         timeout: float = 60.0,

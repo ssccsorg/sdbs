@@ -1,15 +1,15 @@
 """
 The s3 channel: upload a built tree to an S3-compatible object store.
 
-S3 is a protocol rather than a provider, so this channel names no vendor.
-Cloudflare R2 is the reference deployment: it speaks the S3 API, serves
-path-style addressing, and accepts the region ``auto``. Any S3-compatible
-store works, and nothing here special-cases one.
+S3 is a protocol rather than a provider. The channel carries no endpoint, no
+region, and no vendor behaviour: the endpoint, the region, and the credentials
+are the caller's, supplied through options and the environment. Path-style
+addressing and SigV4 are what the protocol fixes, and they are all this channel
+assumes.
 
 The channel writes private objects. It sends no object ACL, so an object is
 reachable only if the bucket itself is exposed, which is a provider setting
-outside this tool; the channel never makes one public. Endpoint and credentials
-come from the environment.
+outside this tool; the channel never makes one public.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ DEFAULT_ENDPOINT_ENV = "S3_ENDPOINT"
 DEFAULT_ACCESS_KEY_ENV = "AWS_ACCESS_KEY_ID"
 DEFAULT_SECRET_KEY_ENV = "AWS_SECRET_ACCESS_KEY"
 DEFAULT_SESSION_TOKEN_ENV = "AWS_SESSION_TOKEN"
-DEFAULT_REGION = "auto"
+DEFAULT_REGION_ENV = "AWS_REGION"
 DEFAULT_PRESIGN_SECONDS = 3600
 
 
@@ -64,6 +64,7 @@ class S3DeployPlugin:
                 f"deploy channel {target.name!r}: no endpoint. Set options.endpoint "
                 f"or the {DEFAULT_ENDPOINT_ENV} environment variable"
             )
+        _region(options)
         _credentials(options)
         source = resolve_source(context.docs_root, target.source)
         auth = options.get("auth") or {}
@@ -124,7 +125,7 @@ class S3DeployPlugin:
             bucket=str(options["bucket"]),
             access_key=credentials["access_key"],
             secret_key=credentials["secret_key"],
-            region=str(options.get("region") or DEFAULT_REGION),
+            region=_region(options),
             session_token=credentials["session_token"],
         )
 
@@ -189,6 +190,20 @@ def _content_type(path: Path) -> str:
 def _endpoint(options: Dict[str, Any]) -> str:
     value = options.get("endpoint") or os.environ.get(DEFAULT_ENDPOINT_ENV, "")
     return str(value).strip()
+
+
+def _region(options: Dict[str, Any]) -> str:
+    # The region is the caller's: the protocol fixes that a scope carries one,
+    # not what it is. A provider's value belongs at the call site, so this
+    # channel carries no default.
+    value = options.get("region") or os.environ.get(DEFAULT_REGION_ENV, "")
+    value = str(value).strip()
+    if not value:
+        raise DeployError(
+            f"no region: set options.region or the {DEFAULT_REGION_ENV} "
+            f"environment variable"
+        )
+    return value
 
 
 def _env_name(options: Dict[str, Any], key: str, default: str) -> str:
