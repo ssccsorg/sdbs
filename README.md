@@ -75,7 +75,7 @@ Every command that takes a docs root stops when the path is not a directory, and
 
 Deploy runs as its own invocation, separate from the render. The render container executes project-controlled Quarto and Jupyter code, so it stays free of upload credentials; the deploy invocation receives the credentials and walks the built artifact without running project code.
 
-Channels are private by default. The `s3` channel sends no object ACL and refuses a `visibility: public` request unless `--allow-public` is passed, so a reachable destination is an explicit decision rather than a default.
+Channels are private by default. The `s3` channel never sets an object ACL, so an object is reachable only if the bucket itself is exposed, which is a provider setting outside this tool; the channel gives no way to make one public.
 
 ```yaml
 deploy:
@@ -86,7 +86,6 @@ deploy:
       bucket: example-private
       prefix: project/docs
       endpoint: https://<account-id>.r2.cloudflarestorage.com
-      visibility: private
       delete: true
       auth:
         mode: access

@@ -101,15 +101,15 @@ metadata:
 # so the render container never holds upload credentials.  The built-in channel
 # is `s3`, for an S3-compatible store such as Cloudflare R2.
 #
-# Channels are private by default: the s3 channel sends no object ACL and
-# refuses `visibility: public` unless --allow-public is passed.  Destination
-# values and credentials come from the environment, never from this file.
+# The s3 channel never sets a public ACL, so an object is private unless the
+# bucket itself is exposed, which is a provider setting outside this tool.
+# Destination values and credentials come from the environment, never here.
 #
 # Generic keys:   name (required), plugin (required), source (default _site),
 #                 enabled (default true)
 # Plugin options: bucket (required), prefix, endpoint (or S3_ENDPOINT),
-#                 region (default auto), visibility (private|public),
-#                 delete (mirror the source), allow_unscoped_delete (confirm a
+#                 region (default auto), delete (mirror the source),
+#                 allow_unscoped_delete (confirm a
 #                 delete at the bucket root), and auth for client access:
 #                 mode none|access|presigned, domain, expires_seconds, objects.
 #
@@ -121,7 +121,6 @@ metadata:
 #       bucket: example-private
 #       prefix: project/docs
 #       endpoint: https://<account-id>.r2.cloudflarestorage.com
-#       visibility: private
 #       delete: true
 #       auth:
 #         mode: access

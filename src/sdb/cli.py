@@ -305,10 +305,6 @@ def main(argv: list[str] | None = None) -> None:
         "--dry-run", action="store_true",
         help="Report what each channel would upload without contacting the store",
     )
-    deploy_parser.add_argument(
-        "--allow-public", action="store_true",
-        help="Confirm a channel that asks for visibility: public",
-    )
 
     # --- clean ---
     clean_parser = subparsers.add_parser(
@@ -515,7 +511,6 @@ def main(argv: list[str] | None = None) -> None:
             config_path=config_path,
             channels=args.channel,
             dry_run=args.dry_run,
-            allow_public=args.allow_public,
             registry=registry,
         )
         sys.exit(0 if success else 1)

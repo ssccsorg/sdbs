@@ -52,7 +52,6 @@ class DeployContext:
 
     docs_root: Path
     dry_run: bool = False
-    allow_public: bool = False
 
 
 @dataclass
@@ -116,7 +115,8 @@ class DeployRegistry:
 
 
 def _plugin_problem(plugin: Any) -> Optional[str]:
-    if not getattr(plugin, "name", ""):
+    name = getattr(plugin, "name", "")
+    if not isinstance(name, str) or not name:
         return "no name"
     for method in ("validate", "deploy"):
         if not callable(getattr(plugin, method, None)):
@@ -132,10 +132,10 @@ def _entry_point_plugins() -> Iterable[DeployPlugin]:
     for entry in discovered:
         try:
             loaded = entry.load()
+            plugin = loaded() if isinstance(loaded, type) else loaded
         except Exception as error:
             logger.warning("Could not load deploy plugin %s: %s", entry.name, error)
             continue
-        plugin = loaded() if isinstance(loaded, type) else loaded
         problem = _plugin_problem(plugin)
         if problem:
             logger.warning("Deploy entry point %s: %s", entry.name, problem)
@@ -197,12 +197,20 @@ def resolve_source(docs_root: Path, source: str) -> Path:
 
 
 def iter_source_files(source: Path) -> List[Tuple[str, Path]]:
-    """Return ``(relative posix path, path)`` for every file under a source."""
-    return [
-        (path.relative_to(source).as_posix(), path)
-        for path in sorted(source.rglob("*"))
-        if path.is_file()
-    ]
+    """Return ``(relative posix path, path)`` for every file under a source.
+
+    A path that resolves outside the source is skipped, so a symlink in a built
+    tree cannot turn a deploy into a copy of a file that is not in it.
+    """
+    files: List[Tuple[str, Path]] = []
+    for path in sorted(source.rglob("*")):
+        if not path.is_file():
+            continue
+        if not path.resolve().is_relative_to(source):
+            logger.debug("Skipping %s: it resolves outside the source", path)
+            continue
+        files.append((path.relative_to(source).as_posix(), path))
+    return files
 
 
 def run_deploy(
@@ -210,7 +218,6 @@ def run_deploy(
     config_path: Optional[Path] = None,
     channels: Optional[List[str]] = None,
     dry_run: bool = False,
-    allow_public: bool = False,
     registry: Optional[DeployRegistry] = None,
 ) -> bool:
     """Run every selected channel and report whether all of them succeeded."""
@@ -238,9 +245,7 @@ def run_deploy(
         logger.error("Deploy: no deploy channels are configured and enabled")
         return False
 
-    context = DeployContext(
-        docs_root=docs_root, dry_run=dry_run, allow_public=allow_public
-    )
+    context = DeployContext(docs_root=docs_root, dry_run=dry_run)
     ok = True
     for target in targets:
         plugin = registry.get(target.plugin)

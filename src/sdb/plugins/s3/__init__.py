@@ -6,10 +6,10 @@ Cloudflare R2 is the reference deployment: it speaks the S3 API, serves
 path-style addressing, and accepts the region ``auto``. Any S3-compatible
 store works, and nothing here special-cases one.
 
-The channel is private by default. It sends no object ACL, so the only way an
-object becomes reachable is a bucket exposure configured on the provider side,
-and a ``visibility: public`` request is refused unless the operator confirms it
-with ``--allow-public``. Endpoint and credentials come from the environment.
+The channel writes private objects. It sends no object ACL, so an object is
+reachable only if the bucket itself is exposed, which is a provider setting
+outside this tool; the channel never makes one public. Endpoint and credentials
+come from the environment.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from ...deploy import (
     resolve_source,
 )
 from .client import S3Client, S3Error
+from .signer import MAX_PRESIGN_EXPIRES
 
 logger = logging.getLogger(__name__)
 
@@ -51,17 +52,6 @@ class S3DeployPlugin:
             raise DeployError(
                 f"deploy channel {target.name!r}: options.bucket is required"
             )
-        visibility = options.get("visibility", "private")
-        if visibility not in ("private", "public"):
-            raise DeployError(
-                f"deploy channel {target.name!r}: visibility must be "
-                f"'private' or 'public', got {visibility!r}"
-            )
-        if visibility == "public" and not context.allow_public:
-            raise DeployError(
-                f"deploy channel {target.name!r} asks for visibility: public; "
-                f"pass --allow-public to confirm the destination is meant to be reachable"
-            )
         if options.get("delete", False) and not str(options.get("prefix") or "").strip("/"):
             if not options.get("allow_unscoped_delete", False):
                 raise DeployError(
@@ -75,7 +65,7 @@ class S3DeployPlugin:
                 f"or the {DEFAULT_ENDPOINT_ENV} environment variable"
             )
         _credentials(options)
-        resolve_source(context.docs_root, target.source)
+        source = resolve_source(context.docs_root, target.source)
         auth = options.get("auth") or {}
         if not isinstance(auth, dict):
             raise DeployError(
@@ -91,11 +81,25 @@ class S3DeployPlugin:
             raise DeployError(
                 f"deploy channel {target.name!r}: auth.mode access needs auth.domain"
             )
-        if mode == "presigned" and not auth.get("objects"):
-            raise DeployError(
-                f"deploy channel {target.name!r}: auth.mode presigned needs an "
-                f"explicit objects list, since a website is not presigned per object"
-            )
+        if mode == "presigned":
+            objects = auth.get("objects") or []
+            if not objects:
+                raise DeployError(
+                    f"deploy channel {target.name!r}: auth.mode presigned needs an "
+                    f"explicit objects list, since a website is not presigned per object"
+                )
+            # A presigned URL is reported as a result, so an object that is not in
+            # the source would become a link that resolves to nothing. Refuse it
+            # here rather than after the upload.
+            for relative in objects:
+                candidate = source / str(relative).lstrip("/")
+                inside = candidate.resolve().is_relative_to(source)
+                if not inside or not candidate.is_file():
+                    raise DeployError(
+                        f"deploy channel {target.name!r}: presigned object is not a "
+                        f"file in the source: {relative!r}"
+                    )
+            _presign_seconds(target.name, auth)
 
     def deploy(self, target: DeployTarget, context: DeployContext) -> DeployResult:
         options = target.options
@@ -135,12 +139,12 @@ class S3DeployPlugin:
                 client.delete_object(key)
                 result.deleted += 1
 
-        result.urls = _client_urls(client, options, prefix)
+        result.urls = _client_urls(client, target.name, options, prefix)
         return result
 
 
 def _client_urls(
-    client: S3Client, options: Dict[str, Any], prefix: str
+    client: S3Client, name: str, options: Dict[str, Any], prefix: str
 ) -> List[str]:
     auth = options.get("auth") or {}
     mode = auth.get("mode", "none")
@@ -149,12 +153,28 @@ def _client_urls(
     domain = str(auth.get("domain") or "").rstrip("/")
     if mode == "access":
         return [f"{domain}/"] if domain else []
-    expires = int(auth.get("expires_seconds") or DEFAULT_PRESIGN_SECONDS)
+    expires = _presign_seconds(name, auth)
     urls = []
     for relative in auth.get("objects") or []:
         key = _object_key(prefix, str(relative).lstrip("/"))
         urls.append(client.presign_get(key, expires))
     return urls
+
+
+def _presign_seconds(name: str, auth: Dict[str, Any]) -> int:
+    value = auth.get("expires_seconds", DEFAULT_PRESIGN_SECONDS)
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        raise DeployError(
+            f"deploy channel {name!r}: expires_seconds must be an integer, got {value!r}"
+        ) from None
+    if not 1 <= seconds <= MAX_PRESIGN_EXPIRES:
+        raise DeployError(
+            f"deploy channel {name!r}: expires_seconds must be between 1 and "
+            f"{MAX_PRESIGN_EXPIRES}, got {seconds}"
+        )
+    return seconds
 
 
 def _object_key(prefix: str, relative: str) -> str:

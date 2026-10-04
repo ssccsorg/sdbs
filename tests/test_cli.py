@@ -271,10 +271,9 @@ class TestDeployCommand:
             kwargs = mock_deploy.call_args.kwargs
             assert kwargs["channels"] is None
             assert kwargs["dry_run"] is False
-            assert kwargs["allow_public"] is False
 
     def test_deploy_channel_and_flags(self, tmp_path: Path) -> None:
-        """--channel, --dry-run, and --allow-public reach run_deploy."""
+        """--channel and --dry-run reach run_deploy."""
         docs_root = tmp_path / "docs"
         docs_root.mkdir()
         with patch("sdb.deploy.run_deploy") as mock_deploy:
@@ -286,14 +285,12 @@ class TestDeployCommand:
                     "--channel",
                     "private-docs",
                     "--dry-run",
-                    "--allow-public",
                 ]
             )
             assert code == 0
             kwargs = mock_deploy.call_args.kwargs
             assert kwargs["channels"] == ["private-docs"]
             assert kwargs["dry_run"] is True
-            assert kwargs["allow_public"] is True
 
     def test_deploy_failure_exit_code(self, tmp_path: Path) -> None:
         """A channel that fails makes the command exit non-zero."""

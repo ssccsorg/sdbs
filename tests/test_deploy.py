@@ -166,6 +166,17 @@ class TestRegistry:
         with pytest.raises(DeployError):
             DeployRegistry([NoDeploy()])
 
+    def test_a_non_string_name_is_rejected(self) -> None:
+        class Numeric:
+            name = 7
+
+            def validate(self, target, context): ...
+
+            def deploy(self, target, context): ...
+
+        with pytest.raises(DeployError):
+            DeployRegistry([Numeric()])
+
     def test_entry_point_plugins_are_discovered(self, monkeypatch) -> None:
         class External(DeployPlugin):
             name = "external"
@@ -187,6 +198,29 @@ class TestRegistry:
         registry = DeployRegistry.discover()
         assert "external" in registry.names()
         assert isinstance(registry.get("external"), External)
+
+    def test_an_entry_point_that_cannot_be_built_is_skipped(self, monkeypatch) -> None:
+        class NeedsArguments(DeployPlugin):
+            name = "needs-arguments"
+
+            def __init__(self, required): ...
+
+            def deploy(self, target, context): ...
+
+        class FakeEntryPoint:
+            name = "needs-arguments"
+
+            def load(self):
+                return NeedsArguments
+
+        import sdb.deploy as deploy_module
+
+        monkeypatch.setattr(
+            deploy_module, "entry_points", lambda group: [FakeEntryPoint()]
+        )
+        # The failing entry point does not stop discovery of the others.
+        registry = DeployRegistry.discover()
+        assert "needs-arguments" not in registry.names()
 
 
 class TestRunDeploy:
@@ -270,16 +304,62 @@ class TestS3Validation:
         with pytest.raises(DeployError):
             plugin.validate(_s3_target({}), DeployContext(docs_root=tmp_path))
 
-    def test_public_visibility_needs_confirmation(self, tmp_path: Path, monkeypatch) -> None:
+    def test_a_presigned_object_must_be_in_the_source(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
         monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
         monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
-        (tmp_path / "_site").mkdir()
+        site = tmp_path / "_site"
+        site.mkdir()
+        (site / "present.pdf").write_text("pdf", encoding="utf-8")
         plugin = S3DeployPlugin()
-        target = _s3_target({"bucket": "b", "visibility": "public"})
+        context = DeployContext(docs_root=tmp_path)
+        plugin.validate(
+            _s3_target(
+                {"bucket": "b", "auth": {"mode": "presigned", "objects": ["present.pdf"]}}
+            ),
+            context,
+        )
+        # Absent: refused, since the reported URL would resolve to nothing.
         with pytest.raises(DeployError):
-            plugin.validate(target, DeployContext(docs_root=tmp_path))
-        plugin.validate(target, DeployContext(docs_root=tmp_path, allow_public=True))
+            plugin.validate(
+                _s3_target(
+                    {"bucket": "b", "auth": {"mode": "presigned", "objects": ["missing.pdf"]}}
+                ),
+                context,
+            )
+        # Outside the source: refused.
+        with pytest.raises(DeployError):
+            plugin.validate(
+                _s3_target(
+                    {"bucket": "b", "auth": {"mode": "presigned", "objects": ["../escape.pdf"]}}
+                ),
+                context,
+            )
+
+    def test_presign_seconds_must_be_in_range(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
+        site = tmp_path / "_site"
+        site.mkdir()
+        (site / "a.pdf").write_text("pdf", encoding="utf-8")
+        plugin = S3DeployPlugin()
+        context = DeployContext(docs_root=tmp_path)
+        base = {"mode": "presigned", "objects": ["a.pdf"]}
+        with pytest.raises(DeployError):
+            plugin.validate(
+                _s3_target({"bucket": "b", "auth": {**base, "expires_seconds": 0}}),
+                context,
+            )
+        with pytest.raises(DeployError):
+            plugin.validate(
+                _s3_target({"bucket": "b", "auth": {**base, "expires_seconds": "soon"}}),
+                context,
+            )
+        plugin.validate(
+            _s3_target({"bucket": "b", "auth": {**base, "expires_seconds": 3600}}),
+            context,
+        )
 
     def test_a_missing_endpoint_is_rejected(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.delenv("S3_ENDPOINT", raising=False)
@@ -322,7 +402,9 @@ class TestS3Validation:
         monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
         monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
         monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
-        (tmp_path / "_site").mkdir()
+        site = tmp_path / "_site"
+        site.mkdir()
+        (site / "a.pdf").write_text("pdf", encoding="utf-8")
         plugin = S3DeployPlugin()
         target = _s3_target(
             {"bucket": "b", "auth": {"mode": "presigned", "objects": ["a.pdf"]}}
@@ -392,6 +474,19 @@ class TestHelpers:
         (tmp_path / "sub" / "c.txt").write_text("c", encoding="utf-8")
         files = iter_source_files(tmp_path)
         assert [relative for relative, _ in files] == ["a.txt", "b.txt", "sub/c.txt"]
+
+    def test_iter_source_files_skips_a_link_outside_the_source(self, tmp_path: Path) -> None:
+        source = tmp_path / "site"
+        source.mkdir()
+        (source / "inside.txt").write_text("x", encoding="utf-8")
+        outside = tmp_path / "outside.txt"
+        outside.write_text("secret", encoding="utf-8")
+        try:
+            (source / "link.txt").symlink_to(outside)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks are not available here")
+        files = iter_source_files(source)
+        assert [relative for relative, _ in files] == ["inside.txt"]
 
 
 class TestS3Client:
