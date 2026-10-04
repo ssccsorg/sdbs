@@ -313,11 +313,21 @@ class TestS3Validation:
         monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
         (tmp_path / "_site").mkdir()
         plugin = S3DeployPlugin()
-        target = _s3_target(
-            {"bucket": "b", "auth": {"mode": "presigned", "domain": "https://d"}}
-        )
+        target = _s3_target({"bucket": "b", "auth": {"mode": "presigned"}})
         with pytest.raises(DeployError):
             plugin.validate(target, DeployContext(docs_root=tmp_path))
+
+    def test_presigned_needs_no_domain(self, tmp_path: Path, monkeypatch) -> None:
+        """A presigned URL is minted on the store endpoint, so no domain is used."""
+        monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "k")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s")
+        (tmp_path / "_site").mkdir()
+        plugin = S3DeployPlugin()
+        target = _s3_target(
+            {"bucket": "b", "auth": {"mode": "presigned", "objects": ["a.pdf"]}}
+        )
+        plugin.validate(target, DeployContext(docs_root=tmp_path))
 
     def test_access_without_a_domain_is_rejected(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)

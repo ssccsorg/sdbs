@@ -87,9 +87,9 @@ class S3DeployPlugin:
                 f"deploy channel {target.name!r}: auth.mode must be one of "
                 f"none, access, presigned"
             )
-        if mode in ("access", "presigned") and not auth.get("domain"):
+        if mode == "access" and not auth.get("domain"):
             raise DeployError(
-                f"deploy channel {target.name!r}: auth.mode {mode} needs auth.domain"
+                f"deploy channel {target.name!r}: auth.mode access needs auth.domain"
             )
         if mode == "presigned" and not auth.get("objects"):
             raise DeployError(

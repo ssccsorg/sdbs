@@ -99,7 +99,7 @@ The `auth` block records how a client reaches the deployed tree.
 
 - `mode: none` uploads and reports nothing.
 - `mode: access` reports the `domain`, which is expected to sit behind Cloudflare Access. Access gates every request at the edge and sets a session cookie, so a website's relative links keep working and a reader authenticates once in a browser. This is the fit for a private site.
-- `mode: presigned` mints a time-limited GET URL for each path in `objects` and needs `domain` and `expires_seconds`. This fits a single file, since each object needs its own signature and a page's relative links are not presigned.
+- `mode: presigned` mints a time-limited GET URL for each path in `objects`, valid for `expires_seconds`, on the store endpoint. It needs no domain and fits a single file, since each object needs its own signature and a page's relative links are not presigned.
 
 `delete: true` mirrors the source by removing remote keys absent from it, and needs a `prefix`, or an explicit `allow_unscoped_delete`, because a delete at the bucket root would remove every object outside the source.
 
