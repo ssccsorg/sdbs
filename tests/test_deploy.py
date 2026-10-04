@@ -86,6 +86,36 @@ class TestManifest:
         with pytest.raises(DeployError):
             load_manifest(path)
 
+    def test_a_well_formed_interface_is_accepted(self, tmp_path: Path) -> None:
+        path = tmp_path / "manifest.yml"
+        path.write_text(
+            "manifest: 1\nname: s3\ncommand: [python3]\n"
+            "interface:\n  artifact: directory\n  options:\n    - bucket\n",
+            encoding="utf-8",
+        )
+        assert load_manifest(path).name == "s3"
+
+    def test_an_interface_that_is_not_a_mapping_is_rejected(self, tmp_path: Path) -> None:
+        path = tmp_path / "manifest.yml"
+        path.write_text(
+            "manifest: 1\nname: s3\ncommand: [python3]\ninterface: bucket\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(DeployError):
+            load_manifest(path)
+
+    def test_an_interface_options_entry_that_is_not_a_string_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "manifest.yml"
+        path.write_text(
+            "manifest: 1\nname: s3\ncommand: [python3]\n"
+            "interface:\n  options:\n    - 3\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(DeployError):
+            load_manifest(path)
+
 
 class TestDiscovery:
     def test_a_plugin_under_the_project_is_found(self, tmp_path: Path) -> None:

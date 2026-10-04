@@ -85,6 +85,7 @@ def load_manifest(manifest_path: Path) -> PluginManifest:
     env = raw.get("env") or {}
     if not isinstance(env, dict) or not all(isinstance(k, str) for k in env):
         raise DeployError(f"{manifest_path}: 'env' must be a mapping")
+    _validate_interface(raw.get("interface"), manifest_path)
     return PluginManifest(
         name=name,
         command=list(command),
@@ -93,6 +94,31 @@ def load_manifest(manifest_path: Path) -> PluginManifest:
         description=str(raw.get("description") or ""),
         path=manifest_path,
     )
+
+
+def _validate_interface(interface: Any, manifest_path: Path) -> None:
+    """Check the optional ``interface`` block a manifest declares.
+
+    The block is metadata for a human, and the engine reads nothing from it to
+    run a plugin. Rejecting a malformed one keeps the declaration honest, so a
+    plugin author learns of a typo here rather than from a reader who trusted a
+    field that said nothing.
+    """
+    if interface is None:
+        return
+    if not isinstance(interface, dict):
+        raise DeployError(f"{manifest_path}: 'interface' must be a mapping")
+    artifact = interface.get("artifact")
+    if artifact is not None and not isinstance(artifact, str):
+        raise DeployError(f"{manifest_path}: interface.artifact must be a string")
+    options = interface.get("options")
+    if options is not None and (
+        not isinstance(options, list)
+        or not all(isinstance(option, str) for option in options)
+    ):
+        raise DeployError(
+            f"{manifest_path}: interface.options must be a list of strings"
+        )
 
 
 def plugin_dirs(project_root: Path, extra: Optional[List[str]] = None) -> List[Path]:
