@@ -492,7 +492,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "deploy":
         _setup_logging()
         from .deploy import DeployRegistry, run_deploy
-        from .plugins import builtin_plugins
+        from sdb_plugins import builtin_plugins
 
         docs_root = args.docs_root.resolve()
         _require_docs_root(docs_root, "deploy")

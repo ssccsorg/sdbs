@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ...deploy import (
+from sdb.deploy import (
     DeployContext,
     DeployError,
     DeployResult,

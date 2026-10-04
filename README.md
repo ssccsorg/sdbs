@@ -71,7 +71,7 @@ Every command that takes a docs root stops when the path is not a directory, and
 
 ## External Deploy Channels
 
-`sdb deploy` runs the channels declared under `deploy:` in `build.yml`. A channel names a plugin and a source directory and moves that source to an external store. The engine lives in `src/sdb/deploy.py` and knows only the shape a channel satisfies: a `name`, a `validate`, and a `deploy`. It resolves channels by duck typing, so an external package provides one without importing sdbs, and discovers it through the `sdb.deploy` entry point group. The channels sdbs ships live under `src/sdb/plugins/`, and the command line composes them with the discovered ones, so the engine imports no channel itself.
+`sdb deploy` runs the channels declared under `deploy:` in `build.yml`. A channel names a plugin and a source directory and moves that source to an external store. The engine lives in `src/sdb/deploy.py` and knows only the shape a channel satisfies: a `name`, a `validate`, and a `deploy`. It resolves channels by duck typing, so an external package provides one without importing sdbs, and discovers it through the `sdb.deploy` entry point group. The channels sdbs ships live under `plugins/`, and the command line composes them with the discovered ones, so the engine imports no channel itself.
 
 Deploy runs as its own invocation, separate from the render. The render container executes project-controlled Quarto and Jupyter code, so it stays free of upload credentials; the deploy invocation receives the credentials and walks the built artifact without running project code.
 

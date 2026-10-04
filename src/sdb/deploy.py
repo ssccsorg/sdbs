@@ -5,9 +5,9 @@ A deploy channel moves a built tree to an external store. The engine knows the
 protocol a channel satisfies and nothing about any store: a channel is anything
 with a ``name``, a ``validate``, and a ``deploy``, checked by duck typing, so an
 external package provides one without importing or subclassing sdbs. The
-``sdb.deploy`` entry point group is how those external channels are discovered;
-the channels sdbs ships under :mod:`sdb.plugins` are registered by the command
-line, which is the composition root.
+the ``sdb.deploy`` entry point group is how those external channels are discovered;
+the channels sdbs ships, under :mod:`sdb_plugins` at the repository root, are
+registered by the command line, which is the composition root.
 
 ``deploy`` runs as its own invocation, apart from the render. The render
 container executes project-controlled Quarto and Jupyter code, so it stays free

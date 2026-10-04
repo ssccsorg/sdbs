@@ -15,7 +15,7 @@ from typing import List, Optional
 
 import requests
 
-from ...deploy import DeployError
+from sdb.deploy import DeployError
 from . import signer as s3sig
 
 

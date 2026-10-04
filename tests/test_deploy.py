@@ -26,8 +26,8 @@ from sdb.deploy import (
     load_deploy_targets,
     run_deploy,
 )
-from sdb.plugins import builtin_plugins
-from sdb.plugins.s3 import S3DeployPlugin, _object_key
+from sdb_plugins import builtin_plugins
+from sdb_plugins.s3 import S3DeployPlugin, _object_key
 
 ENDPOINT = "https://account.example.com"
 REGION = "region-1"
@@ -68,10 +68,10 @@ class _RecordingPlugin(DeployPlugin):
 
 class TestEngineSeparation:
     def test_the_engine_does_not_import_a_channel(self) -> None:
-        """Importing sdb.deploy must not pull any sdb.plugins module in."""
+        """Importing sdb.deploy must not pull any sdb_plugins module in."""
         code = (
             "import sys, sdb.deploy\n"
-            "loaded = [m for m in sys.modules if m.startswith('sdb.plugins')]\n"
+            "loaded = [m for m in sys.modules if m.startswith('sdb_plugins')]\n"
             "assert not loaded, loaded\n"
         )
         subprocess.run(
@@ -494,7 +494,7 @@ class TestS3Client:
     def test_a_transport_error_becomes_a_deploy_error(self, monkeypatch) -> None:
         import requests
 
-        from sdb.plugins.s3.client import S3Client, S3Error
+        from sdb_plugins.s3.client import S3Client, S3Error
 
         client = S3Client(
             endpoint="https://example.test",
@@ -507,14 +507,14 @@ class TestS3Client:
         def boom(*args, **kwargs):
             raise requests.ConnectionError("no route to host")
 
-        monkeypatch.setattr("sdb.plugins.s3.client.requests.request", boom)
+        monkeypatch.setattr("sdb_plugins.s3.client.requests.request", boom)
         with pytest.raises(S3Error):
             client.put_object("a.txt", b"data")
         # The engine recognizes the failure from its own error type.
         assert issubclass(S3Error, DeployError)
 
     def test_list_keys_parses_a_list_response(self) -> None:
-        from sdb.plugins.s3.client import _parse_list_keys, _parse_next_token
+        from sdb_plugins.s3.client import _parse_list_keys, _parse_next_token
 
         payload = (
             b'<?xml version="1.0" encoding="UTF-8"?>'

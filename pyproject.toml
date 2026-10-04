@@ -28,7 +28,7 @@ Documentation = "https://github.com/ssccsorg/sdbs"
 sdb = "sdb.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "plugins/src"]
 
 [tool.setuptools.package-data]
 "sdb" = ["py.typed"]
