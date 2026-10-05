@@ -59,7 +59,7 @@ class PluginManifest:
     path: Optional[Path] = None
     # The option names the manifest declares, or None when it declares none and
     # therefore accepts any option.
-    options: Optional[Tuple[str, ...]] = None
+    declared_options: Optional[Tuple[str, ...]] = None
 
 
 @dataclass
@@ -100,7 +100,7 @@ def load_manifest(manifest_path: Path) -> PluginManifest:
         env={str(k): str(v) for k, v in env.items()},
         description=str(raw.get("description") or ""),
         path=manifest_path,
-        options=declared_options,
+        declared_options=declared_options,
     )
 
 
@@ -196,6 +196,11 @@ def load_activations(config_path: Path) -> List[Activation]:
             raise DeployError(
                 f"{config_path}: deploy entry {index} ({plugin}): options must be a mapping"
             )
+        if not all(isinstance(name, str) for name in options):
+            raise DeployError(
+                f"{config_path}: deploy entry {index} ({plugin}): "
+                "option names must be strings"
+            )
         activations.append(
             Activation(
                 plugin=plugin,
@@ -271,9 +276,9 @@ def _undeclared_options(
     options: Dict[str, Any], manifest: PluginManifest
 ) -> List[str]:
     """The activation options the manifest does not declare, if it declares any."""
-    if manifest.options is None:
+    if manifest.declared_options is None:
         return []
-    return sorted(name for name in options if name not in manifest.options)
+    return sorted(name for name in options if name not in manifest.declared_options)
 
 
 def run_deploy(
@@ -290,6 +295,9 @@ def run_deploy(
     A plugin that is named but not found is skipped unless it is required. A
     plugin that is found and fails fails the run.
     """
+    if timeout <= 0:
+        logger.error("Deploy: the timeout must be greater than zero, got %g", timeout)
+        return False
     config_path = config_path or (project_root / CONFIG_NAME)
     if not config_path.is_file():
         logger.info("Deploy: no %s under %s; nothing to do", CONFIG_NAME, project_root)
@@ -336,7 +344,7 @@ def run_deploy(
                 "Deploy: plugin %r does not declare option(s): %s (it declares: %s)",
                 activation.plugin,
                 ", ".join(undeclared),
-                ", ".join(manifest.options or ()) or "none",
+                ", ".join(manifest.declared_options or ()) or "none",
             )
             ok = False
             continue

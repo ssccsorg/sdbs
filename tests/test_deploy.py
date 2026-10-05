@@ -120,7 +120,7 @@ class TestManifest:
             "interface:\n  options:\n    - bucket\n    - prefix\n",
             encoding="utf-8",
         )
-        assert load_manifest(path).options == ("bucket", "prefix")
+        assert load_manifest(path).declared_options == ("bucket", "prefix")
 
     def test_a_manifest_without_an_interface_declares_no_options(
         self, tmp_path: Path
@@ -129,7 +129,7 @@ class TestManifest:
         path.write_text(
             "manifest: 1\nname: s3\ncommand: [python3]\n", encoding="utf-8"
         )
-        assert load_manifest(path).options is None
+        assert load_manifest(path).declared_options is None
 
     def test_an_interface_that_is_not_a_mapping_is_rejected(self, tmp_path: Path) -> None:
         path = tmp_path / "manifest.yml"
@@ -220,6 +220,21 @@ class TestActivations:
     def test_a_missing_artifact_is_rejected(self, tmp_path: Path) -> None:
         config = tmp_path / "_deploy.yml"
         config.write_text("deploy:\n  - plugin: s3\n", encoding="utf-8")
+        with pytest.raises(DeployError):
+            load_activations(config)
+
+    def test_a_non_string_option_name_is_rejected(self, tmp_path: Path) -> None:
+        # A name that is not a string reaches the report as a value the join
+        # cannot take, so it is refused where the file is read.
+        config = tmp_path / "_deploy.yml"
+        config.write_text(
+            "deploy:\n"
+            "  - plugin: s3\n"
+            "    artifact: docs/_site\n"
+            "    options:\n"
+            "      7: x\n",
+            encoding="utf-8",
+        )
         with pytest.raises(DeployError):
             load_activations(config)
 
@@ -328,6 +343,12 @@ class TestTimeout:
         root = _make_project(tmp_path, self.CONFIG)
         _make_plugin(root / "plugins", "s3", _OK_PLUGIN)
         assert run_deploy(root, timeout=30) is True
+
+    def test_a_non_positive_timeout_fails(self, tmp_path: Path) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        plugin = _make_plugin(root / "plugins", "s3", _OK_PLUGIN)
+        assert run_deploy(root, timeout=0) is False
+        assert not (plugin / "request.json").exists()
 
 
 class TestEngineIsolation:
