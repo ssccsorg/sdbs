@@ -6,12 +6,15 @@ project's activation, and the driver that runs a plugin as a subprocess.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 import sdb.deploy
 from sdb.deploy import (
@@ -49,6 +52,20 @@ def _write_manifest(directory: Path, name: str, command: list[str], extra: str =
 def _make_plugin(plugins_root: Path, name: str, script: str) -> Path:
     directory = plugins_root / name
     _write_manifest(directory, name, ["python3", "run.py"])
+    (directory / "run.py").write_text(script, encoding="utf-8")
+    return directory
+
+
+def _make_declaring_plugin(
+    plugins_root: Path, name: str, script: str, options: list[str] | None
+) -> Path:
+    """A plugin whose manifest declares, or does not declare, the options it takes."""
+    directory = plugins_root / name
+    extra = ""
+    if options is not None:
+        declared = "".join(f"    - {option}\n" for option in options)
+        extra = f"interface:\n  options:\n{declared}"
+    _write_manifest(directory, name, ["python3", "run.py"], extra=extra)
     (directory / "run.py").write_text(script, encoding="utf-8")
     return directory
 
@@ -98,6 +115,24 @@ class TestManifest:
             encoding="utf-8",
         )
         assert load_manifest(path).name == "s3"
+
+    def test_declared_options_are_captured(self, tmp_path: Path) -> None:
+        path = tmp_path / "manifest.yml"
+        path.write_text(
+            "manifest: 1\nname: s3\ncommand: [python3]\n"
+            "interface:\n  options:\n    - bucket\n    - prefix\n",
+            encoding="utf-8",
+        )
+        assert load_manifest(path).declared_options == ("bucket", "prefix")
+
+    def test_a_manifest_without_an_interface_declares_no_options(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "manifest.yml"
+        path.write_text(
+            "manifest: 1\nname: s3\ncommand: [python3]\n", encoding="utf-8"
+        )
+        assert load_manifest(path).declared_options is None
 
     def test_an_interface_that_is_not_a_mapping_is_rejected(self, tmp_path: Path) -> None:
         path = tmp_path / "manifest.yml"
@@ -191,6 +226,21 @@ class TestActivations:
         with pytest.raises(DeployError):
             load_activations(config)
 
+    def test_a_non_string_option_name_is_rejected(self, tmp_path: Path) -> None:
+        # A name that is not a string reaches the report as a value the join
+        # cannot take, so it is refused where the file is read.
+        config = tmp_path / "_deploy.yml"
+        config.write_text(
+            "deploy:\n"
+            "  - plugin: s3\n"
+            "    artifact: docs/_site\n"
+            "    options:\n"
+            "      7: x\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(DeployError):
+            load_activations(config)
+
 
 class TestRunDeploy:
     CONFIG = (
@@ -245,6 +295,120 @@ class TestRunDeploy:
         run_deploy(root, dry_run=False)
         request = json.loads((plugin / "request.json").read_text(encoding="utf-8"))
         assert request["dry_run"] is False
+
+
+class TestDeclaredOptions:
+    """An activation is checked against the options its manifest declares."""
+
+    CONFIG = (
+        "deploy:\n"
+        "  - plugin: s3\n"
+        "    artifact: docs/_site\n"
+        "    options:\n"
+        "      bucket: b\n"
+    )
+
+    def test_an_undeclared_option_fails_without_invoking_the_plugin(
+        self, tmp_path: Path
+    ) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        plugin = _make_declaring_plugin(root / "plugins", "s3", _OK_PLUGIN, ["prefix"])
+        assert run_deploy(root) is False
+        assert not (plugin / "request.json").exists()
+
+    def test_a_declared_option_runs(self, tmp_path: Path) -> None:
+        config = self.CONFIG.replace("bucket: b", "prefix: p")
+        root = _make_project(tmp_path, config)
+        _make_declaring_plugin(root / "plugins", "s3", _OK_PLUGIN, ["prefix"])
+        assert run_deploy(root) is True
+
+    def test_a_manifest_that_declares_no_options_accepts_any(self, tmp_path: Path) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        _make_declaring_plugin(root / "plugins", "s3", _OK_PLUGIN, None)
+        assert run_deploy(root) is True
+
+
+class TestTimeout:
+    CONFIG = (
+        "deploy:\n"
+        "  - plugin: s3\n"
+        "    artifact: docs/_site\n"
+        "    options:\n"
+        "      bucket: b\n"
+    )
+
+    def test_a_plugin_that_does_not_return_fails(self, tmp_path: Path) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        _make_plugin(root / "plugins", "s3", "import time\ntime.sleep(30)\n")
+        assert run_deploy(root, timeout=0.5) is False
+
+    def test_a_plugin_that_returns_within_the_limit_runs(self, tmp_path: Path) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        _make_plugin(root / "plugins", "s3", _OK_PLUGIN)
+        assert run_deploy(root, timeout=30) is True
+
+    def test_a_non_positive_timeout_fails(self, tmp_path: Path) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        plugin = _make_plugin(root / "plugins", "s3", _OK_PLUGIN)
+        assert run_deploy(root, timeout=0) is False
+        assert not (plugin / "request.json").exists()
+
+
+class TestBrokenPlugin:
+    """A plugin that cannot be read is reported, and the others still run."""
+
+    CONFIG = (
+        "deploy:\n"
+        "  - plugin: good\n"
+        "    artifact: docs/_site\n"
+        "    options:\n"
+        "      bucket: b\n"
+    )
+
+    _BROKEN = "manifest: 2\nname: broken\ncommand: [python3]\n"
+
+    def _add_broken(self, root: Path) -> None:
+        directory = root / "plugins" / "broken"
+        directory.mkdir(parents=True)
+        (directory / "manifest.yml").write_text(self._BROKEN, encoding="utf-8")
+
+    def test_a_broken_manifest_does_not_stop_the_others(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        _make_plugin(root / "plugins", "good", _OK_PLUGIN)
+        self._add_broken(root)
+        with caplog.at_level(logging.WARNING, logger="sdb.deploy"):
+            assert run_deploy(root, dry_run=True) is True
+        assert any("broken" in record.getMessage() for record in caplog.records)
+
+    def test_a_required_activation_that_names_a_broken_plugin_fails(
+        self, tmp_path: Path
+    ) -> None:
+        config = self.CONFIG.replace("plugin: good", "plugin: broken\n    require: true")
+        root = _make_project(tmp_path, config)
+        self._add_broken(root)
+        assert run_deploy(root) is False
+
+
+class TestDocumentedManifest:
+    """The manifest the README shows is the one the reference plugin carries."""
+
+    def test_the_readme_example_is_the_reference_manifest(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        shown = next(
+            block
+            for block in (
+                yaml.safe_load(text)
+                for text in re.findall(r"```yaml\n(.*?)```", readme, re.DOTALL)
+            )
+            if isinstance(block, dict) and "manifest" in block
+        )
+        carried = yaml.safe_load(
+            (root / "plugins" / "s3" / "manifest.yml").read_text(encoding="utf-8")
+        )
+        assert shown == carried
 
 
 class TestEngineIsolation:

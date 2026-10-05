@@ -22,6 +22,7 @@ from pathlib import Path
 from sdb import __version__
 
 from . import build as build_module
+from . import deploy as deploy_module
 from . import init as init_module
 
 
@@ -276,7 +277,8 @@ def main(argv: list[str] | None = None) -> None:
         description="Read '_deploy.yml' in the project root and run each plugin it "
         "names. A plugin is an external tool with a manifest.yml at its root, found "
         "on the plugin path (SDB_PLUGIN_PATH, then <root>/plugins). A plugin that is "
-        "named but not found is skipped unless the activation sets require: true. "
+        "named but not found is skipped unless the activation sets require: true, "
+        "and an option the manifest does not declare fails the run. "
         "sdbs carries no plugin code.\n\n"
         "The endpoint, region, and credentials come from the environment, so deploy "
         "runs as its own step from the render, which executes project code.",
@@ -309,6 +311,12 @@ def main(argv: list[str] | None = None) -> None:
     deploy_parser.add_argument(
         "--require-all", action="store_true",
         help="Fail when an activated plugin is not found",
+    )
+    deploy_parser.add_argument(
+        "--timeout", type=float, default=deploy_module.DEFAULT_TIMEOUT,
+        metavar="SECONDS",
+        help="Seconds to allow each plugin before failing "
+        f"(default: {deploy_module.DEFAULT_TIMEOUT:g})",
     )
 
     # --- plugins (introspect the plugin path) ---
@@ -515,26 +523,25 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.command == "deploy":
         _setup_logging()
-        from .deploy import run_deploy
 
         root = args.root.resolve()
         _require_docs_root(root, "deploy")
-        success = run_deploy(
+        success = deploy_module.run_deploy(
             root,
             config_path=args.config,
             dry_run=args.dry_run,
             require_all=args.require_all,
             extra_plugin_dirs=args.plugin_path,
+            timeout=args.timeout,
         )
         sys.exit(0 if success else 1)
 
     elif args.command == "plugins":
         _setup_logging()
-        from .deploy import list_plugins
 
         root = args.root.resolve()
         _require_docs_root(root, "plugins")
-        found = list_plugins(root, args.plugin_path)
+        found = deploy_module.list_plugins(root, args.plugin_path)
         if not found:
             print("No plugins found on the plugin path.")
             sys.exit(0)

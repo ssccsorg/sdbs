@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from sdb.cli import main
+from sdb.deploy import DEFAULT_TIMEOUT
 
 
 def _run_main(argv: list[str]) -> int:
@@ -270,6 +271,7 @@ class TestDeployCommand:
             kwargs = mock_deploy.call_args.kwargs
             assert kwargs["dry_run"] is False
             assert kwargs["require_all"] is False
+            assert kwargs["timeout"] == DEFAULT_TIMEOUT
 
     def test_deploy_flags(self, tmp_path: Path) -> None:
         root = tmp_path / "project"
@@ -277,13 +279,23 @@ class TestDeployCommand:
         with patch("sdb.deploy.run_deploy") as mock_deploy:
             mock_deploy.return_value = True
             code = _run_main(
-                ["deploy", str(root), "--dry-run", "--require-all", "--plugin-path", "/x"]
+                [
+                    "deploy",
+                    str(root),
+                    "--dry-run",
+                    "--require-all",
+                    "--plugin-path",
+                    "/x",
+                    "--timeout",
+                    "120",
+                ]
             )
             assert code == 0
             kwargs = mock_deploy.call_args.kwargs
             assert kwargs["dry_run"] is True
             assert kwargs["require_all"] is True
             assert kwargs["extra_plugin_dirs"] == ["/x"]
+            assert kwargs["timeout"] == 120
 
     def test_deploy_failure_exit_code(self, tmp_path: Path) -> None:
         root = tmp_path / "project"

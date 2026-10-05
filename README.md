@@ -80,7 +80,12 @@ manifest: 1
 name: s3
 description: Upload an artifact directory to an S3-compatible object store
 command: [python3, __main__.py]
+interface:
+  artifact: directory
+  options: [bucket, prefix, endpoint, region, delete, allow_unscoped_delete, auth]
 ```
+
+`manifest` is the schema version, `name` is the name an activation refers to, and `command` is the program and its arguments. `env` is optional and is merged into the plugin's environment. `interface` is optional and states the kind of path the plugin takes in `artifact` and the option names it accepts in `options`; the manifest is the source of truth for what a plugin declares.
 
 The project that uses sdbs activates a plugin in `_deploy.yml` at its root:
 
@@ -98,7 +103,22 @@ deploy:
 
 `artifact` is resolved against the directory holding `_deploy.yml`. A named plugin that is not found is skipped, since a plugin is optional; set `require: true` on the activation, or pass `--require-all`, to make a missing plugin fail instead.
 
-The plugin path is the directories searched for manifests, in order, first match wins: the `--plugin-path` values, then `SDB_PLUGIN_PATH`, then `<root>/plugins`. An explicit location beats the convention, so a deployment that sets `SDB_PLUGIN_PATH` replaces a plugin the project ships under the same name, which is what lets the image supply a reference plugin and a consumer override it. `sdb plugins` lists what it finds.
+An activation option the manifest does not declare in `options` fails the run, so a typo is reported rather than passed to a plugin that ignores it. A manifest with no `interface`, or an `interface` with no `options`, declares nothing and accepts any option, while `options: []` declares that it takes none.
+
+Each plugin is given a bounded time to return, by default 900 seconds, which `--timeout` overrides.
+
+The plugin path is the directories searched for manifests, in order, first match wins: the `--plugin-path` values, then `SDB_PLUGIN_PATH`, then `<root>/plugins`. `<root>` is the directory passed to `sdb deploy`, so a project ships its own plugin at `<root>/plugins/<name>/manifest.yml`, beside the `_deploy.yml` that activates it:
+
+```
+docs/
+  _deploy.yml
+  _site/
+  plugins/
+    mychannel/
+      manifest.yml
+```
+
+A `--config` file elsewhere moves the activation and the artifact it names, while the local plugin directory stays with the root. A plugin is a direct child of one of those directories, and one whose manifest cannot be read is reported and skipped, so a broken plugin does not stop the others. An explicit location beats the convention, so a deployment that sets `SDB_PLUGIN_PATH` replaces a plugin the project ships under the same name, which is what lets the image supply a reference plugin and a consumer override it. `sdb plugins` lists what it finds.
 
 Across the process boundary the contract is one JSON request on the plugin's stdin and one JSON result on its stdout, with the exit code carrying success or failure:
 
@@ -106,6 +126,8 @@ Across the process boundary the contract is one JSON request on the plugin's std
 {"deploy": 1, "plugin": "s3", "artifact": "/abs/path", "options": {}, "dry_run": false}
 {"deploy": 1, "ok": true, "uploaded": 164, "deleted": 0, "urls": [], "message": ""}
 ```
+
+The engine reads `deploy`, `ok`, `uploaded`, `deleted`, `urls`, and `message` from the result, and logs each entry in `urls`.
 
 The endpoint, the region, and the credentials travel in the environment, never on the command line or in the request, so a provider's values and its secrets stay with the project that deploys.
 
@@ -126,7 +148,7 @@ The plugin signs its requests with the standard library rather than a cloud SDK.
 
 ### Writing a plugin
 
-A plugin is a program in any language. Put a `manifest.yml` at its root, read the one JSON request from stdin, write one JSON result to stdout, and exit non-zero on failure. The s3 plugin under `plugins/s3` is a complete example: `manifest.yml`, `__main__.py` for the stdio contract, and `channel.py` for the work, with `client.py` and `signer.py` beside them.
+A plugin is a program in any language. Put a `manifest.yml` at its root, read the one JSON request from stdin, write one JSON result to stdout, and exit non-zero on failure. The command runs with the plugin's own directory as its working directory, so a plugin may keep its modules beside its manifest and reach them by name. The s3 plugin under `plugins/s3` is a complete example: `manifest.yml`, `__main__.py` for the stdio contract, and `channel.py` for the work, with `client.py` and `signer.py` beside them.
 
 ## Pre-build Sequence
 
