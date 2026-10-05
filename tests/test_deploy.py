@@ -6,12 +6,15 @@ project's activation, and the driver that runs a plugin as a subprocess.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 import sdb.deploy
 from sdb.deploy import (
@@ -349,6 +352,63 @@ class TestTimeout:
         plugin = _make_plugin(root / "plugins", "s3", _OK_PLUGIN)
         assert run_deploy(root, timeout=0) is False
         assert not (plugin / "request.json").exists()
+
+
+class TestBrokenPlugin:
+    """A plugin that cannot be read is reported, and the others still run."""
+
+    CONFIG = (
+        "deploy:\n"
+        "  - plugin: good\n"
+        "    artifact: docs/_site\n"
+        "    options:\n"
+        "      bucket: b\n"
+    )
+
+    _BROKEN = "manifest: 2\nname: broken\ncommand: [python3]\n"
+
+    def _add_broken(self, root: Path) -> None:
+        directory = root / "plugins" / "broken"
+        directory.mkdir(parents=True)
+        (directory / "manifest.yml").write_text(self._BROKEN, encoding="utf-8")
+
+    def test_a_broken_manifest_does_not_stop_the_others(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        _make_plugin(root / "plugins", "good", _OK_PLUGIN)
+        self._add_broken(root)
+        with caplog.at_level(logging.WARNING, logger="sdb.deploy"):
+            assert run_deploy(root, dry_run=True) is True
+        assert any("broken" in record.getMessage() for record in caplog.records)
+
+    def test_a_required_activation_that_names_a_broken_plugin_fails(
+        self, tmp_path: Path
+    ) -> None:
+        config = self.CONFIG.replace("plugin: good", "plugin: broken\n    require: true")
+        root = _make_project(tmp_path, config)
+        self._add_broken(root)
+        assert run_deploy(root) is False
+
+
+class TestDocumentedManifest:
+    """The manifest the README shows is the one the reference plugin carries."""
+
+    def test_the_readme_example_is_the_reference_manifest(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        shown = next(
+            block
+            for block in (
+                yaml.safe_load(text)
+                for text in re.findall(r"```yaml\n(.*?)```", readme, re.DOTALL)
+            )
+            if isinstance(block, dict) and "manifest" in block
+        )
+        carried = yaml.safe_load(
+            (root / "plugins" / "s3" / "manifest.yml").read_text(encoding="utf-8")
+        )
+        assert shown == carried
 
 
 class TestEngineIsolation:

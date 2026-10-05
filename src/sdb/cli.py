@@ -22,6 +22,7 @@ from pathlib import Path
 from sdb import __version__
 
 from . import build as build_module
+from . import deploy as deploy_module
 from . import init as init_module
 
 
@@ -270,8 +271,6 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     # --- deploy (external plugins) ---
-    from .deploy import DEFAULT_TIMEOUT
-
     deploy_parser = subparsers.add_parser(
         "deploy",
         help="Run the external deploy plugins a project activates",
@@ -314,8 +313,10 @@ def main(argv: list[str] | None = None) -> None:
         help="Fail when an activated plugin is not found",
     )
     deploy_parser.add_argument(
-        "--timeout", type=float, default=DEFAULT_TIMEOUT, metavar="SECONDS",
-        help=f"Seconds to allow each plugin before failing (default: {DEFAULT_TIMEOUT:g})",
+        "--timeout", type=float, default=deploy_module.DEFAULT_TIMEOUT,
+        metavar="SECONDS",
+        help="Seconds to allow each plugin before failing "
+        f"(default: {deploy_module.DEFAULT_TIMEOUT:g})",
     )
 
     # --- plugins (introspect the plugin path) ---
@@ -522,11 +523,10 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.command == "deploy":
         _setup_logging()
-        from .deploy import run_deploy
 
         root = args.root.resolve()
         _require_docs_root(root, "deploy")
-        success = run_deploy(
+        success = deploy_module.run_deploy(
             root,
             config_path=args.config,
             dry_run=args.dry_run,
@@ -538,11 +538,10 @@ def main(argv: list[str] | None = None) -> None:
 
     elif args.command == "plugins":
         _setup_logging()
-        from .deploy import list_plugins
 
         root = args.root.resolve()
         _require_docs_root(root, "plugins")
-        found = list_plugins(root, args.plugin_path)
+        found = deploy_module.list_plugins(root, args.plugin_path)
         if not found:
             print("No plugins found on the plugin path.")
             sys.exit(0)

@@ -103,11 +103,11 @@ deploy:
 
 `artifact` is resolved against the directory holding `_deploy.yml`. A named plugin that is not found is skipped, since a plugin is optional; set `require: true` on the activation, or pass `--require-all`, to make a missing plugin fail instead.
 
-An activation option the manifest does not declare in `options` fails the run, so a typo is reported rather than passed to a plugin that ignores it.
+An activation option the manifest does not declare in `options` fails the run, so a typo is reported rather than passed to a plugin that ignores it. A manifest with no `interface`, or an `interface` with no `options`, declares nothing and accepts any option, while `options: []` declares that it takes none.
 
 Each plugin is given a bounded time to return, by default 900 seconds, which `--timeout` overrides.
 
-The plugin path is the directories searched for manifests, in order, first match wins: the `--plugin-path` values, then `SDB_PLUGIN_PATH`, then `<root>/plugins`. A plugin is a direct child of one of those directories. An explicit location beats the convention, so a deployment that sets `SDB_PLUGIN_PATH` replaces a plugin the project ships under the same name, which is what lets the image supply a reference plugin and a consumer override it. `sdb plugins` lists what it finds.
+The plugin path is the directories searched for manifests, in order, first match wins: the `--plugin-path` values, then `SDB_PLUGIN_PATH`, then `<root>/plugins`. A plugin is a direct child of one of those directories, and one whose manifest cannot be read is reported and skipped, so a broken plugin does not stop the others. An explicit location beats the convention, so a deployment that sets `SDB_PLUGIN_PATH` replaces a plugin the project ships under the same name, which is what lets the image supply a reference plugin and a consumer override it. `sdb plugins` lists what it finds.
 
 Across the process boundary the contract is one JSON request on the plugin's stdin and one JSON result on its stdout, with the exit code carrying success or failure:
 

@@ -57,8 +57,9 @@ class PluginManifest:
     env: Dict[str, str] = field(default_factory=dict)
     description: str = ""
     path: Optional[Path] = None
-    # The option names the manifest declares, or None when it declares none and
-    # therefore accepts any option.
+    # The option names the manifest declares: None when it declares none and
+    # therefore accepts any option, an empty tuple when it declares an empty
+    # list and therefore accepts no option.
     declared_options: Optional[Tuple[str, ...]] = None
 
 
@@ -151,18 +152,34 @@ def plugin_dirs(project_root: Path, extra: Optional[List[str]] = None) -> List[P
 def discover(
     project_root: Path, extra: Optional[List[str]] = None
 ) -> Dict[str, PluginManifest]:
-    """Index every plugin that declares a manifest, by name."""
+    """Index every plugin that declares a manifest, by name.
+
+    A plugin whose manifest cannot be read is reported and skipped, so one
+    broken plugin does not stop the others from running. An activation that
+    names the skipped plugin then meets the missing-plugin path, and
+    ``require: true`` turns that into a failure, so the cause is reported
+    beside the consequence.
+    """
     index: Dict[str, PluginManifest] = {}
     for directory in plugin_dirs(project_root, extra):
         if not directory.is_dir():
             continue
-        for child in sorted(directory.iterdir()):
+        try:
+            children = sorted(directory.iterdir())
+        except OSError as error:
+            logger.warning("Deploy: cannot read %s: %s; skipped", directory, error)
+            continue
+        for child in children:
             manifest_path = child / MANIFEST_NAME
-            if not manifest_path.is_file():
+            try:
+                if not manifest_path.is_file():
+                    continue
+                manifest = load_manifest(manifest_path)
+            except (DeployError, OSError) as error:
+                logger.warning("Deploy: %s; skipped", error)
                 continue
-            manifest = load_manifest(manifest_path)
             if manifest.name in index:
-                logger.debug(
+                logger.warning(
                     "Deploy: plugin %r at %s is shadowed by %s",
                     manifest.name,
                     manifest_path,
