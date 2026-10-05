@@ -107,7 +107,18 @@ An activation option the manifest does not declare in `options` fails the run, s
 
 Each plugin is given a bounded time to return, by default 900 seconds, which `--timeout` overrides.
 
-The plugin path is the directories searched for manifests, in order, first match wins: the `--plugin-path` values, then `SDB_PLUGIN_PATH`, then `<root>/plugins`. A plugin is a direct child of one of those directories, and one whose manifest cannot be read is reported and skipped, so a broken plugin does not stop the others. An explicit location beats the convention, so a deployment that sets `SDB_PLUGIN_PATH` replaces a plugin the project ships under the same name, which is what lets the image supply a reference plugin and a consumer override it. `sdb plugins` lists what it finds.
+The plugin path is the directories searched for manifests, in order, first match wins: the `--plugin-path` values, then `SDB_PLUGIN_PATH`, then `<root>/plugins`. `<root>` is the directory passed to `sdb deploy`, so a project ships its own plugin at `<root>/plugins/<name>/manifest.yml`, beside the `_deploy.yml` that activates it:
+
+```
+docs/
+  _deploy.yml
+  _site/
+  plugins/
+    mychannel/
+      manifest.yml
+```
+
+A `--config` file elsewhere moves the activation and the artifact it names, while the local plugin directory stays with the root. A plugin is a direct child of one of those directories, and one whose manifest cannot be read is reported and skipped, so a broken plugin does not stop the others. An explicit location beats the convention, so a deployment that sets `SDB_PLUGIN_PATH` replaces a plugin the project ships under the same name, which is what lets the image supply a reference plugin and a consumer override it. `sdb plugins` lists what it finds.
 
 Across the process boundary the contract is one JSON request on the plugin's stdin and one JSON result on its stdout, with the exit code carrying success or failure:
 
