@@ -53,6 +53,20 @@ def _make_plugin(plugins_root: Path, name: str, script: str) -> Path:
     return directory
 
 
+def _make_declaring_plugin(
+    plugins_root: Path, name: str, script: str, options: list[str] | None
+) -> Path:
+    """A plugin whose manifest declares, or does not declare, the options it takes."""
+    directory = plugins_root / name
+    extra = ""
+    if options is not None:
+        declared = "".join(f"    - {option}\n" for option in options)
+        extra = f"interface:\n  options:\n{declared}"
+    _write_manifest(directory, name, ["python3", "run.py"], extra=extra)
+    (directory / "run.py").write_text(script, encoding="utf-8")
+    return directory
+
+
 def _make_project(tmp_path: Path, config: str, artifact: bool = True) -> Path:
     root = tmp_path / "project"
     root.mkdir()
@@ -98,6 +112,24 @@ class TestManifest:
             encoding="utf-8",
         )
         assert load_manifest(path).name == "s3"
+
+    def test_declared_options_are_captured(self, tmp_path: Path) -> None:
+        path = tmp_path / "manifest.yml"
+        path.write_text(
+            "manifest: 1\nname: s3\ncommand: [python3]\n"
+            "interface:\n  options:\n    - bucket\n    - prefix\n",
+            encoding="utf-8",
+        )
+        assert load_manifest(path).options == ("bucket", "prefix")
+
+    def test_a_manifest_without_an_interface_declares_no_options(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "manifest.yml"
+        path.write_text(
+            "manifest: 1\nname: s3\ncommand: [python3]\n", encoding="utf-8"
+        )
+        assert load_manifest(path).options is None
 
     def test_an_interface_that_is_not_a_mapping_is_rejected(self, tmp_path: Path) -> None:
         path = tmp_path / "manifest.yml"
@@ -245,6 +277,57 @@ class TestRunDeploy:
         run_deploy(root, dry_run=False)
         request = json.loads((plugin / "request.json").read_text(encoding="utf-8"))
         assert request["dry_run"] is False
+
+
+class TestDeclaredOptions:
+    """An activation is checked against the options its manifest declares."""
+
+    CONFIG = (
+        "deploy:\n"
+        "  - plugin: s3\n"
+        "    artifact: docs/_site\n"
+        "    options:\n"
+        "      bucket: b\n"
+    )
+
+    def test_an_undeclared_option_fails_without_invoking_the_plugin(
+        self, tmp_path: Path
+    ) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        plugin = _make_declaring_plugin(root / "plugins", "s3", _OK_PLUGIN, ["prefix"])
+        assert run_deploy(root) is False
+        assert not (plugin / "request.json").exists()
+
+    def test_a_declared_option_runs(self, tmp_path: Path) -> None:
+        config = self.CONFIG.replace("bucket: b", "prefix: p")
+        root = _make_project(tmp_path, config)
+        _make_declaring_plugin(root / "plugins", "s3", _OK_PLUGIN, ["prefix"])
+        assert run_deploy(root) is True
+
+    def test_a_manifest_that_declares_no_options_accepts_any(self, tmp_path: Path) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        _make_declaring_plugin(root / "plugins", "s3", _OK_PLUGIN, None)
+        assert run_deploy(root) is True
+
+
+class TestTimeout:
+    CONFIG = (
+        "deploy:\n"
+        "  - plugin: s3\n"
+        "    artifact: docs/_site\n"
+        "    options:\n"
+        "      bucket: b\n"
+    )
+
+    def test_a_plugin_that_does_not_return_fails(self, tmp_path: Path) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        _make_plugin(root / "plugins", "s3", "import time\ntime.sleep(30)\n")
+        assert run_deploy(root, timeout=0.5) is False
+
+    def test_a_plugin_that_returns_within_the_limit_runs(self, tmp_path: Path) -> None:
+        root = _make_project(tmp_path, self.CONFIG)
+        _make_plugin(root / "plugins", "s3", _OK_PLUGIN)
+        assert run_deploy(root, timeout=30) is True
 
 
 class TestEngineIsolation:

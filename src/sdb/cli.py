@@ -270,13 +270,16 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     # --- deploy (external plugins) ---
+    from .deploy import DEFAULT_TIMEOUT
+
     deploy_parser = subparsers.add_parser(
         "deploy",
         help="Run the external deploy plugins a project activates",
         description="Read '_deploy.yml' in the project root and run each plugin it "
         "names. A plugin is an external tool with a manifest.yml at its root, found "
         "on the plugin path (SDB_PLUGIN_PATH, then <root>/plugins). A plugin that is "
-        "named but not found is skipped unless the activation sets require: true. "
+        "named but not found is skipped unless the activation sets require: true, "
+        "and an option the manifest does not declare fails the run. "
         "sdbs carries no plugin code.\n\n"
         "The endpoint, region, and credentials come from the environment, so deploy "
         "runs as its own step from the render, which executes project code.",
@@ -309,6 +312,10 @@ def main(argv: list[str] | None = None) -> None:
     deploy_parser.add_argument(
         "--require-all", action="store_true",
         help="Fail when an activated plugin is not found",
+    )
+    deploy_parser.add_argument(
+        "--timeout", type=float, default=DEFAULT_TIMEOUT, metavar="SECONDS",
+        help=f"Seconds to allow each plugin before failing (default: {DEFAULT_TIMEOUT:g})",
     )
 
     # --- plugins (introspect the plugin path) ---
@@ -525,6 +532,7 @@ def main(argv: list[str] | None = None) -> None:
             dry_run=args.dry_run,
             require_all=args.require_all,
             extra_plugin_dirs=args.plugin_path,
+            timeout=args.timeout,
         )
         sys.exit(0 if success else 1)
 

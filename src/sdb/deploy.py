@@ -9,7 +9,10 @@ reads a manifest, runs the command, and reads the result.
 Activation belongs to the project that uses sdbs, in a ``_deploy.yml`` at that
 project's root. A plugin named there and found on the plugin path is invoked;
 a plugin named there and not found is skipped, unless the activation sets
-``require: true`` or the run passes ``--require-all``.
+``require: true`` or the run passes ``--require-all``. A manifest that declares
+an interface states the options it takes, and an activation option the manifest
+does not declare fails the run, so a typo is reported rather than passed to a
+plugin that ignores it.
 
 The contract across the process boundary is one JSON request on the plugin's
 stdin and one JSON result on its stdout, with the exit code carrying success or
@@ -25,7 +28,7 @@ import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .config import ConfigManager
 
@@ -37,6 +40,7 @@ PLUGIN_PATH_ENV = "SDB_PLUGIN_PATH"
 DEFAULT_PLUGINS_DIR = "plugins"
 MANIFEST_API = 1
 WIRE_API = 1
+DEFAULT_TIMEOUT = 900.0
 
 
 class DeployError(RuntimeError):
@@ -53,6 +57,9 @@ class PluginManifest:
     env: Dict[str, str] = field(default_factory=dict)
     description: str = ""
     path: Optional[Path] = None
+    # The option names the manifest declares, or None when it declares none and
+    # therefore accepts any option.
+    options: Optional[Tuple[str, ...]] = None
 
 
 @dataclass
@@ -85,7 +92,7 @@ def load_manifest(manifest_path: Path) -> PluginManifest:
     env = raw.get("env") or {}
     if not isinstance(env, dict) or not all(isinstance(k, str) for k in env):
         raise DeployError(f"{manifest_path}: 'env' must be a mapping")
-    _validate_interface(raw.get("interface"), manifest_path)
+    declared_options = _interface_options(raw.get("interface"), manifest_path)
     return PluginManifest(
         name=name,
         command=list(command),
@@ -93,32 +100,39 @@ def load_manifest(manifest_path: Path) -> PluginManifest:
         env={str(k): str(v) for k, v in env.items()},
         description=str(raw.get("description") or ""),
         path=manifest_path,
+        options=declared_options,
     )
 
 
-def _validate_interface(interface: Any, manifest_path: Path) -> None:
-    """Check the optional ``interface`` block a manifest declares.
+def _interface_options(
+    interface: Any, manifest_path: Path
+) -> Optional[Tuple[str, ...]]:
+    """Check the optional ``interface`` block and return its option names.
 
-    The block is metadata for a human, and the engine reads nothing from it to
-    run a plugin. Rejecting a malformed one keeps the declaration honest, so a
-    plugin author learns of a typo here rather than from a reader who trusted a
-    field that said nothing.
+    The block states what the plugin takes, and the names it lists are the
+    contract an activation is checked against. A manifest without the block, or
+    without ``options`` in it, declares nothing and accepts any option, which
+    keeps a plugin that takes free-form options working. Rejecting a malformed
+    block keeps the declaration honest, so a plugin author learns of a typo here
+    rather than from a reader who trusted a field that said nothing.
     """
     if interface is None:
-        return
+        return None
     if not isinstance(interface, dict):
         raise DeployError(f"{manifest_path}: 'interface' must be a mapping")
     artifact = interface.get("artifact")
     if artifact is not None and not isinstance(artifact, str):
         raise DeployError(f"{manifest_path}: interface.artifact must be a string")
     options = interface.get("options")
-    if options is not None and (
-        not isinstance(options, list)
-        or not all(isinstance(option, str) for option in options)
+    if options is None:
+        return None
+    if not isinstance(options, list) or not all(
+        isinstance(option, str) for option in options
     ):
         raise DeployError(
             f"{manifest_path}: interface.options must be a list of strings"
         )
+    return tuple(options)
 
 
 def plugin_dirs(project_root: Path, extra: Optional[List[str]] = None) -> List[Path]:
@@ -193,7 +207,11 @@ def load_activations(config_path: Path) -> List[Activation]:
     return activations
 
 
-def invoke(manifest: PluginManifest, request: Dict[str, Any]) -> Dict[str, Any]:
+def invoke(
+    manifest: PluginManifest,
+    request: Dict[str, Any],
+    timeout: float = DEFAULT_TIMEOUT,
+) -> Dict[str, Any]:
     """Run one plugin and return its JSON result."""
     environment = dict(os.environ)
     environment.update(manifest.env)
@@ -204,7 +222,12 @@ def invoke(manifest: PluginManifest, request: Dict[str, Any]) -> Dict[str, Any]:
             env=environment,
             input=json.dumps(request).encode("utf-8"),
             capture_output=True,
+            timeout=timeout,
         )
+    except subprocess.TimeoutExpired as error:
+        raise DeployError(
+            f"plugin {manifest.name!r} did not return within {timeout:g}s"
+        ) from error
     except FileNotFoundError as error:
         raise DeployError(
             f"plugin {manifest.name!r}: command not found: {manifest.command[0]}"
@@ -244,6 +267,15 @@ def _read_result(stdout: bytes, name: str) -> Dict[str, Any]:
     return result
 
 
+def _undeclared_options(
+    options: Dict[str, Any], manifest: PluginManifest
+) -> List[str]:
+    """The activation options the manifest does not declare, if it declares any."""
+    if manifest.options is None:
+        return []
+    return sorted(name for name in options if name not in manifest.options)
+
+
 def run_deploy(
     project_root: Path,
     config_path: Optional[Path] = None,
@@ -251,6 +283,7 @@ def run_deploy(
     require_all: bool = False,
     extra_plugin_dirs: Optional[List[str]] = None,
     plugins: Optional[Dict[str, PluginManifest]] = None,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> bool:
     """Run every activation in a project's ``_deploy.yml``.
 
@@ -297,6 +330,17 @@ def run_deploy(
                 )
             continue
 
+        undeclared = _undeclared_options(activation.options, manifest)
+        if undeclared:
+            logger.error(
+                "Deploy: plugin %r does not declare option(s): %s (it declares: %s)",
+                activation.plugin,
+                ", ".join(undeclared),
+                ", ".join(manifest.options or ()) or "none",
+            )
+            ok = False
+            continue
+
         request = {
             "deploy": WIRE_API,
             "plugin": activation.plugin,
@@ -308,7 +352,7 @@ def run_deploy(
             "Deploy %s [%s] %s", activation.plugin, manifest.path, artifact
         )
         try:
-            result = invoke(manifest, request)
+            result = invoke(manifest, request, timeout)
         except DeployError as error:
             logger.error("Deploy: %s", error)
             ok = False
