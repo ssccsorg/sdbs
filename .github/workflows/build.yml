@@ -6,6 +6,7 @@ on:
     paths:
       - "Dockerfile"
       - "NOTICE.md"
+      - "README.md"
       - "pyproject.toml"
       - "plugins/**"
       - "src/**"
@@ -16,6 +17,7 @@ on:
     paths:
       - "Dockerfile"
       - "NOTICE.md"
+      - "README.md"
       - "pyproject.toml"
       - "plugins/**"
       - "src/**"
