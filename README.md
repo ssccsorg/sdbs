@@ -41,8 +41,9 @@ sdb init docs
 sdb init docs --template ssccs     # with SSCCS-specific templates
 
 # Build all targets
-sdb build .
+sdb build .                        # the formats each target declares
 sdb build . --website -j 4         # parallel website build
+sdb build . --article              # article output, assembled for publication
 
 # Pre-render steps (latest docs, path resolution, footnote cleanup, formatting, metadata)
 sdb pre docs
@@ -51,12 +52,8 @@ sdb pre docs
 sdb check .
 
 # Render a single document by short name for quick preview
-sdb render map
-sdb render map --to pdf            # render to a specific format
-
-# Render and collect PDF artifacts (PDF, LaTeX, figures, media)
-sdb dist map
-sdb dist map --all                  # render all matches without prompting
+sdb render docs map
+sdb render docs map --to pdf       # render to a specific format
 
 # Upload built artifacts to an external deploy channel
 sdb deploy docs
@@ -67,7 +64,19 @@ sdb deploy docs --dry-run
 sdb clean docs
 ```
 
+Every command that operates on a project takes the directory as its first positional argument: `init` takes the directory to scaffold, `build`, `check`, `pre`, `render`, and `clean` take the docs root the documents live in, and `deploy` and `plugins` take the directory holding `_deploy.yml`.
+
 Every command that takes a docs root stops when the path is not a directory, and names the path it rejected. A command that would otherwise walk no documents and report success fails instead, so a typo or a wrong working directory is visible where it happens rather than later as a render error in a document that was never processed.
+
+## Build Outputs
+
+`build` renders the targets it is given in one of two named outputs, or in the formats each target's own configuration declares when neither is named.
+
+`--website` renders the Quarto website profile. It owns the site directory (`_site` by default, or `--output-dir`), and it clears that directory before it renders, so a website build replaces the site rather than adding to it.
+
+`--article` renders the PDF form of each target and assembles the distribution an article is published as: the PDF, its LaTeX source, the figures, the media, and the shared `_files`. Each document's distribution is a directory named after it, beside the document itself, or under `--output-dir` when one is given. It is the form an external deploy channel carries, which is what lets a Zenodo-style channel be added as a plugin: `sdb build docs --article` produces the article, and a deploy activation names the directory it publishes.
+
+An article build goes through the renderer rather than through the site orchestration, since an article is a document's publication artifact rather than a page. It therefore neither reads nor writes the site directory, and `--sequence`, `--jobs`, `--parallel-formats`, and the `snapshot` target do not apply: the article is rendered document by document, and `sdb build` refuses those rather than ignoring them. The built-in pre-build sequence does run, so the version stamp an article carries agrees with the one a full build writes for the same document.
 
 ## External Deploy Plugins
 
@@ -92,7 +101,7 @@ The project that uses sdbs activates a plugin in `_deploy.yml` at its root:
 ```yaml
 deploy:
   - plugin: s3
-    artifact: docs/_site
+    documents: [pdf, c2pa]
     options:
       bucket: example-private
       prefix: project/docs
@@ -101,13 +110,19 @@ deploy:
         domain: https://private.example.com
 ```
 
-`artifact` is resolved against the directory holding `_deploy.yml`. A named plugin that is not found is skipped, since a plugin is optional; set `require: true` on the activation, or pass `--require-all`, to make a missing plugin fail instead.
+An activation declares what it publishes in exactly one of two ways. `artifact` is a directory to upload, resolved against the directory holding `_deploy.yml`. `documents` is the list of extensions to select out of the build output, which is what a site build produces around a page: the selection takes `_site/**/*.pdf` and `_site/**/*.c2pa`, and skips any path inside a page's asset directory (`site_libs/`, `*_files/`), since a document that lands there belongs to the page rather than to the channel. `source` names that build output when it is not `_site`.
+
+The engine composes the selection, not the project. It copies the selected documents into a directory it owns, hands that directory to the plugin as the artifact, and removes it when the activation finishes. The render owns the build output, and a deploy container mounts the tree read-only, so nothing is written back into the project or left behind by a deploy.
+
+Naming both, or neither, fails the run, as does a `documents` list that is empty, or that names something other than an extension. A `source` without `documents` fails too, since nothing would read it. `documents` and `source` compose the artifact rather than reaching the plugin, so they are not activation options and the manifest does not declare them.
+
+A named plugin that is not found is skipped, since a plugin is optional; set `require: true` on the activation, or pass `--require-all`, to make a missing plugin fail instead.
 
 An activation option the manifest does not declare in `options` fails the run, so a typo is reported rather than passed to a plugin that ignores it. A manifest with no `interface`, or an `interface` with no `options`, declares nothing and accepts any option, while `options: []` declares that it takes none.
 
 Each plugin is given a bounded time to return, by default 900 seconds, which `--timeout` overrides.
 
-The plugin path is the directories searched for manifests, in order, first match wins: the `--plugin-path` values, then `SDB_PLUGIN_PATH`, then `<root>/plugins`. `<root>` is the directory passed to `sdb deploy`, so a project ships its own plugin at `<root>/plugins/<name>/manifest.yml`, beside the `_deploy.yml` that activates it:
+The plugin path is the directories searched for manifests, in order, first match wins: the `--plugin-path` values, then `SDB_PLUGIN_PATH`, then `<docs_root>/plugins`. `<docs_root>` is the directory passed to `sdb deploy`, so a project ships its own plugin at `<docs_root>/plugins/<name>/manifest.yml`, beside the `_deploy.yml` that activates it:
 
 ```
 docs/
@@ -118,7 +133,7 @@ docs/
       manifest.yml
 ```
 
-A `--config` file elsewhere moves the activation and the artifact it names, while the local plugin directory stays with the root. A plugin is a direct child of one of those directories, and one whose manifest cannot be read is reported and skipped, so a broken plugin does not stop the others. An explicit location beats the convention, so a deployment that sets `SDB_PLUGIN_PATH` replaces a plugin the project ships under the same name, which is what lets the image supply a reference plugin and a consumer override it. `sdb plugins` lists what it finds.
+A `--config` file elsewhere moves the activation and the artifact it names, while the local plugin directory stays with the docs root. A plugin is a direct child of one of those directories, and one whose manifest cannot be read is reported and skipped, so a broken plugin does not stop the others. An explicit location beats the convention, so a deployment that sets `SDB_PLUGIN_PATH` replaces a plugin the project ships under the same name, which is what lets the image supply a reference plugin and a consumer override it. `sdb plugins` lists what it finds.
 
 Across the process boundary the contract is one JSON request on the plugin's stdin and one JSON result on its stdout, with the exit code carrying success or failure:
 
@@ -160,7 +175,7 @@ A plugin is a program in any language. Put a `manifest.yml` at its root, read th
 - Formatting: run `rumdl fmt` with MD036 disabled.
 - Metadata: write the `_metadata.tex` a document references from its PDF or beamer header, taking the values from the document's front matter and the files it lists under `metadata-files:`. The step heals the mismatches between those declarations and what the render needs. A header that names a metadata macro without referencing a generated file gets that reference inserted, which is the inconsistency that would otherwise reach LuaLaTeX as an undefined control sequence. An `affiliations` entry that declares no url or domain gets the key supplied in the `metadata-files` entry that declares it, which is what the `\href` on the title page reads; a document that declares the affiliation in its own front matter is reported and left alone. An incomplete affiliation renders an empty link rather than failing, so that case reports it. The generated file itself is written when it is missing or older than its inputs. It runs last so the version stamp covers the text after resolution and formatting, and it reports a document whose header offers no line to edit. Every case is named, so one can be switched off on its own under `metadata.disabled` in `build.yml`, and `metadata.report_only` turns every repair off at once.
 
-The sequence is idempotent. Running `sdb pre docs` on an already-clean tree changes nothing. Documents rendered through `sdb render` or `sdb dist` skip this sequence, since those commands call the underlying renderer directly without preprocessing. They do run the metadata step for the documents they select, which writes the file a header consumes, inserts the reference a header needs, puts an unguarded input behind `\IfFileExists`, and supplies the affiliation keys a header links with, because the renderer reads that file from the document header and a preview of a new document would otherwise fail on a missing input. A preview can therefore edit the document it selects, which it did not before.
+The sequence is idempotent. Running `sdb pre docs` on an already-clean tree changes nothing. Documents rendered through `sdb render` skip this sequence, since that command calls the underlying renderer directly without preprocessing. It does run the metadata step for the documents it selects, which writes the file a header consumes, inserts the reference a header needs, puts an unguarded input behind `\IfFileExists`, and supplies the affiliation keys a header links with, because the renderer reads that file from the document header and a preview of a new document would otherwise fail on a missing input. A preview can therefore edit the document it selects, which it did not before.
 
 ### Metadata Cases
 
