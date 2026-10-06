@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -59,6 +60,36 @@ BUILD_FUNCTIONS: Dict[str, Callable[..., bool]] = {}
 OUTPUT_DIR_TARGETS: set = set()
 _INITIAL_CACHED_TARGETS: Optional[set] = None
 CACHE_ROOT: Optional[Path] = None  # Set by initialize_config: where the command ran
+
+# What the build did with the cache, reported at the end of a run.  A warm build
+# writes nothing, so the count is the statement that the cache served it, and it
+# is the line a caller checks instead of reading the render log.
+_CACHE_ACTIVITY_LOCK = threading.Lock()
+_CACHE_ACTIVITY: Dict[str, int] = {"artifacts": 0, "served": 0}
+
+
+def reset_cache_activity() -> None:
+    with _CACHE_ACTIVITY_LOCK:
+        for kind in _CACHE_ACTIVITY:
+            _CACHE_ACTIVITY[kind] = 0
+
+
+def note_cache_activity(kind: str) -> None:
+    """Record one cache outcome, from a render thread or the render itself."""
+    with _CACHE_ACTIVITY_LOCK:
+        _CACHE_ACTIVITY[kind] = _CACHE_ACTIVITY.get(kind, 0) + 1
+
+
+def cache_activity_summary(docs_root: Optional[Path] = None) -> str:
+    """The line that says what the cache did for this build."""
+    with _CACHE_ACTIVITY_LOCK:
+        artifacts = _CACHE_ACTIVITY.get("artifacts", 0)
+        served = _CACHE_ACTIVITY.get("served", 0)
+    return (
+        f"Cache: {artifacts} artifact(s) written, "
+        f"{served} target(s) served entirely from the cache, "
+        f"root {get_cache_base(docs_root)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +513,7 @@ def update_format_cache(
         artifact_path = cache_dir / artifact_name
         try:
             _atomic_copy(output_path, artifact_path)
+            note_cache_activity("artifacts")
             logger.info(f"Cached artifact for {target_name} ({fmt}) at {artifact_path}")
         except Exception as e:
             logger.warning(f"Failed to cache artifact for {target_name} ({fmt}): {e}")
@@ -493,6 +525,7 @@ def update_format_cache(
                     linked_cache_path = cache_dir / linked_cache_name
                     try:
                         _atomic_copy(linked_path, linked_cache_path)
+                        note_cache_activity("artifacts")
                         logger.info(
                             f"Cached linked artifact ({linked_ext}) for {target_name} ({fmt}) at {linked_cache_path}"
                         )
@@ -945,6 +978,7 @@ def build_generic(
                 formats_to_render.append(fmt)
 
         if not formats_to_render:
+            note_cache_activity("served")
             logger.info(
                 f"All formats for {target} are up-to-date, skipping render."
             )
@@ -1020,6 +1054,7 @@ def build_generic(
                 all_cached = False
                 break
         if all_cached:
+            note_cache_activity("served")
             if "html" in formats:
                 if not should_rerender_for_sidebar(
                     build_targets_set or set(), docs_root
@@ -1831,6 +1866,8 @@ def build_targets(
         logger.info("No targets specified. Nothing to build.")
         return True
 
+    reset_cache_activity()
+
     build_temp_path = cache_parent(docs_root) / BUILD_TEMP_DIR
 
     # Run user-configured pre-build commands first (build.yml), then defaults
@@ -2014,6 +2051,7 @@ def build_targets(
                 f"All targets completed successfully: "
                 f"{list(results.keys())}"
             )
+            logger.info(cache_activity_summary(docs_root))
 
             _sync_llms_files(final_output, docs_root)
             # Run user-configured post-render commands first (build.yml), then defaults
@@ -2084,6 +2122,7 @@ def build_targets(
     logger.info(
         f"All targets completed successfully: {list(results.keys())}"
     )
+    logger.info(cache_activity_summary(docs_root))
 
     if website:
         _sync_llms_files(

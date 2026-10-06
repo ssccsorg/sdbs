@@ -250,3 +250,29 @@ class TestCacheWritesAreAtomic:
 
         assert destination.read_text(encoding="utf-8") == "old"
         assert list(destination.parent.iterdir()) == [destination]
+
+
+class TestCacheActivityIsReported:
+    """A build states what the cache did, so a caller reads a line, not the log."""
+
+    def test_the_summary_states_the_counts_and_the_root(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
+        build.reset_cache_activity()
+        build.note_cache_activity("artifacts")
+        build.note_cache_activity("served")
+        build.note_cache_activity("served")
+
+        assert build.cache_activity_summary(tmp_path) == (
+            "Cache: 1 artifact(s) written, "
+            "2 target(s) served entirely from the cache, "
+            f"root {tmp_path / '_cached'}"
+        )
+
+    def test_a_reset_clears_the_counts(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
+        build.note_cache_activity("artifacts")
+        build.reset_cache_activity()
+
+        assert "Cache: 0 artifact(s) written" in build.cache_activity_summary(tmp_path)
