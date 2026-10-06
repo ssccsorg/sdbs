@@ -3,14 +3,18 @@ SDBS CLI — entry point for all sdb commands.
 
 Subcommands:
   init     Scaffold a new docs directory with default templates.
-  build    Build one or more Quarto targets.
+  build    Build one or more Quarto targets, as a website or as an article.
   check    Validate links, citations, and cross-references.
   pre      Run pre-render steps (latest docs, path resolution, formatting).
   render   Locate .qmd files by short name and render them directly (no preprocessing).
-  dist     Render and collect PDF artifacts for short name matches.
   deploy   Run the external deploy plugins a project activates.
   plugins  List the deploy plugins found on the plugin path.
   clean    Remove Quarto build artifacts.
+
+Every command that operates on a project takes the directory as its first
+positional argument: init takes the directory to scaffold, build, check, pre,
+render, and clean take the docs root the documents live in, and deploy and
+plugins take the directory holding ``_deploy.yml``.
 """
 
 import argparse
@@ -41,6 +45,52 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _build_article(
+    docs_root: Path, targets: list[str], output_dir: Path | None
+) -> bool:
+    """Render the article form of the selected targets and assemble their artifacts.
+
+    The article goes through the renderer rather than through the site
+    orchestration: it is a document's publication artifact rather than a page, so
+    it neither reads nor writes the site directory the deploy channel publishes.
+    The built-in pre-build sequence runs first, since it edits the text the
+    version stamp covers, and a stamp that covers pre-edited bytes would disagree
+    with the one a full build writes for the same document.
+    """
+    from .utils.quick_render import article_artifacts, render_qmd
+
+    documents: list[Path] = []
+    for target in targets:
+        qmd = (build_module.TARGET_CONFIG.get(target) or {}).get("qmd")
+        if not qmd:
+            logger.error(
+                "sdb build --article: %s has no document to render", target
+            )
+            return False
+        documents.append(docs_root / qmd)
+    if not documents:
+        logger.error("sdb build --article: no target to render")
+        return False
+    documents = list(dict.fromkeys(documents))
+
+    build_module.run_pre_build_sequence(
+        build_module.EXTERNAL_CONFIG, docs_root, targets
+    )
+
+    success = True
+    for document in documents:
+        if not render_qmd(document, cwd=docs_root, format="pdf"):
+            success = False
+    if not success:
+        return False
+
+    total = article_artifacts(documents, output_dir)
+    logging.info(
+        "Assembled %d artifact(s) for %d document(s).", total, len(documents)
+    )
+    return True
+
+
 def _setup_logging() -> None:
     """Configure proper logging with timestamps when running commands."""
     root = logging.getLogger()
@@ -57,15 +107,15 @@ def _setup_logging() -> None:
 def _require_docs_root(docs_root: Path, command: str) -> None:
     """Stop when the named docs root is not a directory.
 
-    Every command takes the docs root from the command line, so a typo or a
-    wrong working directory would otherwise walk no documents, report success,
-    and leave the failure to surface later as an unreadable render error.
+    Every project-scoped command takes the docs root from the command line, so a
+    typo or a wrong working directory would otherwise walk no documents, report
+    success, and leave the failure to surface later as an unreadable render error.
     """
     if docs_root.is_dir():
         return
     print(
         f"sdb {command}: docs root is not a directory: {docs_root}\n"
-        f"  Pass the directory the documents live in.",
+        f"  Pass the directory the project is rooted at.",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -111,11 +161,18 @@ def main(argv: list[str] | None = None) -> None:
         "build",
         help="Build Quarto document targets",
         description="Orchestrate Quarto rendering for one or more document targets. "
-        "Supports parallel execution, website mode, and intelligent caching.",
+        "Supports parallel execution, a website output, and an article output. "
+        "With neither --website nor --article, each target renders the formats "
+        "its own configuration declares.\n\n"
+        "--website renders the website profile. --article renders the PDF form of "
+        "each target and assembles the distribution an article is published as "
+        "(the PDF, its LaTeX source, the figures, and the media), which is the "
+        "form an external deploy channel carries. The two are mutually exclusive.",
         epilog=(
             "Examples:\n"
             "  sdb build docs whitepaper\n"
             "  sdb build docs whitepaper proposal --website -j 4\n"
+            "  sdb build docs --article\n"
             "  sdb build docs snapshot\n"
             "  sdb clean docs"
         ),
@@ -138,9 +195,14 @@ def main(argv: list[str] | None = None) -> None:
         "--output-dir", "-o", type=Path, default=None,
         help="Directory to place final outputs",
     )
-    build_parser.add_argument(
+    build_output = build_parser.add_mutually_exclusive_group()
+    build_output.add_argument(
         "--website", action="store_true",
         help="Use Quarto website profile (isolated parallel rendering)",
+    )
+    build_output.add_argument(
+        "--article", action="store_true",
+        help="Render each target as an article and assemble its distribution",
     )
     build_parser.add_argument(
         "--sequence", "-s", action="store_true",
@@ -203,7 +265,7 @@ def main(argv: list[str] | None = None) -> None:
     render_parser = subparsers.add_parser(
         "render",
         help="Locate .qmd files by short name and render them directly",
-        description="Search the current directory tree for .qmd files whose stem "
+        description="Search the docs root for .qmd files whose stem "
         "matches one or more short names (e.g. 'map' → "
         "docs/projects/section/chapter/map/index.qmd) and render them by calling the "
         "underlying tool directly, without the full SDBS preprocessing pipeline "
@@ -214,17 +276,22 @@ def main(argv: list[str] | None = None) -> None:
         "missing or stale, inserts the reference a header that names a metadata "
         "macro needs, and supplies the affiliation keys a header links with.\n\n"
         "Multiple patterns can be given to render several documents in sequence "
-        "(e.g. 'sdb render map id').  Contrast this with 'sdb build', which runs "
-        "the full SDBS pipeline before rendering.  Use 'render' when you only "
+        "(e.g. 'sdb render docs map id').  Contrast this with 'sdb build', which "
+        "runs the full SDBS pipeline before rendering.  Use 'render' when you only "
         "need a quick preview or to verify the document structure.\n\n"
         "When multiple files match, prompts for selection unless --all is given.",
         epilog=(
             "Examples:\n"
-            "  sdb render map\n"
-            "  sdb render map --to pdf\n"
-            "  sdb render chapter/map\n"
-            "  sdb render map id wp\n"
+            "  sdb render docs map\n"
+            "  sdb render docs map --to pdf\n"
+            "  sdb render docs chapter/map\n"
+            "  sdb render docs map id wp"
         ),
+    )
+    render_parser.add_argument(
+        "docs_root",
+        type=Path,
+        help="Path to the docs directory to search",
     )
     render_parser.add_argument(
         "patterns",
@@ -238,34 +305,6 @@ def main(argv: list[str] | None = None) -> None:
         help="Output format passed to quarto render --to (e.g. html, pdf)",
     )
     render_parser.add_argument(
-        "--all", "-a", action="store_true",
-        help="Render all matching files without prompting",
-    )
-
-    # --- dist (render + collect PDF artifacts) ---
-    dist_parser = subparsers.add_parser(
-        "dist",
-        help="Render and assemble PDF artifacts for short name matches",
-        description="Same as 'sdb render' but additionally collects PDF-related "
-        "artifacts after rendering: PDF, LaTeX source, figure-pdf, mediabag, "
-        "and shared _files/ into a folder named after each matched file.\n\n"
-        "This assembles a local distribution artifact and uploads nothing; use "
-        "'sdb deploy' to move a built tree to an external channel.\n\n"
-        "When multiple files match, prompts for selection unless --all is given.",
-        epilog=(
-            "Examples:\n"
-            "  sdb dist map\n"
-            "  sdb dist map id --all\n"
-        ),
-    )
-    dist_parser.add_argument(
-        "patterns",
-        type=str,
-        nargs="+",
-        help="One or more short names or path fragments to match against .qmd "
-        "file stems",
-    )
-    dist_parser.add_argument(
         "--all", "-a", action="store_true",
         help="Render all matching files without prompting",
     )
@@ -290,15 +329,15 @@ def main(argv: list[str] | None = None) -> None:
         ),
     )
     deploy_parser.add_argument(
-        "root",
+        "docs_root",
         type=Path,
         nargs="?",
         default=Path("."),
-        help="Project root holding _deploy.yml (default: current directory)",
+        help="Directory holding _deploy.yml (default: current directory)",
     )
     deploy_parser.add_argument(
         "--config", "-c", type=Path, default=None,
-        help="Path to the deploy configuration (default: <root>/_deploy.yml)",
+        help="Path to the deploy configuration (default: <docs_root>/_deploy.yml)",
     )
     deploy_parser.add_argument(
         "--plugin-path", action="append", default=None,
@@ -323,15 +362,15 @@ def main(argv: list[str] | None = None) -> None:
     plugins_parser = subparsers.add_parser(
         "plugins",
         help="List the deploy plugins found on the plugin path",
-        description="Scan the plugin path (SDB_PLUGIN_PATH, then <root>/plugins) and "
-        "list each plugin manifest: its name, its path, and its description.",
+        description="Scan the plugin path (SDB_PLUGIN_PATH, then <docs_root>/plugins) "
+        "and list each plugin manifest: its name, its path, and its description.",
     )
     plugins_parser.add_argument(
-        "root",
+        "docs_root",
         type=Path,
         nargs="?",
         default=Path("."),
-        help="Project root whose plugins directory is searched (default: current directory)",
+        help="Directory whose plugins directory is searched (default: current directory)",
     )
     plugins_parser.add_argument(
         "--plugin-path", action="append", default=None,
@@ -400,6 +439,38 @@ def main(argv: list[str] | None = None) -> None:
                 config_path = default_config
 
         build_module.initialize_config(docs_root, config_path)
+
+        if args.article:
+            ignored = [
+                flag
+                for flag, given in (
+                    ("--sequence", args.sequence),
+                    ("--jobs", args.jobs is not None),
+                    ("--parallel-formats", args.parallel_formats),
+                )
+                if given
+            ]
+            if ignored:
+                logging.error(
+                    "sdb build --article: %s does not apply; an article is "
+                    "rendered document by document",
+                    ", ".join(ignored),
+                )
+                sys.exit(1)
+            if "snapshot" in args.targets:
+                logging.error(
+                    "sdb build --article: 'snapshot' does not apply; it refreshes "
+                    "the site cache an article build does not use"
+                )
+                sys.exit(1)
+            if "all" in args.targets:
+                article_targets = list(build_module.BUILD_FUNCTIONS.keys())
+            else:
+                article_targets = build_module.parse_targets(args.targets)
+                build_module.ensure_explicit_targets(docs_root, article_targets)
+                article_targets = build_module.validate_targets(article_targets)
+            success = _build_article(docs_root, article_targets, args.output_dir)
+            sys.exit(0 if success else 1)
 
         # Handle "snapshot"
         if "snapshot" in args.targets:
@@ -481,53 +552,30 @@ def main(argv: list[str] | None = None) -> None:
             resolve_and_render,
         )
 
-        build_yml = find_build_yml()
+        docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "render")
+
+        build_yml = find_build_yml(docs_root)
         exclude_patterns = (
             load_exclude_patterns(build_yml) if build_yml else []
         )
 
         success, _ = resolve_and_render(
             args.patterns,
-            Path.cwd(),
+            docs_root,
             prompt=not args.all,
             exclude_patterns=exclude_patterns,
             format=args.format,
         )
         sys.exit(0 if success else 1)
 
-    elif args.command == "dist":
-        _setup_logging()
-        from .utils.quick_render import (
-            dist_artifacts,
-            find_build_yml,
-            load_exclude_patterns,
-            resolve_and_render,
-        )
-
-        build_yml = find_build_yml()
-        exclude_patterns = (
-            load_exclude_patterns(build_yml) if build_yml else []
-        )
-
-        success, rendered = resolve_and_render(
-            args.patterns,
-            Path.cwd(),
-            prompt=not args.all,
-            exclude_patterns=exclude_patterns,
-            format="pdf",
-        )
-        if rendered:
-            n = dist_artifacts(rendered)
-            logging.info("Assembled %d artifact(s) for %d file(s).", n, len(rendered))
-        sys.exit(0 if success else 1)
-
     elif args.command == "deploy":
         _setup_logging()
 
-        root = args.root.resolve()
-        _require_docs_root(root, "deploy")
+        docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "deploy")
         success = deploy_module.run_deploy(
-            root,
+            docs_root,
             config_path=args.config,
             dry_run=args.dry_run,
             require_all=args.require_all,
@@ -539,9 +587,9 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "plugins":
         _setup_logging()
 
-        root = args.root.resolve()
-        _require_docs_root(root, "plugins")
-        found = deploy_module.list_plugins(root, args.plugin_path)
+        docs_root = args.docs_root.resolve()
+        _require_docs_root(docs_root, "plugins")
+        found = deploy_module.list_plugins(docs_root, args.plugin_path)
         if not found:
             print("No plugins found on the plugin path.")
             sys.exit(0)

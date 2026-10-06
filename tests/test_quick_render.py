@@ -849,12 +849,12 @@ class TestResolveAndRender:
 
 
 # ============================================================================
-# dist_artifacts / _collect_one
+# article_artifacts / _collect_one
 # ============================================================================
 
 
-class TestDistArtifacts:
-    """Tests for PDF artifact collection."""
+class TestArticleArtifacts:
+    """Tests for article distribution collection."""
 
     def test_collect_one_copies_pdf(self, tmp_path: Path) -> None:
         """PDF file is copied into the publish folder."""
@@ -902,23 +902,36 @@ class TestDistArtifacts:
         assert (dest / "doc_files" / "figure-pdf" / "fig1.pdf").exists()
         assert (dest / "_files" / "style.css").exists()
 
-    def test_dist_artifacts_creates_folder(self, tmp_path: Path) -> None:
-        """dist_artifacts creates folder alongside the QMD."""
-        from sdb.utils.quick_render import dist_artifacts
+    def test_article_artifacts_creates_folder(self, tmp_path: Path) -> None:
+        """article_artifacts creates a folder alongside the QMD."""
+        from sdb.utils.quick_render import article_artifacts
         qmd = tmp_path / "report.qmd"
         qmd.write_text("---\n")
         pdf = tmp_path / "report.pdf"
         pdf.write_text("%PDF")
-        result = dist_artifacts([qmd])
+        result = article_artifacts([qmd])
         assert result >= 1
         assert (tmp_path / "report" / "report.pdf").exists()
 
-    def test_dist_no_artifacts_warns(self, tmp_path: Path) -> None:
-        """dist_artifacts warns when no artifacts are found."""
-        from sdb.utils.quick_render import dist_artifacts
+    def test_article_artifacts_honours_a_destination_root(self, tmp_path: Path) -> None:
+        """A destination root places each distribution under its own stem there."""
+        from sdb.utils.quick_render import article_artifacts
+        qmd = tmp_path / "docs" / "report.qmd"
+        qmd.parent.mkdir()
+        qmd.write_text("---\n")
+        (qmd.parent / "report.pdf").write_text("%PDF")
+        dest_root = tmp_path / "dist"
+        result = article_artifacts([qmd], dest_root)
+        assert result >= 1
+        assert (dest_root / "report" / "report.pdf").exists()
+        assert not (qmd.parent / "report").exists()
+
+    def test_no_artifacts_warns(self, tmp_path: Path) -> None:
+        """article_artifacts warns when no artifacts are found."""
+        from sdb.utils.quick_render import article_artifacts
         qmd = tmp_path / "orphan.qmd"
         qmd.write_text("---\n")
-        result = dist_artifacts([qmd])
+        result = article_artifacts([qmd])
         assert result == 0
 
 

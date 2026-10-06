@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -306,25 +308,189 @@ class TestDeployCommand:
             assert code == 1
 
 
-class TestDistCommand:
-    """Tests for the ``sdb dist`` subcommand (the renamed pub)."""
+class TestRenderCommand:
+    """Tests for the ``sdb render`` subcommand."""
 
-    def test_dist_collects_artifacts(self, tmp_path: Path) -> None:
-        """sdb dist renders the matches and assembles their artifacts."""
-        rendered = [tmp_path / "map.qmd"]
+    def test_the_docs_root_reaches_the_search(self, tmp_path: Path) -> None:
+        """sdb render <docs_root> map searches the named root, not the cwd."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
         with (
             patch("sdb.utils.quick_render.find_build_yml", return_value=None),
             patch(
                 "sdb.utils.quick_render.resolve_and_render",
-                return_value=(True, rendered),
+                return_value=(True, []),
             ) as mock_resolve,
-            patch("sdb.utils.quick_render.dist_artifacts") as mock_dist,
         ):
-            mock_dist.return_value = 1
-            code = _run_main(["dist", "map"])
-            assert code == 0
-            assert mock_resolve.call_args.kwargs["format"] == "pdf"
-            mock_dist.assert_called_once_with(rendered)
+            code = _run_main(["render", str(docs_root), "map"])
+        assert code == 0
+        assert mock_resolve.call_args.args == (["map"], docs_root.resolve())
+
+    def test_several_patterns_follow_one_root(self, tmp_path: Path) -> None:
+        """The root is the first argument, so the patterns that follow are patterns."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
+        with (
+            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
+            patch(
+                "sdb.utils.quick_render.resolve_and_render",
+                return_value=(True, []),
+            ) as mock_resolve,
+        ):
+            code = _run_main(["render", str(docs_root), "map", "id"])
+        assert code == 0
+        assert mock_resolve.call_args.args == (["map", "id"], docs_root.resolve())
+
+    def test_a_root_alone_is_not_enough(self, tmp_path: Path) -> None:
+        """A root with no pattern has nothing to select, and says so."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
+        with patch("sdb.utils.quick_render.resolve_and_render") as mock_resolve:
+            code = _run_main(["render", str(docs_root)])
+        assert code != 0
+        mock_resolve.assert_not_called()
+
+    def test_a_missing_root_stops_before_the_search(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A root that is not a directory stops the search rather than walking nothing."""
+        absent = tmp_path / "absent"
+        with patch("sdb.utils.quick_render.resolve_and_render") as mock_resolve:
+            code = _run_main(["render", str(absent), "map"])
+        assert code == 1
+        mock_resolve.assert_not_called()
+        captured = capsys.readouterr()
+        assert "sdb render: docs root is not a directory" in captured.err
+        assert "absent" in captured.err
+
+
+class TestBuildArticle:
+    """Tests for the article output of ``sdb build``.
+
+    The article is a build output rather than a separate command, and the
+    former ``sdb dist`` command is gone rather than aliased.
+    """
+
+    TARGET_CONFIG = {"map": {"qmd": "map.qmd"}}
+
+    def _docs(self, tmp_path: Path) -> Path:
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
+        (docs_root / "map.qmd").write_text("---\ntitle: m\n---\n", encoding="utf-8")
+        return docs_root
+
+    def test_article_renders_pdf_and_assembles(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """sdb build <docs> --article renders pdf and assembles the distribution."""
+        docs_root = self._docs(tmp_path)
+        with (
+            patch("sdb.cli.build_module.initialize_config"),
+            patch("sdb.cli.build_module.TARGET_CONFIG", self.TARGET_CONFIG),
+            patch("sdb.cli.build_module.BUILD_FUNCTIONS", {"map": lambda: True}),
+            patch("sdb.cli.build_module.EXTERNAL_CONFIG", {}),
+            patch("sdb.cli.build_module.run_pre_build_sequence") as mock_pre,
+            patch(
+                "sdb.utils.quick_render.render_qmd", return_value=True
+            ) as mock_render,
+            patch(
+                "sdb.utils.quick_render.article_artifacts", return_value=3
+            ) as mock_assemble,
+        ):
+            code = _run_main(["build", str(docs_root), "--article"])
+        assert code == 0
+        mock_pre.assert_called_once()
+        assert mock_render.call_args.args[0] == docs_root / "map.qmd"
+        assert mock_render.call_args.kwargs["format"] == "pdf"
+        assert mock_assemble.call_args.args == ([docs_root / "map.qmd"], None)
+
+    def test_article_places_the_distribution_where_asked(
+        self, tmp_path: Path
+    ) -> None:
+        """--output-dir decides where an assembled distribution lands."""
+        docs_root = self._docs(tmp_path)
+        output_dir = tmp_path / "out"
+        with (
+            patch("sdb.cli.build_module.initialize_config"),
+            patch("sdb.cli.build_module.TARGET_CONFIG", self.TARGET_CONFIG),
+            patch("sdb.cli.build_module.BUILD_FUNCTIONS", {"map": lambda: True}),
+            patch("sdb.cli.build_module.EXTERNAL_CONFIG", {}),
+            patch("sdb.cli.build_module.run_pre_build_sequence"),
+            patch("sdb.utils.quick_render.render_qmd", return_value=True),
+            patch(
+                "sdb.utils.quick_render.article_artifacts", return_value=1
+            ) as mock_assemble,
+        ):
+            code = _run_main(
+                ["build", str(docs_root), "--article", "-o", str(output_dir)]
+            )
+        assert code == 0
+        assert mock_assemble.call_args.args == ([docs_root / "map.qmd"], output_dir)
+
+    def test_a_failed_render_assembles_nothing(self, tmp_path: Path) -> None:
+        """A render that failed is not assembled into a distribution."""
+        docs_root = self._docs(tmp_path)
+        with (
+            patch("sdb.cli.build_module.initialize_config"),
+            patch("sdb.cli.build_module.TARGET_CONFIG", self.TARGET_CONFIG),
+            patch("sdb.cli.build_module.BUILD_FUNCTIONS", {"map": lambda: True}),
+            patch("sdb.cli.build_module.EXTERNAL_CONFIG", {}),
+            patch("sdb.cli.build_module.run_pre_build_sequence"),
+            patch("sdb.utils.quick_render.render_qmd", return_value=False),
+            patch("sdb.utils.quick_render.article_artifacts") as mock_assemble,
+        ):
+            code = _run_main(["build", str(docs_root), "--article"])
+        assert code == 1
+        mock_assemble.assert_not_called()
+
+    def test_website_and_article_are_mutually_exclusive(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """Two outputs for one invocation is a contradiction, so argparse refuses."""
+        docs_root = self._docs(tmp_path)
+        with patch("sdb.cli.build_module.initialize_config"):
+            code = _run_main(
+                ["build", str(docs_root), "--website", "--article"]
+            )
+        assert code != 0
+        assert "not allowed with" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("flag", ["--sequence", "--jobs", "--parallel-formats"])
+    def test_flags_that_do_not_apply_are_refused(
+        self, tmp_path: Path, flag: str, caplog
+    ) -> None:
+        """A flag the article path does not use stops the run instead of being ignored."""
+        docs_root = self._docs(tmp_path)
+        argv = ["build", str(docs_root), "--article"]
+        argv += [flag, "2"] if flag == "--jobs" else [flag]
+        with (
+            caplog.at_level(logging.ERROR),
+            patch("sdb.cli.build_module.initialize_config"),
+            patch("sdb.utils.quick_render.render_qmd") as mock_render,
+        ):
+            code = _run_main(argv)
+        assert code == 1
+        mock_render.assert_not_called()
+        assert flag in caplog.text
+
+    def test_the_snapshot_target_does_not_apply(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        """'snapshot' refreshes the site cache, which an article build does not use."""
+        docs_root = self._docs(tmp_path)
+        with (
+            caplog.at_level(logging.ERROR),
+            patch("sdb.cli.build_module.initialize_config"),
+            patch("sdb.utils.quick_render.render_qmd") as mock_render,
+        ):
+            code = _run_main(["build", str(docs_root), "snapshot", "--article"])
+        assert code == 1
+        mock_render.assert_not_called()
+        assert "snapshot" in caplog.text
+
+    def test_dist_is_no_longer_a_command(self) -> None:
+        """The article output replaced the command rather than aliasing it."""
+        assert _run_main(["dist", "map"]) != 0
 
     def test_pub_is_no_longer_a_command(self) -> None:
         """The rename removed the old name rather than aliasing it."""
@@ -382,6 +548,54 @@ class TestDeployEndToEnd:
             "deploy:\n  - plugin: absent\n    artifact: docs/_site\n", encoding="utf-8"
         )
         assert _run_main(["deploy", str(root)]) == 0
+
+    def _documents_project(self, tmp_path: Path) -> Path:
+        root = tmp_path / "project"
+        site = root / "docs" / "_site"
+        site.mkdir(parents=True)
+        (site / "index.html").write_text("<html></html>", encoding="utf-8")
+        (site / "intro.pdf").write_text("%PDF", encoding="utf-8")
+        (root / "_deploy.yml").write_text(
+            "deploy:\n"
+            "  - plugin: echo\n"
+            "    documents: [pdf]\n"
+            "    source: docs/_site\n",
+            encoding="utf-8",
+        )
+        plugin = root / "plugins" / "echo"
+        plugin.mkdir(parents=True)
+        (plugin / "manifest.yml").write_text(
+            "manifest: 1\nname: echo\ncommand:\n  - python3\n  - run.py\n",
+            encoding="utf-8",
+        )
+        (plugin / "run.py").write_text(
+            "import json, pathlib, sys\n"
+            "request = json.loads(sys.stdin.read())\n"
+            "artifact = pathlib.Path(request['artifact'])\n"
+            "files = sorted(str(p.relative_to(artifact))\n"
+            "               for p in artifact.rglob('*') if p.is_file())\n"
+            "pathlib.Path('seen.json').write_text(json.dumps({\n"
+            "    'artifact': str(artifact), 'files': files}))\n"
+            "print(json.dumps({'deploy': 1, 'ok': True, 'uploaded': len(files)}))\n",
+            encoding="utf-8",
+        )
+        return root
+
+    def test_a_document_selection_runs_through_the_cli(self, tmp_path: Path) -> None:
+        """What the plugin receives is the selection the engine composed."""
+        root = self._documents_project(tmp_path)
+        assert _run_main(["deploy", str(root)]) == 0
+        seen = json.loads(
+            (root / "plugins" / "echo" / "seen.json").read_text(encoding="utf-8")
+        )
+        assert seen["files"] == ["intro.pdf"]
+        assert not Path(seen["artifact"]).exists()
+
+    def test_a_selection_with_nothing_to_publish_fails(self, tmp_path: Path) -> None:
+        """A build output holding no document stops the run rather than uploading none."""
+        root = self._documents_project(tmp_path)
+        (root / "docs" / "_site" / "intro.pdf").unlink()
+        assert _run_main(["deploy", str(root)]) == 1
 
 
 class TestPluginsCommand:
