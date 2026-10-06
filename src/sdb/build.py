@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -410,6 +411,27 @@ def should_render_format(
     return True
 
 
+def _atomic_copy(source: Path, destination: Path) -> None:
+    """Copy a file into place without exposing a partly written destination.
+
+    One cache serves every render, so a reader can reach a file another render is
+    still writing.  The copy lands under a temporary name in the destination
+    directory and is renamed into place, which a reader sees either as the old
+    file or as the new one.  A failure leaves neither the destination nor the
+    temporary name behind.
+    """
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    handle, name = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
+    os.close(handle)
+    temporary = Path(name)
+    try:
+        shutil.copy2(source, temporary)
+        os.replace(temporary, destination)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
 def update_format_cache(
     file_path: Path,
     fmt: str,
@@ -459,7 +481,7 @@ def update_format_cache(
         artifact_name = f"{target_name}.{ext}"
         artifact_path = cache_dir / artifact_name
         try:
-            shutil.copy2(output_path, artifact_path)
+            _atomic_copy(output_path, artifact_path)
             logger.info(f"Cached artifact for {target_name} ({fmt}) at {artifact_path}")
         except Exception as e:
             logger.warning(f"Failed to cache artifact for {target_name} ({fmt}): {e}")
@@ -470,7 +492,7 @@ def update_format_cache(
                     linked_cache_name = f"{target_name}.{linked_ext}"
                     linked_cache_path = cache_dir / linked_cache_name
                     try:
-                        shutil.copy2(linked_path, linked_cache_path)
+                        _atomic_copy(linked_path, linked_cache_path)
                         logger.info(
                             f"Cached linked artifact ({linked_ext}) for {target_name} ({fmt}) at {linked_cache_path}"
                         )

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 import shutil
+
+import pytest
 from pathlib import Path
 
 import sdb.build as build
@@ -212,3 +214,39 @@ class TestCacheDirectoriesAreNamed:
 
         assert not (tmp_path / "_jupyter_cache").exists()
         assert not (tmp_path / "_cached").exists()
+
+
+class TestCacheWritesAreAtomic:
+    """One cache serves every render, so a reader must not see a partial file."""
+
+    def _destination(self, tmp_path: Path) -> Path:
+        destination = tmp_path / "cache" / "x.html"
+        destination.parent.mkdir(parents=True)
+        destination.write_text("old", encoding="utf-8")
+        return destination
+
+    def test_a_copy_replaces_the_destination(self, tmp_path: Path) -> None:
+        source = _write(tmp_path / "rendered.html", "new")
+        destination = self._destination(tmp_path)
+
+        build._atomic_copy(source, destination)
+
+        assert destination.read_text(encoding="utf-8") == "new"
+        assert list(destination.parent.iterdir()) == [destination]
+
+    def test_a_failed_copy_leaves_the_destination_alone(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        source = _write(tmp_path / "rendered.html", "new")
+        destination = self._destination(tmp_path)
+
+        def refuse(source_name, destination_name):
+            raise OSError("no space left on device")
+
+        monkeypatch.setattr("sdb.build.shutil.copy2", refuse)
+
+        with pytest.raises(OSError):
+            build._atomic_copy(source, destination)
+
+        assert destination.read_text(encoding="utf-8") == "old"
+        assert list(destination.parent.iterdir()) == [destination]
