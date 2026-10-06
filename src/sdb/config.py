@@ -13,25 +13,34 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Every folder the build writes for itself starts with this marker.  A project's
-# source folders carry a leading underscore (``_include``, ``_extensions``), so
-# the marker keeps the build's own folders from being read as sources or mistaken
-# for a project's, and one marker covers them wherever they are listed.
+# Every folder the build writes for itself carries this marker, except the one a
+# parallel website build copies the tree into, which cannot be hidden.  A
+# project's source folders carry a leading underscore (``_include``,
+# ``_extensions``), so the marker keeps the build's own folders from being read as
+# sources or mistaken for a project's, and one marker covers them wherever they
+# are listed.
 #
-# The marker is not dotted, and that is a constraint rather than a preference.
-# The isolated copy a website build renders from is the parent directory of the
-# document handed to Quarto, and Quarto resolves a project through that path: a
-# hidden component stops the search, and it then reports the document's own
+# ``_sdbtmp_build`` is the exception, and it is a constraint rather than a
+# preference.  That directory is the parent of the document handed to Quarto, and
+# Quarto resolves a project through the path of the document it is given.  A
+# hidden component stops that search, and Quarto then reports the document's own
 # directory as the project and a relative ``QUARTO_DOCUMENT_PATH``.  Every
 # document that reads that variable, as the title-meta include of the SSCCS
 # template does, then opens a path that is not there and the render fails.
-# Measured with Quarto 1.9.31 on ``.sdbtmp_build`` against ``_sdbtmp_build``:
-# ``QUARTO_PROJECT_DIR`` was the document's directory and ``QUARTO_DOCUMENT_PATH``
-# was relative under the dot, and both were the project's own under the
-# underscore.
-SDB_TEMP_PREFIX = "_sdbtmp_"
-DISCOVERY_EXCLUDE_PATTERNS = [f"**/{SDB_TEMP_PREFIX}*/"]
-BUILD_TEMP_DIR = f"{SDB_TEMP_PREFIX}build"
+# Measured with Quarto 1.9.31, that copy's parent name as the only variable:
+# ``.sdbtmp_build`` failed with ``QUARTO_PROJECT_DIR`` at the document's own
+# directory, and ``_sdbtmp_build`` rendered with both variables the project's own.
+# Naming the document relatively from inside the copy fails the same way, because
+# the document's path resolves to one that carries the hidden component.  The
+# other three folders are never on an input's ancestry, and a hidden name is safe
+# for them, measured with the same document.
+SDB_TEMP_PREFIX = ".sdbtmp_"
+SDB_BUILD_DIR = "_sdbtmp_build"
+DISCOVERY_EXCLUDE_PATTERNS = [
+    f"**/{SDB_TEMP_PREFIX}*/",
+    f"**/{SDB_BUILD_DIR}/",
+]
+BUILD_TEMP_DIR = SDB_BUILD_DIR
 BUILD_CACHE_DIR = f"{SDB_TEMP_PREFIX}cache"
 JUPYTER_CACHE_DIR = f"{SDB_TEMP_PREFIX}jupyter"
 QUARTO_CONFIG_FILES = ["_quarto.yml", "_quarto-website.yml"]
@@ -319,7 +328,7 @@ class CleanupManager:
         "**/__pycache__", "**/*.pyc", "**/*.pyd", "**/*.log",
         "**/*_output", "**/*_extensions", "**/*_files",
         "**/*_libs", "**/_llms", "**/_site",
-        f"**/{SDB_TEMP_PREFIX}*",
+        f"**/{SDB_TEMP_PREFIX}*", f"**/{SDB_BUILD_DIR}",
         "**/*.tex", "**/*.pdf", "**/*.html",
         "**/*.quarto_ipynb*", "**/*.quarto",
         "**/*.c2pa", "**/*.c2pa_identifier.svg",

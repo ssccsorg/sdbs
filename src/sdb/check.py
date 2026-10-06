@@ -36,7 +36,7 @@ IGNORED_DIRS = {
     "_llms",
     "node_modules",
     "__pycache__",
-    "_sdbtmp_*",
+    "_sdbtmp_build",
     "*_files",
     "*_libs",
     "*_output",

@@ -294,7 +294,7 @@ def should_rerender_for_sidebar(build_targets: set, docs_root: Path) -> bool:
 def cache_site_directory(target_name: str, hash_str: str, site_dir: Path, docs_root: Path) -> bool:
     """
     Cache the entire _site directory for a target (including site_libs).
-    The directory is copied to _sdbtmp_cache/{target}/{hash}/site/.
+    The directory is copied to .sdbtmp_cache/{target}/{hash}/site/.
     Returns True on success, False on error.
     """
     if not site_dir.exists():
@@ -1789,7 +1789,7 @@ def _cleanup_orphaned_caches(
     Args:
         successful_targets: Set of target names that were successfully built
         docs_root: Root directory of documentation
-        cache_base: Base cache directory (defaults to ``_sdbtmp_cache`` in the
+        cache_base: Base cache directory (defaults to ``.sdbtmp_cache`` in the
             directory the build ran from)
 
     Returns:

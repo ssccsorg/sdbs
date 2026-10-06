@@ -667,9 +667,9 @@ class TestGenerateMetadataTex:
 
     def test_output_path_is_the_referenced_one(self, tmp_path: Path) -> None:
         _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
-        _write(tmp_path / "sub" / "doc.qmd", _document("../_sdbtmp_cache/other_metadata.tex"))
+        _write(tmp_path / "sub" / "doc.qmd", _document("../.sdbtmp_cache/other_metadata.tex"))
         generate_metadata_tex(tmp_path)
-        assert (tmp_path / "_sdbtmp_cache" / "other_metadata.tex").is_file()
+        assert (tmp_path / ".sdbtmp_cache" / "other_metadata.tex").is_file()
 
 
 class TestGenerateMetadataFor:
@@ -1224,10 +1224,10 @@ class TestDocumentScenarios:
             tmp_path / "build.yml",
             'exclude:\n  - "**/*_files/"\n  - "_archive/**"\n',
         )
-        for tree in ("_site", "node_modules", "_sdbtmp_cache", "_archive"):
+        for tree in ("_site", "node_modules", ".sdbtmp_cache", "_archive"):
             _write(tmp_path / tree / "doc.qmd", _document())
         generate_metadata_tex(tmp_path)
-        for tree in ("_site", "node_modules", "_sdbtmp_cache", "_archive"):
+        for tree in ("_site", "node_modules", ".sdbtmp_cache", "_archive"):
             assert not (tmp_path / tree / "_files" / "doc_metadata.tex").exists()
 
 
