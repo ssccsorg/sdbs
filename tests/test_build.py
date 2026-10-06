@@ -196,21 +196,17 @@ class TestCacheDirectoriesAreNamed:
             == tmp_path / "docs" / ".sdbtmp_website_cache"
         )
 
-    def test_the_marker_is_hidden_and_the_copy_parent_is_not(self) -> None:
-        """The marker is hidden; the one folder that cannot be is not.
+    def test_the_marker_names_every_folder_the_build_writes(self) -> None:
+        """One marker names the caches, the scratch space, and a document cache.
 
-        The isolated copy a target renders from is the parent directory of the
-        document Quarto is given, and Quarto resolves a project through that
-        path. A hidden component stops that search, so Quarto reports the
-        document's own directory as the project and a relative
-        ``QUARTO_DOCUMENT_PATH``, and a document that reads that variable opens a
-        path that is not there. Measured on Quarto 1.9.31 with the copy's parent
-        name as the only variable.
+        The copy a parallel website build renders from is the parent directory of
+        the document Quarto is given, so its name is a render input too, and the
+        render is what answers for it rather than the marker.
         """
         from sdb.config import BUILD_TEMP_DIR, SDB_TEMP_PREFIX
 
         assert SDB_TEMP_PREFIX.startswith(".")
-        assert not BUILD_TEMP_DIR.startswith(".")
+        assert BUILD_TEMP_DIR.startswith(SDB_TEMP_PREFIX)
 
     def test_the_marker_covers_a_folder_the_engine_has_not_grown(self) -> None:
         """The skip follows the marker, rather than a list of the folders."""
@@ -222,7 +218,7 @@ class TestCacheDirectoriesAreNamed:
         for name in (
             ".sdbtmp_cache",
             ".sdbtmp_jupyter",
-            "_sdbtmp_build",
+            ".sdbtmp_build",
             ".sdbtmp_index_cache",
             "_site",
         ):
@@ -237,7 +233,7 @@ class TestCacheDirectoriesAreNamed:
         names = (
             ".sdbtmp_cache",
             ".sdbtmp_jupyter",
-            "_sdbtmp_build",
+            ".sdbtmp_build",
             ".sdbtmp_index_cache",
             "_site",
         )

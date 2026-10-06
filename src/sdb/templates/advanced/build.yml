@@ -51,9 +51,8 @@ post_render:
 #   - Glob patterns: **/*.md, **/README.md
 #   - Directory patterns: **/_include/, **/*_libs/
 #   - Simple patterns: README.md, contributing.md
-# The folders the build writes for itself carry the .sdbtmp_ marker, and the
-# copy a parallel website build renders from is _sdbtmp_build.  Both are
-# excluded automatically, so they do not need to be listed here.
+# The folders the build writes for itself carry the .sdbtmp_ marker, and they
+# are excluded automatically, so they do not need to be listed here.
 exclude:
   - "**/README.md"
   - "**/*.llms.md"

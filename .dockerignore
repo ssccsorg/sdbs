@@ -24,7 +24,6 @@ build/
 
 # ---4. Documentation Build Cache ---
 .sdbtmp_*/
-_sdbtmp_build/
 **/_site/
 **/.*_site/
 **/*_files/

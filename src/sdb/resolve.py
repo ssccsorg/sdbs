@@ -41,7 +41,7 @@ class _BaseResolver:
 
     SYSTEM_IGNORED_DIRS: Set[str] = {
         ".venv", ".git", ".quarto", "_site", "_llms",
-        "node_modules", "__pycache__", ".*", "_sdbtmp_build",
+        "node_modules", "__pycache__", ".*",
     }
     SOURCE_EXTENSIONS: Set[str] = set()  # subclasses MUST set this
     _APPLY_BUILD_YML_EXCLUDE: bool = True
