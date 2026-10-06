@@ -60,7 +60,7 @@ sdb deploy docs
 sdb deploy docs --require-all
 sdb deploy docs --dry-run
 
-# Remove Quarto build artifacts (_cached/, _jupyter_cache/, _files/, html, pdf...)
+# Remove Quarto build artifacts (.sdbtmp_*, _files/, html, pdf...)
 sdb clean docs
 ```
 
@@ -80,11 +80,11 @@ An article build goes through the renderer rather than through the site orchestr
 
 ## Build Cache
 
-A build keeps the rendered form of each document in `_cached`, so an unchanged document is not rendered twice, and it runs the Jupyter cache Quarto executes notebooks against in `_jupyter_cache`.
+A build keeps the rendered form of each document in `.sdbtmp_cache`, so an unchanged document is not rendered twice, and it runs the Jupyter cache Quarto executes notebooks against in `.sdbtmp_jupyter`.
 
-Both live in the directory the command was run from. That is one place whether the documents sit in a subdirectory or the docs root is the repository root, so a workflow caches `_cached` and `_jupyter_cache` at its checkout root in either case, and nothing the build writes sits outside the tree it checked out.
+Both live in the directory the command was run from. That is one place whether the documents sit in a subdirectory or the docs root is the repository root, so a workflow caches `.sdbtmp_cache` and `.sdbtmp_jupyter` at its checkout root in either case, and nothing the build writes sits outside the tree it checked out.
 
-A project whose docs root is its repository root therefore writes both inside the tree it reads, which makes the exclusions load-bearing: `sdb clean` removes them, the isolated copies a website build renders from leave them behind, and the project should name them under `exclude` in `build.yml` so target discovery skips them. Having the engine exclude its own artifact directories by default would remove that ask.
+Every folder the build writes for itself carries one marker, a leading dot and `.sdbtmp_`: `.sdbtmp_cache` and `.sdbtmp_jupyter` here, `.sdbtmp_build` for the scratch space a parallel website build copies into, and a per-document `.sdbtmp_<document>_cache` beside the document. A project's own source folders keep the leading underscore (`_include`, `_extensions`), so the marker tells the two apart wherever a folder is listed. The engine reads no folder that carries it: target discovery excludes it, the isolated copy a website build renders from leaves it behind, `sdb clean` removes it, and a preview does not find one document twice. A project whose docs root is its repository root therefore declares nothing for them.
 
 ## External Deploy Plugins
 

@@ -55,12 +55,9 @@ BUILD_DIR=$(mktemp -d /tmp/ssccs_build.XXXXXX)
 echo "[INFO] Clean docs copy: $BUILD_DIR/docs"
 
 rsync -a --delete \
-  --exclude=_cached \
+  --exclude='.sdbtmp_*' \
   --exclude=_site \
-  --exclude=_docsbuild \
   --exclude=_llms \
-  --exclude=_jupyter_cache \
-  --exclude='*_cached' \
   --exclude='*_files' \
   --exclude='*_libs' \
   --exclude='*_output' \

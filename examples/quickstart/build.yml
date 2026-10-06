@@ -12,6 +12,4 @@ exclude:
   - "**/_include/"
   - "**/*_output/"
   - "**/*_files/"
-  - "**/*_cached/"
   - "**/*_libs/"
-  - "**/_jupyter_cache"

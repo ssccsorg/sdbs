@@ -69,20 +69,22 @@ def find_build_yml(start: Optional[Path] = None) -> Optional[Path]:
 
 
 def load_exclude_patterns(build_yml: Path) -> List[str]:
-    """Load exclude patterns from the given ``build.yml`` path.
+    """Return the patterns a preview has to skip, whatever *build_yml* says.
 
-    Uses the same config loading and pattern resolution that ``sdb build``
-    uses, so that ``sdb render`` respects the same exclusions.
+    The folders the build writes for itself are excluded on every path: a
+    preview that read a cache copy of a document would see one document as two
+    candidates, and an unreadable or absent ``build.yml`` must not open that
+    door.  The project's own ``exclude:`` list is added to them.
     """
+    from sdb.config import DISCOVERY_EXCLUDE_PATTERNS, ConfigManager
     try:
-        from sdb.config import ConfigManager
         cfg: Dict[str, Any] = ConfigManager.load_yaml_file(build_yml)
         return ConfigManager.get_exclude_patterns(cfg)
     except Exception as exc:
         logger.warning(
             "Failed to load exclusions from %s: %s", build_yml, exc
         )
-        return []
+        return list(DISCOVERY_EXCLUDE_PATTERNS)
 
 
 def find_qmd_files(

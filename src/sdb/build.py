@@ -30,6 +30,7 @@ from .config import (
     BUILD_CACHE_DIR,
     BUILD_TEMP_DIR,
     JUPYTER_CACHE_DIR,
+    SDB_TEMP_PREFIX,
     ConfigManager,
     CleanupManager,
 )
@@ -293,7 +294,7 @@ def should_rerender_for_sidebar(build_targets: set, docs_root: Path) -> bool:
 def cache_site_directory(target_name: str, hash_str: str, site_dir: Path, docs_root: Path) -> bool:
     """
     Cache the entire _site directory for a target (including site_libs).
-    The directory is copied to _cached/{target}/{hash}/site/.
+    The directory is copied to .sdbtmp_cache/{target}/{hash}/site/.
     Returns True on success, False on error.
     """
     if not site_dir.exists():
@@ -340,7 +341,8 @@ def get_cache_file(qmd_path: Path, fmt: str) -> Path:
     if qmd_path.stem.lower() == "index":
         parent_name = qmd_path.parent.name
         if parent_name and parent_name != ".":
-            return qmd_path.parent / f"{parent_name}_cached" / f"rendered_{fmt}.txt"
+            cache_dir = qmd_path.parent / f"{SDB_TEMP_PREFIX}{parent_name}_cache"
+            return cache_dir / f"rendered_{fmt}.txt"
     return get_cache_dir(qmd_path) / f"rendered_{fmt}.txt"
 
 
@@ -1787,8 +1789,8 @@ def _cleanup_orphaned_caches(
     Args:
         successful_targets: Set of target names that were successfully built
         docs_root: Root directory of documentation
-        cache_base: Base cache directory (defaults to ``_cached`` in parent
-            of docs root)
+        cache_base: Base cache directory (defaults to ``.sdbtmp_cache`` in the
+            directory the build ran from)
 
     Returns:
         Number of orphaned cache directories removed

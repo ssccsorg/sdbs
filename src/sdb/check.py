@@ -32,19 +32,15 @@ IGNORED_DIRS = {
     ".git",
     "_site",
     "_pages",
-    "_cache*",
     ".quarto",
-    "_docsbuild",
     "_llms",
     "node_modules",
     "__pycache__",
-    "*_cached",
     "*_files",
     "*_libs",
     "*_output",
     "*_extensions",
-    ".*",
-    "_jupyter_cache",
+    ".*",  # every dotted folder, including the build's own .sdbtmp_*
 }
 VALID_EXTENSIONS = {".md", ".qmd", ".yml", ".yaml", ".json", ".bib"}
 SOURCE_EXTENSIONS = {
@@ -66,7 +62,7 @@ def _is_ignored_path(file_path: Path, root: Path) -> bool:
     """Return True if any part of file_path matches an IGNORED_DIRS entry.
 
     Each IGNORED_DIRS entry is matched via fnmatch, so glob patterns
-    like ``_llms*`` or ``_cached*`` are supported alongside exact names.
+    like ``*_files`` or ``.*`` are supported alongside exact names.
     """
     parts = file_path.relative_to(root).parts
     for part in parts:

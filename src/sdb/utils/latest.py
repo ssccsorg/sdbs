@@ -33,7 +33,7 @@ EXCLUDE_PATTERNS = [
     "**/_utils/",
     "**/*_output/",
     "**/*_files/",
-    "**/*_cached/",
+    "**/.sdbtmp_*/",
     "**/*_libs/",
 ]
 

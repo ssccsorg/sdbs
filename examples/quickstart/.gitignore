@@ -3,7 +3,6 @@
 /_site/
 /**/*_files/
 /**/*_output/
-/**/*_cached/
-/**/_jupyter_cache/
+/**/.sdbtmp_*/
 __pycache__/
 *.pyc
