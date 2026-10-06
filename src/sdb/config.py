@@ -300,18 +300,20 @@ class CleanupManager:
         "**/__pycache__", "**/*.pyc", "**/*.pyd", "**/*.log",
         "**/*_output", "**/*_extensions", "**/*_cached", "**/*_files",
         "**/*_libs", "**/_llms", "**/_site", "**/_docsbuild",
-        "**/.jupyter_cache",
+        "**/_jupyter_cache",
         "**/*.tex", "**/*.pdf", "**/*.html",
         "**/*.quarto_ipynb*", "**/*.quarto",
         "**/*.c2pa", "**/*.c2pa_identifier.svg",
     ]
 
     def __init__(self):
+        # The cache and the scratch directory sit beside the docs root when the
+        # documents live in a subdirectory, and inside it when the docs root is
+        # the directory the build ran from, where the patterns above reach them.
         self._cleaning_patterns: List[str] = self.IGNORING_ARTIFACT_PATTERNS + [
             os.path.join("..", BUILD_TEMP_DIR),
             os.path.join("..", BUILD_CACHE_DIR),
             os.path.join("..", JUPYTER_CACHE_DIR),
-            "**/.jupyter_cache",
         ]
 
     def ignore_quarto_artifacts(self) -> Callable[[str, list[str]], set[str]]:

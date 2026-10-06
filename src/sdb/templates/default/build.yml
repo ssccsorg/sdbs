@@ -45,7 +45,7 @@ exclude:
   - "**/*_libs/"
   - "**/*_pages/"
   # Jupyter cache created during code cell execution.
-  - "**/.jupyter_cache"
+  - "**/_jupyter_cache"
 
 # Metadata checks (optional)
 # The pre-build metadata step writes the LaTeX file a document's title page

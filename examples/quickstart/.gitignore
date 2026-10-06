@@ -4,6 +4,6 @@
 /**/*_files/
 /**/*_output/
 /**/*_cached/
-/**/.jupyter_cache/
+/**/_jupyter_cache/
 __pycache__/
 *.pyc

@@ -59,7 +59,7 @@ rsync -a --delete \
   --exclude=_site \
   --exclude=_docsbuild \
   --exclude=_llms \
-  --exclude=.jupyter_cache \
+  --exclude=_jupyter_cache \
   --exclude='*_cached' \
   --exclude='*_files' \
   --exclude='*_libs' \

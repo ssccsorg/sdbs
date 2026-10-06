@@ -1,16 +1,22 @@
-"""Tests for the isolated docs copy a website parallel build renders from.
+"""Tests for where the build reads and writes outside the documents themselves.
 
 ``sdb build --website -j N`` copies the docs root per target and renders from
 the copy.  The copy excludes ``_files/``, because that is generated output, so
 the metadata file a title page inputs has to be written again inside it.
+
+The build cache lives in the directory the command was run from, so one
+directory serves either layout of the docs root.
 """
 
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
+import sdb.build as build
 from sdb.build import prepare_isolated_docs
+from sdb.config import CleanupManager
 
 AUTHOR_YML = """author:
   - name: Example Author
@@ -118,3 +124,94 @@ class TestPrepareIsolatedDocs:
             "Metadata generation failed" in str(record.message)
             for record in caplog.records
         )
+
+
+class TestCacheLocation:
+    """The build cache lives where the command was run.
+
+    One directory serves a layout whose documents sit in a subdirectory and one
+    whose docs root is the repository root, so a caller caches the same place in
+    either case, and nothing the build writes sits outside the tree the caller
+    checked out.
+    """
+
+    def test_the_invocation_directory_is_the_cache_parent(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
+        assert build.cache_parent(tmp_path / "docs") == tmp_path
+
+    def test_the_layout_does_not_move_the_cache(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
+        assert build.get_cache_base(tmp_path / "docs") == tmp_path / "_cached"
+        assert build.get_cache_base(tmp_path) == tmp_path / "_cached"
+
+    def test_an_uninitialized_caller_stays_inside_the_tree_it_named(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(build, "CACHE_ROOT", None)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        assert build.get_cache_base(tmp_path / "docs") == tmp_path / "docs" / "_cached"
+
+    def test_initialize_config_reads_the_invocation_directory(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The policy is read once, from where the command was run."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "docs").mkdir()
+        # initialize_config writes state that outlives the test.
+        for name in (
+            "CACHE_ROOT",
+            "JUPYTER_CACHE_PATH",
+            "EXTERNAL_CONFIG",
+            "TARGET_CONFIG",
+            "BUILD_FUNCTIONS",
+            "OUTPUT_DIR_TARGETS",
+        ):
+            monkeypatch.setattr(build, name, getattr(build, name))
+        monkeypatch.setenv("JUPYTERCACHE", "")
+
+        build.initialize_config(tmp_path / "docs")
+
+        assert build.CACHE_ROOT == tmp_path
+        assert build.get_cache_base(tmp_path) == tmp_path / "_cached"
+        assert (tmp_path / "_jupyter_cache").is_dir()
+
+
+class TestCacheDirectoriesAreNamed:
+    """Wherever the build skips or removes its artifacts, the cache is named."""
+
+    def test_the_copy_skip_names_the_cache_directories(self) -> None:
+        ignore = CleanupManager().ignore_quarto_artifacts()
+        for name in ("_cached", "_jupyter_cache", "_docsbuild", "_site"):
+            assert name in ignore("docs", [name, "index.qmd"])
+
+    def test_the_copy_leaves_the_cache_behind(self, tmp_path: Path) -> None:
+        """The copy a target renders from carries no cache, and no scratch space."""
+        source = tmp_path / "docs"
+        for name in ("_cached", "_jupyter_cache", "_docsbuild", "_site"):
+            (source / name / "inner").mkdir(parents=True)
+        _write(source / "index.qmd", "---\ntitle: x\n---\n")
+        destination = tmp_path / "copy"
+
+        shutil.copytree(
+            source, destination, ignore=CleanupManager().ignore_quarto_artifacts()
+        )
+
+        assert (destination / "index.qmd").is_file()
+        for name in ("_cached", "_jupyter_cache", "_docsbuild", "_site"):
+            assert not (destination / name).exists(), name
+
+    def test_clean_removes_a_cache_inside_the_docs_root(self, tmp_path: Path) -> None:
+        (tmp_path / "_jupyter_cache" / "executed").mkdir(parents=True)
+        (tmp_path / "_cached" / "index" / "hash").mkdir(parents=True)
+
+        assert build.clean_quarto_artifacts(tmp_path) is True
+
+        assert not (tmp_path / "_jupyter_cache").exists()
+        assert not (tmp_path / "_cached").exists()

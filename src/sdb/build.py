@@ -25,6 +25,7 @@ from .artifact import (
     find_cached_artifact as _find_cached_artifact,
 )
 from .config import (
+    BUILD_CACHE_DIR,
     BUILD_TEMP_DIR,
     JUPYTER_CACHE_DIR,
     ConfigManager,
@@ -56,7 +57,7 @@ TARGET_CONFIG: Dict[str, Dict[str, Any]] = {}
 BUILD_FUNCTIONS: Dict[str, Callable[..., bool]] = {}
 OUTPUT_DIR_TARGETS: set = set()
 _INITIAL_CACHED_TARGETS: Optional[set] = None
-PROJECT_ROOT: Optional[Path] = None  # Set by initialize_config
+CACHE_ROOT: Optional[Path] = None  # Set by initialize_config: where the command ran
 
 
 # ---------------------------------------------------------------------------
@@ -125,17 +126,27 @@ def get_cache_dir_for_target(qmd_path: Path, target_name: str) -> Path:
     return QuartoInspector.get_cache_dir_for_target(qmd_path, target_name)
 
 
-def get_cache_base(docs_root: Optional[Path] = None) -> Path:
-    """Return the system-wide cache base directory.
+def cache_parent(docs_root: Optional[Path] = None) -> Path:
+    """Return the directory the build cache and its scratch space live in.
 
-    Uses the module-level ``PROJECT_ROOT`` (set by ``initialize_config``)
-    when available, falling back to ``docs_root.parent``.
+    The cache lives where the command was run, which ``initialize_config``
+    reads once into ``CACHE_ROOT``.  That is one directory for a layout whose
+    documents sit in a subdirectory and for one whose docs root is the
+    repository root, so a caller caches the same place in either case, and
+    nothing the build writes has to sit outside the tree the caller checked
+    out.  A caller that did not initialize the configuration gets its own docs
+    root, which keeps a direct call inside the tree it named.
     """
-    if PROJECT_ROOT is not None:
-        return PROJECT_ROOT / "_cached"
+    if CACHE_ROOT is not None:
+        return CACHE_ROOT
     if docs_root is not None:
-        return docs_root.parent / "_cached"
-    return Path.cwd().parent / "_cached"
+        return Path(docs_root)
+    return Path.cwd()
+
+
+def get_cache_base(docs_root: Optional[Path] = None) -> Path:
+    """Return the base directory of the build cache."""
+    return cache_parent(docs_root) / BUILD_CACHE_DIR
 
 
 def format_to_extension(fmt: str) -> str:
@@ -187,10 +198,10 @@ def get_cached_artifact_path(
     docs_root: Path,
     linked_ext: Optional[str] = None,
 ) -> Path:
-    # Use PROJECT_ROOT for cache paths (consistent across website mode)
-    project_root = PROJECT_ROOT if PROJECT_ROOT else docs_root.parent
+    # The cache parent is where the command ran, which is the same directory in
+    # the isolated copies website mode renders from.
     return _get_cached_artifact_path(
-        target_name, hash_str, fmt, project_root, linked_ext=linked_ext
+        target_name, hash_str, fmt, cache_parent(docs_root), linked_ext=linked_ext
     )
 
 
@@ -201,9 +212,8 @@ def find_cached_artifact(
     docs_root: Path,
     linked_ext: Optional[str] = None,
 ) -> Optional[Path]:
-    project_root = PROJECT_ROOT if PROJECT_ROOT else docs_root.parent
     return _find_cached_artifact(
-        target_name, hash_str, fmt, project_root, linked_ext=linked_ext
+        target_name, hash_str, fmt, cache_parent(docs_root), linked_ext=linked_ext
     )
 
 
@@ -1478,11 +1488,13 @@ def initialize_config(docs_root: Path, config_path: Optional[Path] = None) -> No
     cache directory exists.
     """
     global EXTERNAL_CONFIG, TARGET_CONFIG, BUILD_FUNCTIONS, OUTPUT_DIR_TARGETS
-    global JUPYTER_CACHE_PATH, PROJECT_ROOT
+    global JUPYTER_CACHE_PATH, CACHE_ROOT
 
-    PROJECT_ROOT = docs_root.parent
+    # The cache and the build's scratch space live where the command was run, so
+    # a caller caches one directory whatever the layout of the docs root.
+    CACHE_ROOT = Path.cwd()
 
-    jupyter_cache_path = PROJECT_ROOT / JUPYTER_CACHE_DIR
+    jupyter_cache_path = CACHE_ROOT / JUPYTER_CACHE_DIR
     jupyter_cache_path.mkdir(parents=True, exist_ok=True)
     JUPYTER_CACHE_PATH = jupyter_cache_path
     os.environ["JUPYTERCACHE"] = str(jupyter_cache_path)
@@ -1797,7 +1809,7 @@ def build_targets(
         logger.info("No targets specified. Nothing to build.")
         return True
 
-    build_temp_path = docs_root.parent / BUILD_TEMP_DIR
+    build_temp_path = cache_parent(docs_root) / BUILD_TEMP_DIR
 
     # Run user-configured pre-build commands first (build.yml), then defaults
     run_pre_build_sequence(EXTERNAL_CONFIG, docs_root, targets)
@@ -2069,26 +2081,3 @@ def build_targets(
 # ---------------------------------------------------------------------------
 
 JUPYTER_CACHE_PATH: Optional[Path] = None  # Set by initialize_config
-
-IGNORING_ARTIFACT_PATTERNS = [
-    "**/__pycache__",
-    "**/*.pyc",
-    "**/*.pyd",
-    "**/*.log",
-    "**/*_output",
-    "**/*_extensions",
-    "**/*_cached",
-    "**/*_files",
-    "**/*_libs",
-    "**/_llms",
-    "**/_site",
-    "**/_docsbuild",
-    "**/.jupyter_cache",
-    "**/*.tex",
-    "**/*.pdf",
-    "**/*.html",
-    "**/*.quarto_ipynb*",
-    "**/*.quarto",
-    "**/*.c2pa",
-    "**/*.c2pa_identifier.svg",
-]

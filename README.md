@@ -60,7 +60,7 @@ sdb deploy docs
 sdb deploy docs --require-all
 sdb deploy docs --dry-run
 
-# Remove Quarto build artifacts (_cached/, _files/, html, pdf...)
+# Remove Quarto build artifacts (_cached/, _jupyter_cache/, _files/, html, pdf...)
 sdb clean docs
 ```
 
@@ -77,6 +77,14 @@ Every command that takes a docs root stops when the path is not a directory, and
 `--article` renders the PDF form of each target and assembles the distribution an article is published as: the PDF, its LaTeX source, the figures, the media, and the shared `_files`. Each document's distribution is a directory named after it, beside the document itself, or under `--output-dir` when one is given. It is the form an external deploy channel carries, which is what lets a Zenodo-style channel be added as a plugin: `sdb build docs --article` produces the article, and a deploy activation names the directory it publishes.
 
 An article build goes through the renderer rather than through the site orchestration, since an article is a document's publication artifact rather than a page. It therefore neither reads nor writes the site directory, and `--sequence`, `--jobs`, `--parallel-formats`, and the `snapshot` target do not apply: the article is rendered document by document, and `sdb build` refuses those rather than ignoring them. The built-in pre-build sequence does run, so the version stamp an article carries agrees with the one a full build writes for the same document.
+
+## Build Cache
+
+A build keeps the rendered form of each document in `_cached`, so an unchanged document is not rendered twice, and it runs the Jupyter cache Quarto executes notebooks against in `_jupyter_cache`.
+
+Both live in the directory the command was run from. That is one place whether the documents sit in a subdirectory or the docs root is the repository root, so a workflow caches `_cached` and `_jupyter_cache` at its checkout root in either case, and nothing the build writes sits outside the tree it checked out.
+
+A project whose docs root is its repository root therefore writes both inside the tree it reads, which makes the exclusions load-bearing: `sdb clean` removes them, the isolated copies a website build renders from leave them behind, and the project should name them under `exclude` in `build.yml` so target discovery skips them. Having the engine exclude its own artifact directories by default would remove that ask.
 
 ## External Deploy Plugins
 

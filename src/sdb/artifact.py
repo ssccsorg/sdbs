@@ -127,9 +127,8 @@ def get_cached_artifact_path(
     Parameters
     ----------
     cache_parent
-        The project root directory (parent of ``docs/``), under which the
-        ``_cached/`` directory lives.  This mirrors ``PROJECT_ROOT`` in
-        :mod:`sdb.build`.
+        The directory the build cache lives in, which is where the command was
+        run.  This mirrors :func:`sdb.build.cache_parent`.
     """
     ext = linked_ext if linked_ext else ConfigManager.format_to_extension(fmt)
     return ConfigManager.get_cache_base(cache_parent) / target_name / hash_str / f"{target_name}.{ext}"

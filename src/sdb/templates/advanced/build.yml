@@ -65,7 +65,7 @@ exclude:
   - "**/*_cached/"
   - "**/*_libs/"
   - "**/*_pages/"
-  - "**/.jupyter_cache"
+  - "**/_jupyter_cache"
 
 # Metadata checks (optional)
 # The pre-build metadata step writes the LaTeX file a document's title page

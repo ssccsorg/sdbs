@@ -14,4 +14,4 @@ exclude:
   - "**/*_files/"
   - "**/*_cached/"
   - "**/*_libs/"
-  - "**/.jupyter_cache"
+  - "**/_jupyter_cache"
