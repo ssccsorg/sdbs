@@ -11,6 +11,12 @@ import pytest
 from sdb.utils.quick_render import find_qmd_files, quick_render, render_qmd
 
 
+def _engine_exclude_patterns() -> list:
+    """The patterns discovery applies whatever a project's build.yml declares."""
+    from sdb.config import DISCOVERY_EXCLUDE_PATTERNS
+    return list(DISCOVERY_EXCLUDE_PATTERNS)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -260,10 +266,15 @@ class TestFindQmdFiles:
 
 
 class TestLoadExcludePatterns:
-    """Tests for loading exclude patterns from a build.yml path."""
+    """Patterns a preview skips, from the engine and from build.yml.
+
+    A cache holds a copy of the document it serves, so a preview that read one
+    would offer the same document twice.  The engine's own patterns therefore
+    hold on every path out of the loader, whatever the project wrote down.
+    """
 
     def test_loads_patterns(self, tmp_path: Path) -> None:
-        """Exclude patterns from build.yml are loaded correctly."""
+        """Patterns from build.yml lead the engine's own, which stay present."""
         build_yml = tmp_path / "build.yml"
         build_yml.write_text("exclude:\n  - \"**/_include\"\n  - \"*.bak\"")
         from sdb.utils.quick_render import load_exclude_patterns
@@ -271,27 +282,33 @@ class TestLoadExcludePatterns:
         assert "**/_include" in patterns
         assert "*.bak" in patterns
 
+    def test_the_build_directories_are_always_excluded(self, tmp_path: Path) -> None:
+        """A project's list adds to the engine's instead of replacing it."""
+        build_yml = tmp_path / "build.yml"
+        build_yml.write_text("exclude:\n  - \"*.bak\"")
+        from sdb.utils.quick_render import load_exclude_patterns
+        patterns = load_exclude_patterns(build_yml)
+        for engine_pattern in _engine_exclude_patterns():
+            assert engine_pattern in patterns
+
     def test_no_exclude_key(self, tmp_path: Path) -> None:
-        """build.yml without exclude key returns empty list."""
+        """build.yml without an exclude key still excludes the build's folders."""
         build_yml = tmp_path / "build.yml"
         build_yml.write_text("target_config:\n  test:\n    c2pa: true")
         from sdb.utils.quick_render import load_exclude_patterns
-        patterns = load_exclude_patterns(build_yml)
-        assert patterns == []
+        assert load_exclude_patterns(build_yml) == _engine_exclude_patterns()
 
     def test_empty_file(self, tmp_path: Path) -> None:
-        """Empty build.yml returns empty list."""
+        """An empty build.yml still excludes the build's folders."""
         build_yml = tmp_path / "build.yml"
         build_yml.write_text("")
         from sdb.utils.quick_render import load_exclude_patterns
-        patterns = load_exclude_patterns(build_yml)
-        assert patterns == []
+        assert load_exclude_patterns(build_yml) == _engine_exclude_patterns()
 
     def test_missing_file(self, tmp_path: Path) -> None:
-        """Non-existent build.yml returns empty list (error handled gracefully)."""
+        """A build.yml that does not exist still excludes the build's folders."""
         from sdb.utils.quick_render import load_exclude_patterns
-        patterns = load_exclude_patterns(tmp_path / "nonexistent.yml")
-        assert patterns == []
+        assert load_exclude_patterns(tmp_path / "nonexistent.yml") == _engine_exclude_patterns()
 
 
 # ============================================================================
@@ -936,20 +953,19 @@ class TestArticleArtifacts:
 
 
 class TestLoadExcludePatternsEdgeCases:
-    """Edge cases for load_exclude_patterns."""
+    """A build.yml the loader cannot read, where losing the engine's own
+    patterns would be least visible."""
 
     def test_malformed_yaml(self, tmp_path: Path) -> None:
-        """Malformed build.yml returns empty list gracefully."""
+        """A malformed build.yml still excludes the build's folders."""
         from sdb.utils.quick_render import load_exclude_patterns
         build_yml = tmp_path / "build.yml"
         build_yml.write_text("exclude: [unclosed")
-        patterns = load_exclude_patterns(build_yml)
-        assert patterns == []
+        assert load_exclude_patterns(build_yml) == _engine_exclude_patterns()
 
     def test_not_a_yaml_file(self, tmp_path: Path) -> None:
-        """Non-YAML content returns empty list gracefully."""
+        """Content that is not YAML still excludes the build's folders."""
         from sdb.utils.quick_render import load_exclude_patterns
         build_yml = tmp_path / "build.yml"
         build_yml.write_bytes(b"\x00\x01\x02")
-        patterns = load_exclude_patterns(build_yml)
-        assert patterns == []
+        assert load_exclude_patterns(build_yml) == _engine_exclude_patterns()

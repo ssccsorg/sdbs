@@ -122,7 +122,7 @@ def mock_initialize() -> MagicMock:
         "index": lambda **kw: True,
     }
     build_mod.OUTPUT_DIR_TARGETS = set()
-    build_mod.PROJECT_ROOT = Path("/tmp")
+    build_mod.CACHE_ROOT = Path("/tmp")
     yield
 
 

@@ -23,9 +23,7 @@ build/
 **/.ipynb_checkpoints/
 
 # ---4. Documentation Build Cache ---
-_cached/
-_docsbuild/
-_jupyter_cache/
+_sdbtmp_*/
 **/_site/
 **/.*_site/
 **/*_files/
@@ -33,10 +31,8 @@ _jupyter_cache/
 **/*_output/
 **/*_extensions/
 **/*_libs/
-**/*_cached/
 **/.quarto/
 **/*.quarto_ipynb
-**/.jupyter_cache/
 
 # ---5. Rendered Outputs ---
 **/*.tex

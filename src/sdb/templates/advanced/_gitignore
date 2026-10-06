@@ -4,8 +4,6 @@
 **/*_files/
 **/*_output/
 **/*_extensions/
-**/*_cached/
-**/_docsbuild/
-**/.jupyter_cache/
+**/_sdbtmp_*/
 __pycache__/
 *.pyc

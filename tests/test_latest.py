@@ -96,8 +96,8 @@ class TestMatchesExclude:
     def test_output_files_dir_matches(self) -> None:
         assert matches_exclude("chapter/index_files/figure.pdf", EXCLUDE_PATTERNS) is True
 
-    def test_cached_dir_matches(self) -> None:
-        assert matches_exclude("chapter/index_cached/cache.db", EXCLUDE_PATTERNS) is True
+    def test_build_temp_dir_matches(self) -> None:
+        assert matches_exclude("chapter/_sdbtmp_index_cache/cache.db", EXCLUDE_PATTERNS) is True
 
     def test_libs_dir_matches(self) -> None:
         assert matches_exclude("paper/_libs/vendor.js", EXCLUDE_PATTERNS) is True

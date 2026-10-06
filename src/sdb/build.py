@@ -14,6 +14,8 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -25,8 +27,10 @@ from .artifact import (
     find_cached_artifact as _find_cached_artifact,
 )
 from .config import (
+    BUILD_CACHE_DIR,
     BUILD_TEMP_DIR,
     JUPYTER_CACHE_DIR,
+    SDB_TEMP_PREFIX,
     ConfigManager,
     CleanupManager,
 )
@@ -56,7 +60,37 @@ TARGET_CONFIG: Dict[str, Dict[str, Any]] = {}
 BUILD_FUNCTIONS: Dict[str, Callable[..., bool]] = {}
 OUTPUT_DIR_TARGETS: set = set()
 _INITIAL_CACHED_TARGETS: Optional[set] = None
-PROJECT_ROOT: Optional[Path] = None  # Set by initialize_config
+CACHE_ROOT: Optional[Path] = None  # Set by initialize_config: where the command ran
+
+# What the build did with the cache, reported at the end of a run.  A warm build
+# writes nothing, so the count is the statement that the cache served it, and it
+# is the line a caller checks instead of reading the render log.
+_CACHE_ACTIVITY_LOCK = threading.Lock()
+_CACHE_ACTIVITY: Dict[str, int] = {"artifacts": 0, "served": 0}
+
+
+def reset_cache_activity() -> None:
+    with _CACHE_ACTIVITY_LOCK:
+        for kind in _CACHE_ACTIVITY:
+            _CACHE_ACTIVITY[kind] = 0
+
+
+def note_cache_activity(kind: str) -> None:
+    """Record one cache outcome, from a render thread or the render itself."""
+    with _CACHE_ACTIVITY_LOCK:
+        _CACHE_ACTIVITY[kind] = _CACHE_ACTIVITY.get(kind, 0) + 1
+
+
+def cache_activity_summary(docs_root: Optional[Path] = None) -> str:
+    """The line that says what the cache did for this build."""
+    with _CACHE_ACTIVITY_LOCK:
+        artifacts = _CACHE_ACTIVITY.get("artifacts", 0)
+        served = _CACHE_ACTIVITY.get("served", 0)
+    return (
+        f"Cache: {artifacts} artifact(s) written, "
+        f"{served} target(s) served entirely from the cache, "
+        f"root {get_cache_base(docs_root)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -125,17 +159,27 @@ def get_cache_dir_for_target(qmd_path: Path, target_name: str) -> Path:
     return QuartoInspector.get_cache_dir_for_target(qmd_path, target_name)
 
 
-def get_cache_base(docs_root: Optional[Path] = None) -> Path:
-    """Return the system-wide cache base directory.
+def cache_parent(docs_root: Optional[Path] = None) -> Path:
+    """Return the directory the build cache and its scratch space live in.
 
-    Uses the module-level ``PROJECT_ROOT`` (set by ``initialize_config``)
-    when available, falling back to ``docs_root.parent``.
+    The cache lives where the command was run, which ``initialize_config``
+    reads once into ``CACHE_ROOT``.  That is one directory for a layout whose
+    documents sit in a subdirectory and for one whose docs root is the
+    repository root, so a caller caches the same place in either case, and
+    nothing the build writes has to sit outside the tree the caller checked
+    out.  A caller that did not initialize the configuration gets its own docs
+    root, which keeps a direct call inside the tree it named.
     """
-    if PROJECT_ROOT is not None:
-        return PROJECT_ROOT / "_cached"
+    if CACHE_ROOT is not None:
+        return CACHE_ROOT
     if docs_root is not None:
-        return docs_root.parent / "_cached"
-    return Path.cwd().parent / "_cached"
+        return Path(docs_root)
+    return Path.cwd()
+
+
+def get_cache_base(docs_root: Optional[Path] = None) -> Path:
+    """Return the base directory of the build cache."""
+    return cache_parent(docs_root) / BUILD_CACHE_DIR
 
 
 def format_to_extension(fmt: str) -> str:
@@ -187,10 +231,10 @@ def get_cached_artifact_path(
     docs_root: Path,
     linked_ext: Optional[str] = None,
 ) -> Path:
-    # Use PROJECT_ROOT for cache paths (consistent across website mode)
-    project_root = PROJECT_ROOT if PROJECT_ROOT else docs_root.parent
+    # The cache parent is where the command ran, which is the same directory in
+    # the isolated copies website mode renders from.
     return _get_cached_artifact_path(
-        target_name, hash_str, fmt, project_root, linked_ext=linked_ext
+        target_name, hash_str, fmt, cache_parent(docs_root), linked_ext=linked_ext
     )
 
 
@@ -201,9 +245,8 @@ def find_cached_artifact(
     docs_root: Path,
     linked_ext: Optional[str] = None,
 ) -> Optional[Path]:
-    project_root = PROJECT_ROOT if PROJECT_ROOT else docs_root.parent
     return _find_cached_artifact(
-        target_name, hash_str, fmt, project_root, linked_ext=linked_ext
+        target_name, hash_str, fmt, cache_parent(docs_root), linked_ext=linked_ext
     )
 
 
@@ -251,7 +294,7 @@ def should_rerender_for_sidebar(build_targets: set, docs_root: Path) -> bool:
 def cache_site_directory(target_name: str, hash_str: str, site_dir: Path, docs_root: Path) -> bool:
     """
     Cache the entire _site directory for a target (including site_libs).
-    The directory is copied to _cached/{target}/{hash}/site/.
+    The directory is copied to _sdbtmp_cache/{target}/{hash}/site/.
     Returns True on success, False on error.
     """
     if not site_dir.exists():
@@ -298,7 +341,8 @@ def get_cache_file(qmd_path: Path, fmt: str) -> Path:
     if qmd_path.stem.lower() == "index":
         parent_name = qmd_path.parent.name
         if parent_name and parent_name != ".":
-            return qmd_path.parent / f"{parent_name}_cached" / f"rendered_{fmt}.txt"
+            cache_dir = qmd_path.parent / f"{SDB_TEMP_PREFIX}{parent_name}_cache"
+            return cache_dir / f"rendered_{fmt}.txt"
     return get_cache_dir(qmd_path) / f"rendered_{fmt}.txt"
 
 
@@ -400,6 +444,27 @@ def should_render_format(
     return True
 
 
+def _atomic_copy(source: Path, destination: Path) -> None:
+    """Copy a file into place without exposing a partly written destination.
+
+    One cache serves every render, so a reader can reach a file another render is
+    still writing.  The copy lands under a temporary name in the destination
+    directory and is renamed into place, which a reader sees either as the old
+    file or as the new one.  A failure leaves neither the destination nor the
+    temporary name behind.
+    """
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    handle, name = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
+    os.close(handle)
+    temporary = Path(name)
+    try:
+        shutil.copy2(source, temporary)
+        os.replace(temporary, destination)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
 def update_format_cache(
     file_path: Path,
     fmt: str,
@@ -449,7 +514,8 @@ def update_format_cache(
         artifact_name = f"{target_name}.{ext}"
         artifact_path = cache_dir / artifact_name
         try:
-            shutil.copy2(output_path, artifact_path)
+            _atomic_copy(output_path, artifact_path)
+            note_cache_activity("artifacts")
             logger.info(f"Cached artifact for {target_name} ({fmt}) at {artifact_path}")
         except Exception as e:
             logger.warning(f"Failed to cache artifact for {target_name} ({fmt}): {e}")
@@ -460,7 +526,8 @@ def update_format_cache(
                     linked_cache_name = f"{target_name}.{linked_ext}"
                     linked_cache_path = cache_dir / linked_cache_name
                     try:
-                        shutil.copy2(linked_path, linked_cache_path)
+                        _atomic_copy(linked_path, linked_cache_path)
+                        note_cache_activity("artifacts")
                         logger.info(
                             f"Cached linked artifact ({linked_ext}) for {target_name} ({fmt}) at {linked_cache_path}"
                         )
@@ -913,6 +980,7 @@ def build_generic(
                 formats_to_render.append(fmt)
 
         if not formats_to_render:
+            note_cache_activity("served")
             logger.info(
                 f"All formats for {target} are up-to-date, skipping render."
             )
@@ -988,6 +1056,7 @@ def build_generic(
                 all_cached = False
                 break
         if all_cached:
+            note_cache_activity("served")
             if "html" in formats:
                 if not should_rerender_for_sidebar(
                     build_targets_set or set(), docs_root
@@ -1478,11 +1547,13 @@ def initialize_config(docs_root: Path, config_path: Optional[Path] = None) -> No
     cache directory exists.
     """
     global EXTERNAL_CONFIG, TARGET_CONFIG, BUILD_FUNCTIONS, OUTPUT_DIR_TARGETS
-    global JUPYTER_CACHE_PATH, PROJECT_ROOT
+    global JUPYTER_CACHE_PATH, CACHE_ROOT
 
-    PROJECT_ROOT = docs_root.parent
+    # The cache and the build's scratch space live where the command was run, so
+    # a caller caches one directory whatever the layout of the docs root.
+    CACHE_ROOT = Path.cwd()
 
-    jupyter_cache_path = PROJECT_ROOT / JUPYTER_CACHE_DIR
+    jupyter_cache_path = CACHE_ROOT / JUPYTER_CACHE_DIR
     jupyter_cache_path.mkdir(parents=True, exist_ok=True)
     JUPYTER_CACHE_PATH = jupyter_cache_path
     os.environ["JUPYTERCACHE"] = str(jupyter_cache_path)
@@ -1718,8 +1789,8 @@ def _cleanup_orphaned_caches(
     Args:
         successful_targets: Set of target names that were successfully built
         docs_root: Root directory of documentation
-        cache_base: Base cache directory (defaults to ``_cached`` in parent
-            of docs root)
+        cache_base: Base cache directory (defaults to ``_sdbtmp_cache`` in the
+            directory the build ran from)
 
     Returns:
         Number of orphaned cache directories removed
@@ -1797,7 +1868,9 @@ def build_targets(
         logger.info("No targets specified. Nothing to build.")
         return True
 
-    build_temp_path = docs_root.parent / BUILD_TEMP_DIR
+    reset_cache_activity()
+
+    build_temp_path = cache_parent(docs_root) / BUILD_TEMP_DIR
 
     # Run user-configured pre-build commands first (build.yml), then defaults
     run_pre_build_sequence(EXTERNAL_CONFIG, docs_root, targets)
@@ -1980,6 +2053,7 @@ def build_targets(
                 f"All targets completed successfully: "
                 f"{list(results.keys())}"
             )
+            logger.info(cache_activity_summary(docs_root))
 
             _sync_llms_files(final_output, docs_root)
             # Run user-configured post-render commands first (build.yml), then defaults
@@ -2050,6 +2124,7 @@ def build_targets(
     logger.info(
         f"All targets completed successfully: {list(results.keys())}"
     )
+    logger.info(cache_activity_summary(docs_root))
 
     if website:
         _sync_llms_files(
@@ -2069,26 +2144,3 @@ def build_targets(
 # ---------------------------------------------------------------------------
 
 JUPYTER_CACHE_PATH: Optional[Path] = None  # Set by initialize_config
-
-IGNORING_ARTIFACT_PATTERNS = [
-    "**/__pycache__",
-    "**/*.pyc",
-    "**/*.pyd",
-    "**/*.log",
-    "**/*_output",
-    "**/*_extensions",
-    "**/*_cached",
-    "**/*_files",
-    "**/*_libs",
-    "**/_llms",
-    "**/_site",
-    "**/_docsbuild",
-    "**/.jupyter_cache",
-    "**/*.tex",
-    "**/*.pdf",
-    "**/*.html",
-    "**/*.quarto_ipynb*",
-    "**/*.quarto",
-    "**/*.c2pa",
-    "**/*.c2pa_identifier.svg",
-]

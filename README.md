@@ -60,7 +60,7 @@ sdb deploy docs
 sdb deploy docs --require-all
 sdb deploy docs --dry-run
 
-# Remove Quarto build artifacts (_cached/, _files/, html, pdf...)
+# Remove Quarto build artifacts (_sdbtmp_*, _files/, html, pdf...)
 sdb clean docs
 ```
 
@@ -77,6 +77,16 @@ Every command that takes a docs root stops when the path is not a directory, and
 `--article` renders the PDF form of each target and assembles the distribution an article is published as: the PDF, its LaTeX source, the figures, the media, and the shared `_files`. Each document's distribution is a directory named after it, beside the document itself, or under `--output-dir` when one is given. It is the form an external deploy channel carries, which is what lets a Zenodo-style channel be added as a plugin: `sdb build docs --article` produces the article, and a deploy activation names the directory it publishes.
 
 An article build goes through the renderer rather than through the site orchestration, since an article is a document's publication artifact rather than a page. It therefore neither reads nor writes the site directory, and `--sequence`, `--jobs`, `--parallel-formats`, and the `snapshot` target do not apply: the article is rendered document by document, and `sdb build` refuses those rather than ignoring them. The built-in pre-build sequence does run, so the version stamp an article carries agrees with the one a full build writes for the same document.
+
+## Build Cache
+
+A build keeps the rendered form of each document in `_sdbtmp_cache`, so an unchanged document is not rendered twice, and it runs the Jupyter cache Quarto executes notebooks against in `_sdbtmp_jupyter`.
+
+Both live in the directory the command was run from. That is one place whether the documents sit in a subdirectory or the docs root is the repository root, so a workflow caches `_sdbtmp_cache` and `_sdbtmp_jupyter` at its checkout root in either case, and nothing the build writes sits outside the tree it checked out.
+
+Every folder the build writes for itself carries one marker, `_sdbtmp_`: `_sdbtmp_cache` and `_sdbtmp_jupyter` here, `_sdbtmp_build` for the scratch space a parallel website build copies into, and a per-document `_sdbtmp_<document>_cache` beside the document. A project's own folders are named `_include`, `_extensions`, `_files` and the like, so the marker tells the build's own apart from a project's wherever a folder is listed. The engine reads no folder that carries it: target discovery excludes it, the isolated copy a website build renders from leaves it behind, `sdb clean` removes it, and a preview does not find one document twice. A project whose docs root is its repository root therefore declares nothing for them.
+
+The marker is not dotted, which is a constraint rather than a preference. The isolated copy a parallel website build renders from is the parent directory of the document Quarto is given, and Quarto resolves a project through that path. A hidden component stops the search: Quarto then reports the document's own directory as the project and a relative `QUARTO_DOCUMENT_PATH`, and a document that reads that variable, as the title-meta include does, opens a path that is not there. Measured on Quarto 1.9.31, with the copy's parent named `_sdbtmp_build` against `.sdbtmp_build`.
 
 ## External Deploy Plugins
 

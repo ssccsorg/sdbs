@@ -7,6 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .config import SDB_TEMP_PREFIX
+
 logger = logging.getLogger(__name__)
 
 
@@ -97,15 +99,11 @@ class QuartoInspector:
 
     @staticmethod
     def get_cache_dir(qmd_path: Path) -> Path:
-        return qmd_path.parent / f"{qmd_path.stem}_cached"
+        return qmd_path.parent / f"{SDB_TEMP_PREFIX}{qmd_path.stem}_cache"
 
     @staticmethod
     def get_cache_dir_for_target(qmd_path: Path, target_name: str) -> Path:
-        return qmd_path.parent / f"{target_name}_cached"
-
-    @staticmethod
-    def get_cache_base(docs_root: Path) -> Path:
-        return docs_root.parent / "_cached"
+        return qmd_path.parent / f"{SDB_TEMP_PREFIX}{target_name}_cache"
 
     @staticmethod
     def format_to_extension(fmt: str) -> str:

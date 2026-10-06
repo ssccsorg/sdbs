@@ -381,7 +381,7 @@ def main(argv: list[str] | None = None) -> None:
     clean_parser = subparsers.add_parser(
         "clean",
         help="Remove Quarto build artifacts",
-        description="Delete all Quarto rendering artifacts (_cached/, _files/, html, pdf, tex) "
+        description="Delete all Quarto rendering artifacts (_sdbtmp_*, _files/, html, pdf, tex) "
         "from the docs directory. Run before committing to avoid bloat.",
     )
     clean_parser.add_argument(

@@ -13,9 +13,27 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-BUILD_TEMP_DIR = "_docsbuild"
-BUILD_CACHE_DIR = "_cached"
-JUPYTER_CACHE_DIR = "_jupyter_cache"
+# Every folder the build writes for itself starts with this marker.  A project's
+# source folders carry a leading underscore (``_include``, ``_extensions``), so
+# the marker keeps the build's own folders from being read as sources or mistaken
+# for a project's, and one marker covers them wherever they are listed.
+#
+# The marker is not dotted, and that is a constraint rather than a preference.
+# The isolated copy a website build renders from is the parent directory of the
+# document handed to Quarto, and Quarto resolves a project through that path: a
+# hidden component stops the search, and it then reports the document's own
+# directory as the project and a relative ``QUARTO_DOCUMENT_PATH``.  Every
+# document that reads that variable, as the title-meta include of the SSCCS
+# template does, then opens a path that is not there and the render fails.
+# Measured with Quarto 1.9.31 on ``.sdbtmp_build`` against ``_sdbtmp_build``:
+# ``QUARTO_PROJECT_DIR`` was the document's directory and ``QUARTO_DOCUMENT_PATH``
+# was relative under the dot, and both were the project's own under the
+# underscore.
+SDB_TEMP_PREFIX = "_sdbtmp_"
+DISCOVERY_EXCLUDE_PATTERNS = [f"**/{SDB_TEMP_PREFIX}*/"]
+BUILD_TEMP_DIR = f"{SDB_TEMP_PREFIX}build"
+BUILD_CACHE_DIR = f"{SDB_TEMP_PREFIX}cache"
+JUPYTER_CACHE_DIR = f"{SDB_TEMP_PREFIX}jupyter"
 QUARTO_CONFIG_FILES = ["_quarto.yml", "_quarto-website.yml"]
 
 
@@ -44,9 +62,6 @@ class BuildContext:
 # ---------------------------------------------------------------------------
 # ConfigManager -- configuration loading, target discovery, gitignore matching
 # ---------------------------------------------------------------------------
-
-
-DEFAULT_EXCLUDE_PATTERNS: List[str] = []
 
 
 class ConfigManager:
@@ -86,7 +101,15 @@ class ConfigManager:
 
     @staticmethod
     def get_exclude_patterns(external_config: Dict[str, Any]) -> List[str]:
-        return external_config.get("exclude", DEFAULT_EXCLUDE_PATTERNS)
+        """The patterns that keep generated artifacts out of target discovery.
+
+        The folders the build writes for itself are always excluded, because it
+        never treats its cache, its scratch space, or a rendered page as a
+        document, and a project whose docs root is where the build runs would
+        otherwise discover them.  A project's own list is added to them.
+        """
+        declared = external_config.get("exclude") or []
+        return list(dict.fromkeys([*DISCOVERY_EXCLUDE_PATTERNS, *declared]))
 
     @staticmethod
     def get_target_config_from_external(external_config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -140,7 +163,7 @@ class ConfigManager:
     @staticmethod
     def discover_quarto_targets(docs_root: Path, exclude_patterns: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         if exclude_patterns is None:
-            exclude_patterns = DEFAULT_EXCLUDE_PATTERNS
+            exclude_patterns = list(DISCOVERY_EXCLUDE_PATTERNS)
         targets = {}
         for ext in ("*.qmd", "*.md"):
             for file_path in docs_root.rglob(ext):
@@ -185,23 +208,19 @@ class ConfigManager:
 
     @staticmethod
     def get_cache_base(cache_parent: Path) -> Path:
-        """Return the base cache directory under ``cache_parent``.
-
-        Note: ``cache_parent`` should be the PROJECT root (parent of docs/),
-        not the docs/ directory itself.  In the original build.py this was
-        always ``DOCS_PARENT`` (the hardcoded project root).
-        """
+        """Return the base cache directory under ``cache_parent``, the directory
+        the build ran from."""
         return cache_parent / BUILD_CACHE_DIR
 
     @staticmethod
     def get_cache_dir(qmd_path: Path) -> Path:
-        """Return per-QMD cache directory (``{stem}_cached/`` next to the QMD)."""
-        return qmd_path.parent / f"{qmd_path.stem}_cached"
+        """Return the per-document cache directory, beside the document."""
+        return qmd_path.parent / f"{SDB_TEMP_PREFIX}{qmd_path.stem}_cache"
 
     @staticmethod
     def get_cache_dir_for_target(qmd_path: Path, target_name: str) -> Path:
-        """Return per-target cache directory (``{target_name}_cached/`` next to the QMD)."""
-        return qmd_path.parent / f"{target_name}_cached"
+        """Return the per-target cache directory, beside the document."""
+        return qmd_path.parent / f"{SDB_TEMP_PREFIX}{target_name}_cache"
 
     @staticmethod
     def get_moved_path(
@@ -298,20 +317,22 @@ class CleanupManager:
 
     IGNORING_ARTIFACT_PATTERNS = [
         "**/__pycache__", "**/*.pyc", "**/*.pyd", "**/*.log",
-        "**/*_output", "**/*_extensions", "**/*_cached", "**/*_files",
-        "**/*_libs", "**/_llms", "**/_site", "**/_docsbuild",
-        "**/.jupyter_cache",
+        "**/*_output", "**/*_extensions", "**/*_files",
+        "**/*_libs", "**/_llms", "**/_site",
+        f"**/{SDB_TEMP_PREFIX}*",
         "**/*.tex", "**/*.pdf", "**/*.html",
         "**/*.quarto_ipynb*", "**/*.quarto",
         "**/*.c2pa", "**/*.c2pa_identifier.svg",
     ]
 
     def __init__(self):
+        # The cache and the scratch directory sit beside the docs root when the
+        # documents live in a subdirectory, and inside it when the docs root is
+        # the directory the build ran from, where the patterns above reach them.
         self._cleaning_patterns: List[str] = self.IGNORING_ARTIFACT_PATTERNS + [
             os.path.join("..", BUILD_TEMP_DIR),
             os.path.join("..", BUILD_CACHE_DIR),
             os.path.join("..", JUPYTER_CACHE_DIR),
-            "**/.jupyter_cache",
         ]
 
     def ignore_quarto_artifacts(self) -> Callable[[str, list[str]], set[str]]:

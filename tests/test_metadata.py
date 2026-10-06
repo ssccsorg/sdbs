@@ -667,9 +667,9 @@ class TestGenerateMetadataTex:
 
     def test_output_path_is_the_referenced_one(self, tmp_path: Path) -> None:
         _write(tmp_path / "_include" / "author.yml", AUTHOR_YML)
-        _write(tmp_path / "sub" / "doc.qmd", _document("../_cached/other_metadata.tex"))
+        _write(tmp_path / "sub" / "doc.qmd", _document("../_sdbtmp_cache/other_metadata.tex"))
         generate_metadata_tex(tmp_path)
-        assert (tmp_path / "_cached" / "other_metadata.tex").is_file()
+        assert (tmp_path / "_sdbtmp_cache" / "other_metadata.tex").is_file()
 
 
 class TestGenerateMetadataFor:
@@ -1214,15 +1214,20 @@ class TestDocumentScenarios:
         assert target.read_text(encoding="utf-8") == before
 
     def test_generated_trees_are_excluded(self, tmp_path) -> None:
-        """Output and dependency trees carry copies that must not be served."""
+        """Output and dependency trees carry copies that must not be served.
+
+        Three of these four are skipped without being declared: a dotted folder
+        is the build's own, and ``_site`` and ``node_modules`` are known
+        generated trees.  ``_archive`` is the one the pattern here names.
+        """
         _write(
             tmp_path / "build.yml",
-            'exclude:\n  - "**/*_files/"\n  - "**/*_cached/"\n  - "_archive/**"\n',
+            'exclude:\n  - "**/*_files/"\n  - "_archive/**"\n',
         )
-        for tree in ("_site", "node_modules", "_cached", "_archive"):
+        for tree in ("_site", "node_modules", "_sdbtmp_cache", "_archive"):
             _write(tmp_path / tree / "doc.qmd", _document())
         generate_metadata_tex(tmp_path)
-        for tree in ("_site", "node_modules", "_cached", "_archive"):
+        for tree in ("_site", "node_modules", "_sdbtmp_cache", "_archive"):
             assert not (tmp_path / tree / "_files" / "doc_metadata.tex").exists()
 
 

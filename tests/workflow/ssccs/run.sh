@@ -55,12 +55,9 @@ BUILD_DIR=$(mktemp -d /tmp/ssccs_build.XXXXXX)
 echo "[INFO] Clean docs copy: $BUILD_DIR/docs"
 
 rsync -a --delete \
-  --exclude=_cached \
+  --exclude='_sdbtmp_*' \
   --exclude=_site \
-  --exclude=_docsbuild \
   --exclude=_llms \
-  --exclude=.jupyter_cache \
-  --exclude='*_cached' \
   --exclude='*_files' \
   --exclude='*_libs' \
   --exclude='*_output' \
@@ -131,6 +128,33 @@ run_phase() {
   return "$ok"
 }
 
+check_cache() {
+  local log="$1"
+  local label="$2"
+  local expect="$3"
+  local line
+  line=$(grep -o "Cache: [0-9]* artifact(s) written, [0-9]* target(s) served entirely from the cache" "$log" | tail -1)
+  if [ -z "$line" ]; then
+    echo "    [FAIL] $label  ->  the build reported no cache line"
+    return 1
+  fi
+  echo "      $line"
+  case "$expect" in
+    warm)
+      case "$line" in
+        "Cache: 0 artifact(s) written, "*) echo "    [OK]   $label  ->  the cache served every target" ;;
+        *) echo "    [FAIL] $label  ->  a warm build rendered again: $line"; return 1 ;;
+      esac
+      ;;
+    cold)
+      case "$line" in
+        "Cache: 0 artifact(s) written, "*) echo "    [FAIL] $label  ->  a cold build cached nothing"; return 1 ;;
+        *) echo "    [OK]   $label  ->  the cold build cached what it rendered" ;;
+      esac
+      ;;
+  esac
+}
+
 verify_outputs() {
   local docs_dir="$1"
   local label="$2"
@@ -165,6 +189,7 @@ verify_outputs() {
 LOG1=$(mktemp /tmp/ssccs_phase1.XXXXXX)
 run_phase "1 (cold)" "$BUILD_DIR/docs" "$LOG1" || { echo "[FAIL] Phase 1 build failed"; exit 1; }
 verify_outputs "$BUILD_DIR/docs" "Phase 1" || { echo "[FAIL] Phase 1 output verification failed"; exit 1; }
+check_cache "$LOG1" "Phase 1 cache" cold || { echo "[FAIL] Phase 1 cache check failed"; exit 1; }
 
 # ------------------------------------------------------------------
 # Phase 2 -- warm build (reuse cache populated by phase 1)
@@ -175,6 +200,7 @@ verify_outputs "$BUILD_DIR/docs" "Phase 1" || { echo "[FAIL] Phase 1 output veri
 LOG2=$(mktemp /tmp/ssccs_phase2.XXXXXX)
 run_phase "2 (warm)" "$BUILD_DIR/docs" "$LOG2" || { echo "[FAIL] Phase 2 build failed"; exit 1; }
 verify_outputs "$BUILD_DIR/docs" "Phase 2" || { echo "[FAIL] Phase 2 output verification failed"; exit 1; }
+check_cache "$LOG2" "Phase 2 cache" warm || { echo "[FAIL] Phase 2 cache check failed"; exit 1; }
 
 # ------------------------------------------------------------------
 # Summary

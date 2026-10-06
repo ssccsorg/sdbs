@@ -54,10 +54,9 @@ Thumbs.db
 **/*_output/
 **/*_extensions/
 **/*_libs/
-**/*_cached/
+**/_sdbtmp_*/
 **/.quarto/
 **/*.quarto_ipynb
-**/.jupyter_cache/
 **/*.tex
 **/*.pdf
 **/*.html
@@ -68,16 +67,13 @@ Thumbs.db
 # Example project build artifacts
 # ============================================================
 examples/**/_site/
-examples/**/_cached/
 examples/**/*_files/
 examples/**/*_output/
 examples/**/.quarto/
-examples/**/.jupyter_cache/
 
 # ============================================================
 # Test artifacts (created by command tests in repo root)
 # ============================================================
-_jupyter_cache/
 mydoc/
 uv.lock
 _publish/
