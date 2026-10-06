@@ -200,9 +200,10 @@ class TestCacheDirectoriesAreNamed:
         """Every name the engine derives carries the one marker.
 
         The copy a parallel website build renders from is the parent directory of
-        the document Quarto is given, so its name is also a render input.  That is
-        an argument about the render, and not a licence to spell a folder the build
-        writes without the marker.
+        the document Quarto is given, so its name is also a render input.  Quarto
+        resolves a project through that path and a hidden component stops the
+        search, so this one folder is spelled with the plain underscore and the
+        engine keeps a second pattern for it.
         """
         from sdb.config import (
             BUILD_CACHE_DIR,
@@ -213,12 +214,15 @@ class TestCacheDirectoriesAreNamed:
         )
 
         assert SDB_TEMP_PREFIX.startswith(".")
-        assert DISCOVERY_EXCLUDE_PATTERNS == [f"**/{SDB_TEMP_PREFIX}*/"]
+        assert not BUILD_TEMP_DIR.startswith(".")
+        assert DISCOVERY_EXCLUDE_PATTERNS == [
+            f"**/{SDB_TEMP_PREFIX}*/",
+            f"**/{BUILD_TEMP_DIR}/",
+        ]
 
         names = [
             BUILD_CACHE_DIR,
             JUPYTER_CACHE_DIR,
-            BUILD_TEMP_DIR,
             build.get_cache_dir(Path("docs/index.qmd")).name,
             build.get_cache_dir_for_target(Path("docs/index.qmd"), "site").name,
         ]
@@ -263,8 +267,7 @@ class TestCacheDirectoriesAreNamed:
         for name in (
             ".sdbtmp_cache",
             ".sdbtmp_jupyter",
-            ".sdbtmp_build",
-            ".sdbtmp_index_cache",
+            "_sdbtmp_build",
             "_site",
         ):
             assert name in ignore("docs", [name, "index.qmd"]), name
@@ -278,7 +281,7 @@ class TestCacheDirectoriesAreNamed:
         names = (
             ".sdbtmp_cache",
             ".sdbtmp_jupyter",
-            ".sdbtmp_build",
+            "_sdbtmp_build",
             ".sdbtmp_index_cache",
             "_site",
         )
@@ -317,13 +320,13 @@ class TestCacheDirectoriesAreNamed:
         docs.mkdir()
         (tmp_path / ".sdbtmp_cache" / "index" / "hash").mkdir(parents=True)
         (tmp_path / ".sdbtmp_jupyter" / "executed").mkdir(parents=True)
-        (tmp_path / ".sdbtmp_build" / "index").mkdir(parents=True)
+        (tmp_path / "_sdbtmp_build" / "index").mkdir(parents=True)
 
         assert build.clean_quarto_artifacts(docs) is True
 
         assert not (tmp_path / ".sdbtmp_cache").exists()
         assert not (tmp_path / ".sdbtmp_jupyter").exists()
-        assert not (tmp_path / ".sdbtmp_build").exists()
+        assert not (tmp_path / "_sdbtmp_build").exists()
 
 
 class TestCacheWritesAreAtomic:

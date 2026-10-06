@@ -13,18 +13,32 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Every folder the build writes for itself carries this marker: the cache, the
-# Jupyter cache, the scratch space a parallel website build copies the tree
-# into, and a per-document cache beside its document.  A project's source
-# folders carry a leading underscore (``_include``, ``_extensions``), so the
-# marker keeps the build's own folders from being read as sources, from being
-# copied into the tree a website build renders from, and from being mistaken for
-# a project's, wherever a folder is listed.  One pattern covers all of them.
+# Every folder the build writes for itself carries this marker, except the one a
+# parallel website build copies the tree into, which cannot be hidden.  A
+# project's source folders carry a leading underscore (``_include``,
+# ``_extensions``), so the marker keeps the build's own folders from being read as
+# sources or mistaken for a project's, and one marker covers them wherever they
+# are listed.
+#
+# ``_sdbtmp_build`` is the exception, and it is a constraint rather than a
+# preference.  That directory is the parent of the document handed to Quarto, and
+# Quarto resolves a project through the path of the document it is given.  A
+# hidden component stops that search, and Quarto then renders the document on its
+# own: a website build loses the site directory and every file the website writes
+# for a page, which is what the phase that collects llms.txt reads.  Measured on
+# the Quarto the image pins, 1.9.35, over the ssccs corpus.  With
+# ``_sdbtmp_build`` the build cached a site directory for each of its 112 targets
+# and the post-render step collected llms.txt from them.  With ``.sdbtmp_build``
+# every target reported no site directory, nothing was cached under ``site/``, and
+# the post-render step found no ``.llms.md`` to collect.  The three caches are
+# never on an input's ancestry, so a hidden name is safe for them.
 SDB_TEMP_PREFIX = ".sdbtmp_"
+SDB_BUILD_DIR = "_sdbtmp_build"
 DISCOVERY_EXCLUDE_PATTERNS = [
     f"**/{SDB_TEMP_PREFIX}*/",
+    f"**/{SDB_BUILD_DIR}/",
 ]
-BUILD_TEMP_DIR = f"{SDB_TEMP_PREFIX}build"
+BUILD_TEMP_DIR = SDB_BUILD_DIR
 BUILD_CACHE_DIR = f"{SDB_TEMP_PREFIX}cache"
 JUPYTER_CACHE_DIR = f"{SDB_TEMP_PREFIX}jupyter"
 QUARTO_CONFIG_FILES = ["_quarto.yml", "_quarto-website.yml"]
@@ -312,7 +326,7 @@ class CleanupManager:
         "**/__pycache__", "**/*.pyc", "**/*.pyd", "**/*.log",
         "**/*_output", "**/*_extensions", "**/*_files",
         "**/*_libs", "**/_llms", "**/_site",
-        f"**/{SDB_TEMP_PREFIX}*",
+        f"**/{SDB_TEMP_PREFIX}*", f"**/{SDB_BUILD_DIR}",
         "**/*.tex", "**/*.pdf", "**/*.html",
         "**/*.quarto_ipynb*", "**/*.quarto",
         "**/*.c2pa", "**/*.c2pa_identifier.svg",

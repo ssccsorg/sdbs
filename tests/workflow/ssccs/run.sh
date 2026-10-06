@@ -56,6 +56,7 @@ echo "[INFO] Clean docs copy: $BUILD_DIR/docs"
 
 rsync -a --delete \
   --exclude='.sdbtmp_*' \
+  --exclude='_sdbtmp_build' \
   --exclude=_site \
   --exclude=_llms \
   --exclude='*_files' \

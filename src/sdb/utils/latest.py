@@ -34,6 +34,7 @@ EXCLUDE_PATTERNS = [
     "**/*_output/",
     "**/*_files/",
     "**/.sdbtmp_*/",
+    "**/_sdbtmp_build/",
     "**/*_libs/",
 ]
 
@@ -41,7 +42,7 @@ EXCLUDE_PATTERNS = [
 # These mirror the SYSTEM_IGNORED_DIRS in sdb/resolve.py.
 SYSTEM_IGNORED_DIRS = {
     ".venv", ".git", ".quarto", "_site", "_llms",
-    "node_modules", "__pycache__", ".*",
+    "node_modules", "__pycache__", ".*", "_sdbtmp_build",
 }
 
 
