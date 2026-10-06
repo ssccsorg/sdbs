@@ -16,7 +16,6 @@ from pathlib import Path
 
 import sdb.build as build
 from sdb.build import prepare_isolated_docs
-from sdb.config import CleanupManager
 
 AUTHOR_YML = """author:
   - name: Example Author
@@ -187,7 +186,7 @@ class TestCacheDirectoriesAreNamed:
     """Wherever the build skips or removes its artifacts, the cache is named."""
 
     def test_the_copy_skip_names_the_cache_directories(self) -> None:
-        ignore = CleanupManager().ignore_quarto_artifacts()
+        ignore = build.ignore_quarto_artifacts()
         for name in ("_cached", "_jupyter_cache", "_docsbuild", "_site"):
             assert name in ignore("docs", [name, "index.qmd"])
 
@@ -199,9 +198,7 @@ class TestCacheDirectoriesAreNamed:
         _write(source / "index.qmd", "---\ntitle: x\n---\n")
         destination = tmp_path / "copy"
 
-        shutil.copytree(
-            source, destination, ignore=CleanupManager().ignore_quarto_artifacts()
-        )
+        shutil.copytree(source, destination, ignore=build.ignore_quarto_artifacts())
 
         assert (destination / "index.qmd").is_file()
         for name in ("_cached", "_jupyter_cache", "_docsbuild", "_site"):

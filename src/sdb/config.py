@@ -185,12 +185,8 @@ class ConfigManager:
 
     @staticmethod
     def get_cache_base(cache_parent: Path) -> Path:
-        """Return the base cache directory under ``cache_parent``.
-
-        Note: ``cache_parent`` should be the PROJECT root (parent of docs/),
-        not the docs/ directory itself.  In the original build.py this was
-        always ``DOCS_PARENT`` (the hardcoded project root).
-        """
+        """Return the base cache directory under ``cache_parent``, the directory
+        the build ran from."""
         return cache_parent / BUILD_CACHE_DIR
 
     @staticmethod
