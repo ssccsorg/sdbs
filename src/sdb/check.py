@@ -36,11 +36,12 @@ IGNORED_DIRS = {
     "_llms",
     "node_modules",
     "__pycache__",
+    "_sdbtmp_*",
     "*_files",
     "*_libs",
     "*_output",
     "*_extensions",
-    ".*",  # every dotted folder, including the build's own .sdbtmp_*
+    ".*",
 }
 VALID_EXTENSIONS = {".md", ".qmd", ".yml", ".yaml", ".json", ".bib"}
 SOURCE_EXTENSIONS = {

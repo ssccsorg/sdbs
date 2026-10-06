@@ -17,7 +17,19 @@ logger = logging.getLogger(__name__)
 # source folders carry a leading underscore (``_include``, ``_extensions``), so
 # the marker keeps the build's own folders from being read as sources or mistaken
 # for a project's, and one marker covers them wherever they are listed.
-SDB_TEMP_PREFIX = ".sdbtmp_"
+#
+# The marker is not dotted, and that is a constraint rather than a preference.
+# The isolated copy a website build renders from is the parent directory of the
+# document handed to Quarto, and Quarto resolves a project through that path: a
+# hidden component stops the search, and it then reports the document's own
+# directory as the project and a relative ``QUARTO_DOCUMENT_PATH``.  Every
+# document that reads that variable, as the title-meta include of the SSCCS
+# template does, then opens a path that is not there and the render fails.
+# Measured with Quarto 1.9.31 on ``.sdbtmp_build`` against ``_sdbtmp_build``:
+# ``QUARTO_PROJECT_DIR`` was the document's directory and ``QUARTO_DOCUMENT_PATH``
+# was relative under the dot, and both were the project's own under the
+# underscore.
+SDB_TEMP_PREFIX = "_sdbtmp_"
 DISCOVERY_EXCLUDE_PATTERNS = [f"**/{SDB_TEMP_PREFIX}*/"]
 BUILD_TEMP_DIR = f"{SDB_TEMP_PREFIX}build"
 BUILD_CACHE_DIR = f"{SDB_TEMP_PREFIX}cache"

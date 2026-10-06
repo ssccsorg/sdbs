@@ -23,7 +23,7 @@ build/
 **/.ipynb_checkpoints/
 
 # ---4. Documentation Build Cache ---
-.sdbtmp_*/
+_sdbtmp_*/
 **/_site/
 **/.*_site/
 **/*_files/

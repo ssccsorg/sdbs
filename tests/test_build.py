@@ -146,8 +146,8 @@ class TestCacheLocation:
         self, tmp_path: Path, monkeypatch
     ) -> None:
         monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
-        assert build.get_cache_base(tmp_path / "docs") == tmp_path / ".sdbtmp_cache"
-        assert build.get_cache_base(tmp_path) == tmp_path / ".sdbtmp_cache"
+        assert build.get_cache_base(tmp_path / "docs") == tmp_path / "_sdbtmp_cache"
+        assert build.get_cache_base(tmp_path) == tmp_path / "_sdbtmp_cache"
 
     def test_an_uninitialized_caller_stays_inside_the_tree_it_named(
         self, tmp_path: Path, monkeypatch
@@ -157,7 +157,7 @@ class TestCacheLocation:
         elsewhere.mkdir()
         monkeypatch.chdir(elsewhere)
 
-        assert build.get_cache_base(tmp_path / "docs") == tmp_path / "docs" / ".sdbtmp_cache"
+        assert build.get_cache_base(tmp_path / "docs") == tmp_path / "docs" / "_sdbtmp_cache"
 
     def test_initialize_config_reads_the_invocation_directory(
         self, tmp_path: Path, monkeypatch
@@ -180,8 +180,8 @@ class TestCacheLocation:
         build.initialize_config(tmp_path / "docs")
 
         assert build.CACHE_ROOT == tmp_path
-        assert build.get_cache_base(tmp_path) == tmp_path / ".sdbtmp_cache"
-        assert (tmp_path / ".sdbtmp_jupyter").is_dir()
+        assert build.get_cache_base(tmp_path) == tmp_path / "_sdbtmp_cache"
+        assert (tmp_path / "_sdbtmp_jupyter").is_dir()
 
 
 class TestCacheDirectoriesAreNamed:
@@ -190,24 +190,38 @@ class TestCacheDirectoriesAreNamed:
 
     def test_the_marker_names_a_document_cache(self, tmp_path: Path) -> None:
         qmd = tmp_path / "docs" / "index.qmd"
-        assert build.get_cache_dir(qmd) == tmp_path / "docs" / ".sdbtmp_index_cache"
+        assert build.get_cache_dir(qmd) == tmp_path / "docs" / "_sdbtmp_index_cache"
         assert (
             build.get_cache_dir_for_target(qmd, "website")
-            == tmp_path / "docs" / ".sdbtmp_website_cache"
+            == tmp_path / "docs" / "_sdbtmp_website_cache"
         )
+
+    def test_the_marker_is_not_hidden(self) -> None:
+        """A hidden component in the copy's path breaks the render it exists for.
+
+        The isolated copy a target renders from is the parent directory of the
+        document Quarto is given, and Quarto resolves a project through that
+        path. A hidden component stops that search, so Quarto reports the
+        document's own directory as the project and a relative
+        ``QUARTO_DOCUMENT_PATH``, and a document that reads that variable opens a
+        path that is not there. Measured on Quarto 1.9.31.
+        """
+        from sdb.config import SDB_TEMP_PREFIX
+
+        assert not SDB_TEMP_PREFIX.startswith(".")
 
     def test_the_marker_covers_a_folder_the_engine_has_not_grown(self) -> None:
         """The skip follows the marker, rather than a list of the folders."""
         ignore = build.ignore_quarto_artifacts()
-        assert ".sdbtmp_whatever" in ignore("docs", [".sdbtmp_whatever", "index.qmd"])
+        assert "_sdbtmp_whatever" in ignore("docs", ["_sdbtmp_whatever", "index.qmd"])
 
     def test_the_copy_skip_names_the_cache_directories(self) -> None:
         ignore = build.ignore_quarto_artifacts()
         for name in (
-            ".sdbtmp_cache",
-            ".sdbtmp_jupyter",
-            ".sdbtmp_build",
-            ".sdbtmp_index_cache",
+            "_sdbtmp_cache",
+            "_sdbtmp_jupyter",
+            "_sdbtmp_build",
+            "_sdbtmp_index_cache",
             "_site",
         ):
             assert name in ignore("docs", [name, "index.qmd"]), name
@@ -219,10 +233,10 @@ class TestCacheDirectoriesAreNamed:
         at every level of the tree and not only at the root."""
         source = tmp_path / "docs"
         names = (
-            ".sdbtmp_cache",
-            ".sdbtmp_jupyter",
-            ".sdbtmp_build",
-            ".sdbtmp_index_cache",
+            "_sdbtmp_cache",
+            "_sdbtmp_jupyter",
+            "_sdbtmp_build",
+            "_sdbtmp_index_cache",
             "_site",
         )
         for name in names:
@@ -239,13 +253,13 @@ class TestCacheDirectoriesAreNamed:
             assert not (destination / "sub" / name).exists(), f"sub/{name}"
 
     def test_clean_removes_a_cache_inside_the_docs_root(self, tmp_path: Path) -> None:
-        (tmp_path / ".sdbtmp_jupyter" / "executed").mkdir(parents=True)
-        (tmp_path / ".sdbtmp_cache" / "index" / "hash").mkdir(parents=True)
+        (tmp_path / "_sdbtmp_jupyter" / "executed").mkdir(parents=True)
+        (tmp_path / "_sdbtmp_cache" / "index" / "hash").mkdir(parents=True)
 
         assert build.clean_quarto_artifacts(tmp_path) is True
 
-        assert not (tmp_path / ".sdbtmp_jupyter").exists()
-        assert not (tmp_path / ".sdbtmp_cache").exists()
+        assert not (tmp_path / "_sdbtmp_jupyter").exists()
+        assert not (tmp_path / "_sdbtmp_cache").exists()
 
 
 class TestCacheWritesAreAtomic:
@@ -299,7 +313,7 @@ class TestCacheActivityIsReported:
         assert build.cache_activity_summary(tmp_path) == (
             "Cache: 1 artifact(s) written, "
             "2 target(s) served entirely from the cache, "
-            f"root {tmp_path / '.sdbtmp_cache'}"
+            f"root {tmp_path / '_sdbtmp_cache'}"
         )
 
     def test_a_reset_clears_the_counts(self, tmp_path: Path, monkeypatch) -> None:

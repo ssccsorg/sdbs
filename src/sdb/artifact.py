@@ -148,7 +148,7 @@ def find_cached_artifact(
     Parameters
     ----------
     cache_parent
-        The directory the build ran from, under which the ``.sdbtmp_cache/``
+        The directory the build ran from, under which the ``_sdbtmp_cache/``
         directory lives.
     """
     path = get_cached_artifact_path(target_name, hash_str, fmt, cache_parent, linked_ext=linked_ext)

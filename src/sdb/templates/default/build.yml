@@ -28,7 +28,7 @@ post_render:
 #   Glob patterns:   **/*.md, **/README.md
 #   Directory only:  **/_include/, **/*_libs/  (trailing slash)
 #   Simple names:    README.md, contributing.md
-# The folders the build writes for itself carry the .sdbtmp_ marker and are
+# The folders the build writes for itself carry the _sdbtmp_ marker and are
 # excluded automatically, so they do not need to be listed here.
 exclude:
   # Ignore top-level README files (not part of the documentation).

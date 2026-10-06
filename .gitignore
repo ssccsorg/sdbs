@@ -54,7 +54,7 @@ Thumbs.db
 **/*_output/
 **/*_extensions/
 **/*_libs/
-**/.sdbtmp_*/
+**/_sdbtmp_*/
 **/.quarto/
 **/*.quarto_ipynb
 **/*.tex
