@@ -234,8 +234,13 @@ def assemble_documents(
     try:
         for document in documents:
             destination = staging / document.relative_to(source)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(document, destination)
+            try:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(document, destination)
+            except OSError as error:
+                raise DeployError(
+                    f"cannot compose {document} for the deploy: {error}"
+                ) from error
         logger.info(
             "Deploy: selected %d document(s) from %s", len(documents), source
         )

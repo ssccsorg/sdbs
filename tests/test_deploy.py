@@ -500,6 +500,18 @@ class TestDocumentSelection:
         _make_declaring_plugin(root / "plugins", "s3", _RECORDING_PLUGIN, options=[])
         assert run_deploy(root) is True
 
+    def test_a_composition_that_cannot_be_written_fails(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A copy that fails is a deploy failure rather than a traceback."""
+        root, _ = self._project(tmp_path)
+
+        def refuse(source, destination):
+            raise OSError("no space left on device")
+
+        monkeypatch.setattr(sdb.deploy.shutil, "copy2", refuse)
+        assert run_deploy(root) is False
+
 
 class TestDeclaredOptions:
     """An activation is checked against the options its manifest declares."""
