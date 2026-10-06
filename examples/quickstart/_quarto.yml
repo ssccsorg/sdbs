@@ -1,6 +1,3 @@
-project:
-  pre-render: python3 _quarto_pre-render.py
-
 link-citations: true
 
 execute:

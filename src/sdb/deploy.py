@@ -14,6 +14,13 @@ an interface states the options it takes, and an activation option the manifest
 does not declare fails the run, so a typo is reported rather than passed to a
 plugin that ignores it.
 
+An activation declares what it publishes in exactly one of two ways: the
+``artifact`` directory to upload, or the ``documents`` extensions to select out
+of the build output. A selection is the engine's work rather than a project
+script's: the engine knows where the build wrote its output and which of those
+paths are documents rather than page assets, copies the selection into a
+directory it owns, and hands that directory to the plugin.
+
 The contract across the process boundary is one JSON request on the plugin's
 stdin and one JSON result on its stdout, with the exit code carrying success or
 failure. Credentials travel in the environment, never on the command line or in
@@ -25,10 +32,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from .config import ConfigManager
 
@@ -41,6 +51,14 @@ DEFAULT_PLUGINS_DIR = "plugins"
 MANIFEST_API = 1
 WIRE_API = 1
 DEFAULT_TIMEOUT = 900.0
+# Where a Quarto site build writes its output, relative to the directory holding
+# the activation unless the activation names another place.
+SITE_DIR = "_site"
+# A site build writes page assets into these directories beside a page. A
+# document that lands inside one of them belongs to the page, not to a channel
+# that publishes documents.
+PAGE_ASSET_DIR_NAMES = frozenset({"site_libs"})
+PAGE_ASSET_DIR_SUFFIXES = ("_files",)
 
 
 class DeployError(RuntimeError):
@@ -68,9 +86,15 @@ class Activation:
     """One channel a project asks for, from its ``_deploy.yml``."""
 
     plugin: str
-    artifact: str
+    # The directory the channel uploads, when the project names one.
+    artifact: Optional[str] = None
     options: Dict[str, Any] = field(default_factory=dict)
     require: bool = False
+    # The document extensions the channel publishes, selected out of the build
+    # output. Exactly one of artifact and documents is given.
+    documents: Optional[Tuple[str, ...]] = None
+    # The build output a selection reads, when it is not the site directory.
+    source: Optional[str] = None
 
 
 def load_manifest(manifest_path: Path) -> PluginManifest:
@@ -134,6 +158,95 @@ def _interface_options(
             f"{manifest_path}: interface.options must be a list of strings"
         )
     return tuple(options)
+
+
+def _document_extensions(
+    value: Any, config_path: Path, index: int, plugin: str
+) -> Optional[Tuple[str, ...]]:
+    """The document extensions an activation publishes, or None when it publishes a
+    directory instead."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or not value or not all(
+        isinstance(item, str) for item in value
+    ):
+        raise DeployError(
+            f"{config_path}: deploy entry {index} ({plugin}): 'documents' must be a "
+            "non-empty list of extensions"
+        )
+    extensions: List[str] = []
+    for item in value:
+        name = item.strip().lower().lstrip(".")
+        if not name or not all(part.isalnum() for part in name.split(".")):
+            raise DeployError(
+                f"{config_path}: deploy entry {index} ({plugin}): {item!r} is not a "
+                "document extension"
+            )
+        extensions.append(name)
+    return tuple(extensions)
+
+
+def _is_page_asset(relative: Path) -> bool:
+    """Whether a path belongs to a page's asset directory rather than to a document.
+
+    A site build writes ``site_libs`` and ``*_files`` beside the page that owns
+    them, and a document that lands inside one is that page's asset.
+    """
+    return any(
+        part in PAGE_ASSET_DIR_NAMES or part.endswith(PAGE_ASSET_DIR_SUFFIXES)
+        for part in relative.parts[:-1]
+    )
+
+
+def select_documents(source: Path, extensions: Tuple[str, ...]) -> List[Path]:
+    """The files under *source* a channel publishing *extensions* uploads."""
+    selected = {
+        path
+        for extension in extensions
+        for path in source.rglob(f"*.{extension}")
+        if path.is_file() and not _is_page_asset(path.relative_to(source))
+    }
+    return sorted(selected)
+
+
+@contextmanager
+def assemble_documents(
+    source: Path, extensions: Tuple[str, ...]
+) -> Iterator[Path]:
+    """Gather the documents a channel publishes into a directory of the engine's own.
+
+    The build output belongs to the render, and a deploy container mounts the
+    tree read-only, so the selection is copied into a temporary directory that
+    the activation removes when it finishes.
+    """
+    if not source.is_dir():
+        raise DeployError(
+            f"the build output {source} is not a directory; run the build that "
+            "writes it before the deploy"
+        )
+    documents = select_documents(source, extensions)
+    if not documents:
+        wanted = " or ".join(f".{extension}" for extension in extensions)
+        raise DeployError(
+            f"the build output {source} holds no {wanted} document to publish"
+        )
+    staging = Path(tempfile.mkdtemp(prefix="sdb-deploy-"))
+    try:
+        for document in documents:
+            destination = staging / document.relative_to(source)
+            try:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(document, destination)
+            except OSError as error:
+                raise DeployError(
+                    f"cannot compose {document} for the deploy: {error}"
+                ) from error
+        logger.info(
+            "Deploy: selected %d document(s) from %s", len(documents), source
+        )
+        yield staging
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def plugin_dirs(project_root: Path, extra: Optional[List[str]] = None) -> List[Path]:
@@ -204,9 +317,26 @@ def load_activations(config_path: Path) -> List[Activation]:
         if not plugin:
             raise DeployError(f"{config_path}: deploy entry {index} has no plugin")
         artifact = str(entry.get("artifact") or "").strip()
-        if not artifact:
+        documents = _document_extensions(
+            entry.get("documents"), config_path, index, plugin
+        )
+        if bool(artifact) == (documents is not None):
             raise DeployError(
-                f"{config_path}: deploy entry {index} ({plugin}) has no artifact"
+                f"{config_path}: deploy entry {index} ({plugin}) needs exactly one of "
+                "'artifact', a directory to upload, and 'documents', the extensions to "
+                "select from the build output"
+            )
+        source = entry.get("source")
+        if source is not None and not isinstance(source, str):
+            raise DeployError(
+                f"{config_path}: deploy entry {index} ({plugin}): 'source' must be a "
+                "string"
+            )
+        source = (source or "").strip() or None
+        if source is not None and documents is None:
+            raise DeployError(
+                f"{config_path}: deploy entry {index} ({plugin}): 'source' names the "
+                "build output 'documents' selects from, so it needs 'documents'"
             )
         options = entry.get("options") or {}
         if not isinstance(options, dict):
@@ -224,6 +354,8 @@ def load_activations(config_path: Path) -> List[Activation]:
                 artifact=artifact,
                 options=options,
                 require=bool(entry.get("require", False)),
+                documents=documents,
+                source=source,
             )
         )
     return activations
@@ -298,6 +430,61 @@ def _undeclared_options(
     return sorted(name for name in options if name not in manifest.declared_options)
 
 
+def _resolve(base: Path, value: str) -> Path:
+    """Resolve a path an activation declares against the directory holding its config."""
+    path = Path(value)
+    if not path.is_absolute():
+        path = base / path
+    return path.resolve()
+
+
+def _run_activation(
+    activation: Activation,
+    manifest: PluginManifest,
+    artifact: Path,
+    dry_run: bool,
+    timeout: float,
+) -> bool:
+    """Run one activation against a resolved artifact directory."""
+    request = {
+        "deploy": WIRE_API,
+        "plugin": activation.plugin,
+        "artifact": str(artifact),
+        "options": activation.options,
+        "dry_run": dry_run,
+    }
+    logger.info("Deploy %s [%s] %s", activation.plugin, manifest.path, artifact)
+    try:
+        result = invoke(manifest, request, timeout)
+    except DeployError as error:
+        logger.error("Deploy: %s", error)
+        return False
+    if not result.get("ok", False):
+        logger.error(
+            "Deploy: plugin %r reported failure: %s",
+            activation.plugin,
+            result.get("message") or "no message",
+        )
+        return False
+    logger.info(
+        "Deploy %s: %s uploaded, %s deleted",
+        activation.plugin,
+        result.get("uploaded", 0),
+        result.get("deleted", 0),
+    )
+    for url in result.get("urls", []) or []:
+        logger.info("Deploy %s: %s", activation.plugin, url)
+    return True
+
+
+def _activation_artifact(activation: Activation, base: Path) -> Path:
+    """The directory an activation uploads, resolved and checked to exist."""
+    artifact = _resolve(base, activation.artifact or "")
+    if not artifact.exists():
+        raise DeployError(f"{activation.plugin}: artifact does not exist: {artifact}")
+    return artifact
+
+
 def run_deploy(
     project_root: Path,
     config_path: Optional[Path] = None,
@@ -330,17 +517,6 @@ def run_deploy(
 
     ok = True
     for activation in activations:
-        artifact = Path(activation.artifact)
-        if not artifact.is_absolute():
-            artifact = base / artifact
-        artifact = artifact.resolve()
-        if not artifact.exists():
-            logger.error(
-                "Deploy: %s: artifact does not exist: %s", activation.plugin, artifact
-            )
-            ok = False
-            continue
-
         manifest = index.get(activation.plugin)
         if manifest is None:
             if activation.require or require_all:
@@ -366,38 +542,26 @@ def run_deploy(
             ok = False
             continue
 
-        request = {
-            "deploy": WIRE_API,
-            "plugin": activation.plugin,
-            "artifact": str(artifact),
-            "options": activation.options,
-            "dry_run": dry_run,
-        }
-        logger.info(
-            "Deploy %s [%s] %s", activation.plugin, manifest.path, artifact
-        )
-        try:
-            result = invoke(manifest, request, timeout)
-        except DeployError as error:
-            logger.error("Deploy: %s", error)
-            ok = False
-            continue
-        if not result.get("ok", False):
-            logger.error(
-                "Deploy: plugin %r reported failure: %s",
-                activation.plugin,
-                result.get("message") or "no message",
-            )
-            ok = False
-            continue
-        logger.info(
-            "Deploy %s: %s uploaded, %s deleted",
-            activation.plugin,
-            result.get("uploaded", 0),
-            result.get("deleted", 0),
-        )
-        for url in result.get("urls", []) or []:
-            logger.info("Deploy %s: %s", activation.plugin, url)
+        if activation.documents is not None:
+            source = _resolve(base, activation.source or SITE_DIR)
+            try:
+                with assemble_documents(source, activation.documents) as artifact:
+                    if not _run_activation(
+                        activation, manifest, artifact, dry_run, timeout
+                    ):
+                        ok = False
+            except DeployError as error:
+                logger.error("Deploy: %s", error)
+                ok = False
+        else:
+            try:
+                artifact = _activation_artifact(activation, base)
+            except DeployError as error:
+                logger.error("Deploy: %s", error)
+                ok = False
+                continue
+            if not _run_activation(activation, manifest, artifact, dry_run, timeout):
+                ok = False
     return ok
 
 

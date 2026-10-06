@@ -1,9 +1,9 @@
 """
 Quick render: locate one or more .qmd files by short name and render them.
 
-Provides a convenience subcommand ``sdb render <name>`` so that, for example,
-``sdb render map`` finds ``docs/projects/section/chapter/map.qmd`` and runs
-``quarto render`` on it automatically.
+Provides a convenience subcommand ``sdb render <docs_root> <name>`` so that, for
+example, ``sdb render docs map`` finds ``docs/projects/section/chapter/map.qmd``
+and runs ``quarto render`` on it automatically.
 """
 
 from __future__ import annotations
@@ -398,8 +398,7 @@ def resolve_and_render(
 ) -> tuple[bool, list[Path]]:
     """Resolve patterns, deduplicate, render, and return results.
 
-    This is the shared pipeline used by both ``sdb render`` and
-    ``sdb dist``.
+    This is the pipeline behind ``sdb render``.
 
     Args:
         patterns:        List of short name / path fragment patterns.
@@ -507,12 +506,12 @@ def resolve_and_render(
 
 
 # ---------------------------------------------------------------------------
-# dist_artifacts — collect PDF-related artifacts after rendering
+# article_artifacts — assemble the article distribution after rendering
 # ---------------------------------------------------------------------------
 
 
 def _collect_one(qmd_path: Path, dest: Path) -> list[Path]:
-    """Copy PDF-related artifacts for a single rendered QMD into *dest*.
+    """Copy the artifacts a single rendered QMD produced into *dest*.
 
     Copies (when they exist):
       {stem}_files/figure-pdf/
@@ -561,19 +560,24 @@ def _collect_one(qmd_path: Path, dest: Path) -> list[Path]:
     return copied
 
 
-def dist_artifacts(qmd_paths: list[Path]) -> int:
-    """Collect PDF-related artifacts for rendered QMD files.
+def article_artifacts(
+    qmd_paths: list[Path], dest_root: Optional[Path] = None
+) -> int:
+    """Collect the article distribution for rendered QMD files.
 
-    For each rendered QMD, creates a folder named after the file's stem
-    alongside the QMD file itself (e.g. ``map.qmd`` → ``map/``) and copies
-    PDF-related artifacts into it preserving relative paths.
+    For each rendered QMD, creates a folder named after the file's stem and
+    copies the artifacts a published article carries into it: the PDF, the
+    LaTeX source, the figures, the media, and the shared ``_files``.  The folder
+    sits beside the QMD file itself (e.g. ``map.qmd`` → ``map/``) unless
+    *dest_root* places it elsewhere, in which case each folder is named after
+    the file's stem under that root.
 
     Returns the total number of items copied.
     """
     total = 0
     for qmd in qmd_paths:
         stem = qmd.stem
-        dest = qmd.parent / stem
+        dest = (dest_root / stem) if dest_root is not None else (qmd.parent / stem)
         dest.mkdir(parents=True, exist_ok=True)
         logger.info("Assembling %s → %s", qmd, dest)
         n = len(_collect_one(qmd, dest))
