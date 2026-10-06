@@ -70,7 +70,7 @@ class TestCleanReal:
             assert e.code in (None, 0)
 
         docs = tmp_path / "docs"
-        cached = docs / "index_cached"
+        cached = docs / ".sdbtmp_index_cache"
         cached.mkdir(parents=True, exist_ok=True)
         (cached / "test.txt").write_text("cache")
         html = docs / "index_files"
@@ -83,5 +83,5 @@ class TestCleanReal:
             cwd=str(SDBS_SRC.parent), env=_build_env(), timeout=30,
         )
         assert result.returncode == 0, f"Clean failed:\n{result.stderr}"
-        assert not cached.exists(), f"_cached dir still exists: {cached}"
+        assert not cached.exists(), f"cache dir still exists: {cached}"
         assert not html.exists(), f"_files dir still exists: {html}"
