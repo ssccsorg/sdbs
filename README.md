@@ -80,7 +80,9 @@ An article build goes through the renderer rather than through the site orchestr
 
 ## Build Cache
 
-A build keeps the rendered form of each document in `.sdbtmp_cache`, so an unchanged document is not rendered twice, and it runs the Jupyter cache Quarto executes notebooks against in `.sdbtmp_jupyter`.
+A build keeps the rendered form of each document in `.sdbtmp_cache`, under the target name the document has, so an unchanged document is not rendered twice, and it runs the Jupyter cache Quarto executes notebooks against in `.sdbtmp_jupyter`.
+
+The directory a target is named by holds the record of what each of its formats was rendered from, beside the rendered artifacts themselves, so one name identifies a document everywhere and nothing the build caches sits beside a source file.
 
 Both live in the directory the command was run from. That is one place whether the documents sit in a subdirectory or the docs root is the repository root, so a workflow caches `.sdbtmp_cache` and `.sdbtmp_jupyter` at its checkout root in either case, and nothing the build writes sits outside the tree it checked out.
 

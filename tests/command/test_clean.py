@@ -70,7 +70,7 @@ class TestCleanReal:
             assert e.code in (None, 0)
 
         docs = tmp_path / "docs"
-        cached = docs / ".sdbtmp_index_cache"
+        cached = docs / ".sdbtmp_cache"
         cached.mkdir(parents=True, exist_ok=True)
         (cached / "test.txt").write_text("cache")
         html = docs / "index_files"

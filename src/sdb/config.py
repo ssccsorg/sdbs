@@ -220,16 +220,6 @@ class ConfigManager:
         return cache_parent / BUILD_CACHE_DIR
 
     @staticmethod
-    def get_cache_dir(qmd_path: Path) -> Path:
-        """Return the per-document cache directory, beside the document."""
-        return qmd_path.parent / f"{SDB_TEMP_PREFIX}{qmd_path.stem}_cache"
-
-    @staticmethod
-    def get_cache_dir_for_target(qmd_path: Path, target_name: str) -> Path:
-        """Return the per-target cache directory, beside the document."""
-        return qmd_path.parent / f"{SDB_TEMP_PREFIX}{target_name}_cache"
-
-    @staticmethod
     def get_moved_path(
         qmd_path: Path,
         fmt: str,

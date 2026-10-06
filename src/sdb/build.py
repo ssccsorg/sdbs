@@ -30,7 +30,6 @@ from .config import (
     BUILD_CACHE_DIR,
     BUILD_TEMP_DIR,
     JUPYTER_CACHE_DIR,
-    SDB_TEMP_PREFIX,
     ConfigManager,
     CleanupManager,
 )
@@ -149,14 +148,6 @@ def find_existing_output(
     return QuartoInspector.find_existing_output(
         qmd_path, fmt, config, output_dir, docs_root
     )
-
-
-def get_cache_dir(qmd_path: Path) -> Path:
-    return QuartoInspector.get_cache_dir(qmd_path)
-
-
-def get_cache_dir_for_target(qmd_path: Path, target_name: str) -> Path:
-    return QuartoInspector.get_cache_dir_for_target(qmd_path, target_name)
 
 
 def cache_parent(docs_root: Optional[Path] = None) -> Path:
@@ -333,17 +324,16 @@ def restore_site_directory(target_name: str, hash_str: str, dest_dir: Path, docs
         return False
 
 
-def get_cache_file(qmd_path: Path, fmt: str) -> Path:
+def get_cache_file(target_name: str, fmt: str, docs_root: Optional[Path] = None) -> Path:
+    """Return the file recording what a target's format was rendered from.
+
+    It lives under the target in the one cache, so a document is named the same
+    way everywhere and nothing the build caches sits beside a source file.  The
+    target name is also what keeps two ``index.qmd`` in different directories
+    apart, which is why the path this replaces reached for the parent folder's
+    name.
     """
-    Return the cache file path for a given format.
-    For index.qmd files, uses the parent folder name for cache directory.
-    """
-    if qmd_path.stem.lower() == "index":
-        parent_name = qmd_path.parent.name
-        if parent_name and parent_name != ".":
-            cache_dir = qmd_path.parent / f"{SDB_TEMP_PREFIX}{parent_name}_cache"
-            return cache_dir / f"rendered_{fmt}.txt"
-    return get_cache_dir(qmd_path) / f"rendered_{fmt}.txt"
+    return get_cache_base(docs_root) / target_name / f"rendered_{fmt}.txt"
 
 
 def read_hash_pair(cache_file: Path) -> Optional[Tuple[str, str]]:
@@ -470,17 +460,17 @@ def update_format_cache(
     fmt: str,
     output_path: Path,
     docs_root: Path,
-    target_name: Optional[str] = None,
+    target_name: str,
     linked_artifacts: Optional[Dict[str, Path]] = None,
 ) -> None:
-    """Update cache after successful render of a specific format.
+    """Update cache after a successful render of one format of one target.
 
     Args:
         file_path: Path to the source QMD file
         fmt: Output format (pdf, html, etc.)
         output_path: Path to the rendered output file
         docs_root: Root directory of documentation
-        target_name: Name of the build target
+        target_name: Name of the build target, which keys the cache
         linked_artifacts: Dict mapping linked file extension -> path to the linked artifact file
     """
     qmd_hash = compute_quarto_file_hash_with_deps(file_path, docs_root)
@@ -489,55 +479,53 @@ def update_format_cache(
         f"Updating {fmt} cache for {file_path.name}: output hash {output_hash[:16]}..."
     )
 
-    if target_name is not None:
-        target_cache_dir = get_cache_base(docs_root) / target_name
-        if target_cache_dir.exists():
-            try:
-                for existing_hash_dir in target_cache_dir.iterdir():
-                    if (
-                        existing_hash_dir.is_dir()
-                        and existing_hash_dir.name != qmd_hash
-                    ):
-                        shutil.rmtree(existing_hash_dir)
-                        logger.info(
-                            f"Deleted old cache directory for target '{target_name}' "
-                            f"(hash: {existing_hash_dir.name[:16]}...) to prevent accumulation"
-                        )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to delete old cache for target '{target_name}': {e}"
-                )
-
-        cache_dir = get_cache_base(docs_root) / target_name / qmd_hash
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        ext = format_to_extension(fmt)
-        artifact_name = f"{target_name}.{ext}"
-        artifact_path = cache_dir / artifact_name
+    target_cache_dir = get_cache_base(docs_root) / target_name
+    if target_cache_dir.exists():
         try:
-            _atomic_copy(output_path, artifact_path)
-            note_cache_activity("artifacts")
-            logger.info(f"Cached artifact for {target_name} ({fmt}) at {artifact_path}")
+            for existing_hash_dir in target_cache_dir.iterdir():
+                if (
+                    existing_hash_dir.is_dir()
+                    and existing_hash_dir.name != qmd_hash
+                ):
+                    shutil.rmtree(existing_hash_dir)
+                    logger.info(
+                        f"Deleted old cache directory for target '{target_name}' "
+                        f"(hash: {existing_hash_dir.name[:16]}...) to prevent accumulation"
+                    )
         except Exception as e:
-            logger.warning(f"Failed to cache artifact for {target_name} ({fmt}): {e}")
+            logger.warning(
+                f"Failed to delete old cache for target '{target_name}': {e}"
+            )
 
-        if linked_artifacts:
-            for linked_ext, linked_path in linked_artifacts.items():
-                if linked_path is not None and linked_path.exists():
-                    linked_cache_name = f"{target_name}.{linked_ext}"
-                    linked_cache_path = cache_dir / linked_cache_name
-                    try:
-                        _atomic_copy(linked_path, linked_cache_path)
-                        note_cache_activity("artifacts")
-                        logger.info(
-                            f"Cached linked artifact ({linked_ext}) for {target_name} ({fmt}) at {linked_cache_path}"
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to cache linked artifact ({linked_ext}) for {target_name} ({fmt}): {e}"
-                        )
+    cache_dir = target_cache_dir / qmd_hash
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    ext = format_to_extension(fmt)
+    artifact_path = cache_dir / f"{target_name}.{ext}"
+    try:
+        _atomic_copy(output_path, artifact_path)
+        note_cache_activity("artifacts")
+        logger.info(f"Cached artifact for {target_name} ({fmt}) at {artifact_path}")
+    except Exception as e:
+        logger.warning(f"Failed to cache artifact for {target_name} ({fmt}): {e}")
 
-    cache_file = get_cache_file(file_path, fmt)
-    write_hash_pair(cache_file, qmd_hash, output_hash)
+    if linked_artifacts:
+        for linked_ext, linked_path in linked_artifacts.items():
+            if linked_path is not None and linked_path.exists():
+                linked_cache_path = cache_dir / f"{target_name}.{linked_ext}"
+                try:
+                    _atomic_copy(linked_path, linked_cache_path)
+                    note_cache_activity("artifacts")
+                    logger.info(
+                        f"Cached linked artifact ({linked_ext}) for {target_name} ({fmt}) at {linked_cache_path}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to cache linked artifact ({linked_ext}) for {target_name} ({fmt}): {e}"
+                    )
+
+    write_hash_pair(
+        get_cache_file(target_name, fmt, docs_root), qmd_hash, output_hash
+    )
 
 
 def refresh_cache_for_target(
@@ -578,7 +566,7 @@ def refresh_cache_for_target(
     current_qmd_hash = compute_quarto_file_hash_with_deps(qmd_path, docs_root)
 
     for fmt in formats:
-        cache_file = get_cache_file(qmd_path, fmt)
+        cache_file = get_cache_file(target, fmt, docs_root)
         existing_cache = read_hash_pair(cache_file)
 
         output_path = find_existing_output(qmd_path, fmt, config, output_dir, docs_root)

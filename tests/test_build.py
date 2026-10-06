@@ -188,16 +188,44 @@ class TestCacheDirectoriesAreNamed:
     """One marker names every folder the build writes for itself, so a rule
     covers a folder this engine has not grown yet as well as the ones it has."""
 
-    def test_the_marker_names_a_document_cache(self, tmp_path: Path) -> None:
-        qmd = tmp_path / "docs" / "index.qmd"
-        assert build.get_cache_dir(qmd) == tmp_path / "docs" / ".sdbtmp_index_cache"
-        assert (
-            build.get_cache_dir_for_target(qmd, "website")
-            == tmp_path / "docs" / ".sdbtmp_website_cache"
-        )
+    def test_the_hash_pair_lives_under_the_target_in_the_cache(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A document is keyed by its target name and not by its file name.
+
+        Two ``index.qmd`` in different directories are two targets, so their
+        records cannot collide.  That is what the path this replaces reached for
+        the parent folder's name to avoid.
+        """
+        monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
+        root_index = build.get_cache_file("index", "html", tmp_path / "docs")
+        sub_index = build.get_cache_file("rem-index", "html", tmp_path / "docs")
+
+        assert root_index == tmp_path / ".sdbtmp_cache" / "index" / "rendered_html.txt"
+        assert sub_index == tmp_path / ".sdbtmp_cache" / "rem-index" / "rendered_html.txt"
+
+    def test_the_cache_base_holds_only_target_directories(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """What the build records for a target belongs inside that target.
+
+        The set of cached targets is read from the top level of the cache base, so
+        a record that landed there would be read as a target of its own and would
+        keep the sidebar re-render decision always awake.
+        """
+        monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
+        for target in ("index", "rem-index"):
+            for fmt in ("html", "pdf"):
+                marker = build.get_cache_file(target, fmt, tmp_path / "docs")
+                build.write_hash_pair(marker, "a" * 64, "b" * 64)
+
+        cache_base = build.get_cache_base(tmp_path / "docs")
+        directories = {entry.name for entry in cache_base.iterdir() if entry.is_dir()}
+
+        assert directories == {"index", "rem-index"}
 
     def test_the_marker_names_every_folder_the_build_writes(self) -> None:
-        """Every name the engine derives carries the one marker.
+        """Every name the engine derives carries the one marker, bar the copy.
 
         The copy a parallel website build renders from is the parent directory of
         the document Quarto is given, so its name is also a render input.  Quarto
@@ -220,12 +248,7 @@ class TestCacheDirectoriesAreNamed:
             f"**/{BUILD_TEMP_DIR}/",
         ]
 
-        names = [
-            BUILD_CACHE_DIR,
-            JUPYTER_CACHE_DIR,
-            build.get_cache_dir(Path("docs/index.qmd")).name,
-            build.get_cache_dir_for_target(Path("docs/index.qmd"), "site").name,
-        ]
+        names = [BUILD_CACHE_DIR, JUPYTER_CACHE_DIR]
         for name in names:
             assert name.startswith(SDB_TEMP_PREFIX), name
 
@@ -242,12 +265,7 @@ class TestCacheDirectoriesAreNamed:
 
         document = "---\ntitle: x\n---\n"
         _write(tmp_path / "index.qmd", document)
-        for name in (
-            BUILD_CACHE_DIR,
-            JUPYTER_CACHE_DIR,
-            BUILD_TEMP_DIR,
-            ".sdbtmp_index_cache",
-        ):
+        for name in (BUILD_CACHE_DIR, JUPYTER_CACHE_DIR, BUILD_TEMP_DIR):
             (tmp_path / name).mkdir()
             _write(tmp_path / name / "written.qmd", document)
             (tmp_path / "sub" / name).mkdir(parents=True)
@@ -275,8 +293,10 @@ class TestCacheDirectoriesAreNamed:
     def test_the_copy_leaves_the_cache_behind(self, tmp_path: Path) -> None:
         """The copy a target renders from carries no cache, and no scratch space.
 
-        A per-document cache sits beside its document, so the skip has to hold
-        at every level of the tree and not only at the root."""
+        The skip follows the marker rather than a list of names, and it holds at
+        every level, so a tree that carries a marked folder beside a document,
+        which is what an older version of this engine wrote, hands none of it to a
+        copy."""
         source = tmp_path / "docs"
         names = (
             ".sdbtmp_cache",
