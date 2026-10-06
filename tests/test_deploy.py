@@ -39,6 +39,19 @@ _FAIL_PLUGIN = (
     "sys.exit(2)\n"
 )
 
+# A plugin that records the directory it was handed, so a test can see the
+# selection after the engine has removed it.
+_RECORDING_PLUGIN = (
+    "import json, pathlib, sys\n"
+    "request = json.loads(sys.stdin.read())\n"
+    "artifact = pathlib.Path(request['artifact'])\n"
+    "files = sorted(str(p.relative_to(artifact))\n"
+    "               for p in artifact.rglob('*') if p.is_file())\n"
+    "pathlib.Path('seen.json').write_text(json.dumps({\n"
+    "    'artifact': str(artifact), 'files': files}))\n"
+    "print(json.dumps({'deploy': 1, 'ok': True, 'uploaded': len(files)}))\n"
+)
+
 
 def _write_manifest(directory: Path, name: str, command: list[str], extra: str = "") -> Path:
     directory.mkdir(parents=True, exist_ok=True)
@@ -79,6 +92,36 @@ def _make_project(tmp_path: Path, config: str, artifact: bool = True) -> Path:
         site.mkdir(parents=True)
         (site / "index.html").write_text("<html></html>", encoding="utf-8")
     return root
+
+
+def _make_site(root: Path, source: str = "_site") -> Path:
+    """A build output holding documents, a page, and the page's own assets."""
+    site = root / source
+    (site / "nested").mkdir(parents=True)
+    (site / "index.html").write_text("<html></html>", encoding="utf-8")
+    (site / "intro.pdf").write_text("%PDF", encoding="utf-8")
+    (site / "nested" / "deep.pdf").write_text("%PDF", encoding="utf-8")
+    (site / "tag.c2pa").write_text("{}", encoding="utf-8")
+    (site / "site_libs" / "quarto-html").mkdir(parents=True)
+    (site / "site_libs" / "quarto-html" / "asset.pdf").write_text(
+        "%PDF", encoding="utf-8"
+    )
+    (site / "intro_files" / "figure-pdf").mkdir(parents=True)
+    (site / "intro_files" / "figure-pdf" / "fig.pdf").write_text(
+        "%PDF", encoding="utf-8"
+    )
+    return site
+
+
+def _seen(plugin: Path) -> dict:
+    """What a recording plugin observed."""
+    return json.loads((plugin / "seen.json").read_text(encoding="utf-8"))
+
+
+def _write_config(tmp_path: Path, body: str) -> Path:
+    config = tmp_path / "_deploy.yml"
+    config.write_text(body, encoding="utf-8")
+    return config
 
 
 class TestManifest:
@@ -241,6 +284,79 @@ class TestActivations:
         with pytest.raises(DeployError):
             load_activations(config)
 
+    def _documents_config(self, tmp_path: Path, body: str) -> Path:
+        return _write_config(tmp_path, body)
+
+    def test_a_document_selection_is_read(self, tmp_path: Path) -> None:
+        config = self._documents_config(
+            tmp_path, "deploy:\n  - plugin: s3\n    documents: [pdf, c2pa]\n"
+        )
+        activations = load_activations(config)
+        assert activations[0].documents == ("pdf", "c2pa")
+        assert activations[0].artifact == ""
+        assert activations[0].source is None
+
+    def test_extensions_are_normalized(self, tmp_path: Path) -> None:
+        """A leading dot and a different case name the same extension."""
+        config = self._documents_config(
+            tmp_path, "deploy:\n  - plugin: s3\n    documents: ['.PDF', ' c2pa ']\n"
+        )
+        assert load_activations(config)[0].documents == ("pdf", "c2pa")
+
+    def test_an_artifact_and_a_selection_together_are_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """One channel publishes one thing, so naming two is a contradiction."""
+        config = self._documents_config(
+            tmp_path,
+            "deploy:\n"
+            "  - plugin: s3\n"
+            "    artifact: docs/_site\n"
+            "    documents: [pdf]\n",
+        )
+        with pytest.raises(DeployError):
+            load_activations(config)
+
+    @pytest.mark.parametrize(
+        "documents",
+        [
+            "[]",
+            "pdf",
+            "[pdf, 7]",
+            "['']",
+            "['a b']",
+            "['.']",
+        ],
+    )
+    def test_a_selection_that_is_not_a_list_of_extensions_is_rejected(
+        self, tmp_path: Path, documents: str
+    ) -> None:
+        config = self._documents_config(
+            tmp_path, f"deploy:\n  - plugin: s3\n    documents: {documents}\n"
+        )
+        with pytest.raises(DeployError):
+            load_activations(config)
+
+    def test_a_source_without_a_selection_is_rejected(self, tmp_path: Path) -> None:
+        """A build output nothing selects from would be read by nobody."""
+        config = self._documents_config(
+            tmp_path,
+            "deploy:\n"
+            "  - plugin: s3\n"
+            "    artifact: docs/_site\n"
+            "    source: elsewhere\n",
+        )
+        with pytest.raises(DeployError):
+            load_activations(config)
+
+    def test_a_source_that_is_not_a_string_is_rejected(self, tmp_path: Path) -> None:
+        config = self._documents_config(
+            tmp_path,
+            "deploy:\n  - plugin: s3\n    documents: [pdf]\n    source: [a]\n",
+        )
+        with pytest.raises(DeployError):
+            load_activations(config)
+
 
 class TestRunDeploy:
     CONFIG = (
@@ -295,6 +411,94 @@ class TestRunDeploy:
         run_deploy(root, dry_run=False)
         request = json.loads((plugin / "request.json").read_text(encoding="utf-8"))
         assert request["dry_run"] is False
+
+
+class TestDocumentSelection:
+    """A channel that publishes documents, selected out of the build output."""
+
+    CONFIG = (
+        "deploy:\n"
+        "  - plugin: s3\n"
+        "    documents: [pdf, c2pa]\n"
+        "    options:\n"
+        "      bucket: b\n"
+    )
+
+    def _project(self, tmp_path: Path) -> tuple[Path, Path]:
+        root = _make_project(tmp_path, self.CONFIG, artifact=False)
+        _make_site(root, "_site")
+        plugin = _make_plugin(root / "plugins", "s3", _RECORDING_PLUGIN)
+        return root, plugin
+
+    def test_the_selection_reaches_the_plugin(self, tmp_path: Path) -> None:
+        root, plugin = self._project(tmp_path)
+        assert run_deploy(root) is True
+        assert _seen(plugin)["files"] == [
+            "intro.pdf",
+            "nested/deep.pdf",
+            "tag.c2pa",
+        ]
+
+    def test_page_assets_are_not_documents(self, tmp_path: Path) -> None:
+        """A PDF inside a page's asset directory belongs to the page, not the channel."""
+        root, plugin = self._project(tmp_path)
+        run_deploy(root)
+        for path in _seen(plugin)["files"]:
+            assert not path.startswith("site_libs/"), path
+            assert "_files/" not in path, path
+
+    def test_the_composed_directory_is_removed_afterwards(self, tmp_path: Path) -> None:
+        """The engine owns the directory, so nothing is left behind in the tree."""
+        root, plugin = self._project(tmp_path)
+        run_deploy(root)
+        composed = Path(_seen(plugin)["artifact"])
+        assert not composed.exists()
+        assert composed != root / "_site"
+
+    def test_the_selection_leaves_the_build_output_alone(self, tmp_path: Path) -> None:
+        root, _ = self._project(tmp_path)
+        before = sorted(p.name for p in (root / "_site").iterdir())
+        run_deploy(root)
+        assert sorted(p.name for p in (root / "_site").iterdir()) == before
+
+    def test_the_source_can_name_the_build_output(self, tmp_path: Path) -> None:
+        """A build that wrote somewhere other than _site is named rather than guessed."""
+        config = self.CONFIG.replace(
+            "    options:", "    source: build/out\n    options:"
+        )
+        root = _make_project(tmp_path, config, artifact=False)
+        _make_site(root, "build/out")
+        plugin = _make_plugin(root / "plugins", "s3", _RECORDING_PLUGIN)
+        assert run_deploy(root) is True
+        assert _seen(plugin)["files"] == [
+            "intro.pdf",
+            "nested/deep.pdf",
+            "tag.c2pa",
+        ]
+
+    def test_a_missing_build_output_fails(self, tmp_path: Path) -> None:
+        root = _make_project(tmp_path, self.CONFIG, artifact=False)
+        _make_plugin(root / "plugins", "s3", _RECORDING_PLUGIN)
+        assert run_deploy(root) is False
+
+    def test_a_selection_that_matches_nothing_fails(self, tmp_path: Path) -> None:
+        """A run that would upload nothing reports rather than succeeding."""
+        root = _make_project(tmp_path, self.CONFIG, artifact=False)
+        site = root / "_site"
+        site.mkdir()
+        (site / "index.html").write_text("<html></html>", encoding="utf-8")
+        _make_plugin(root / "plugins", "s3", _RECORDING_PLUGIN)
+        assert run_deploy(root) is False
+
+    def test_a_selection_is_not_checked_against_the_declared_options(
+        self, tmp_path: Path
+    ) -> None:
+        """'documents' composes the artifact rather than reaching the plugin."""
+        config = "deploy:\n  - plugin: s3\n    documents: [pdf]\n"
+        root = _make_project(tmp_path, config, artifact=False)
+        _make_site(root, "_site")
+        _make_declaring_plugin(root / "plugins", "s3", _RECORDING_PLUGIN, options=[])
+        assert run_deploy(root) is True
 
 
 class TestDeclaredOptions:
