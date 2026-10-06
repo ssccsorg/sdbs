@@ -4,6 +4,7 @@
 **/*_files/
 **/*_output/
 **/*_extensions/
-**/_sdbtmp_*/
+**/.sdbtmp_*/
+**/_sdbtmp_build/
 __pycache__/
 *.pyc

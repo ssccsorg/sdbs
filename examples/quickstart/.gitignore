@@ -3,6 +3,7 @@
 /_site/
 /**/*_files/
 /**/*_output/
-/**/_sdbtmp_*/
+/**/.sdbtmp_*/
+/**/_sdbtmp_build/
 __pycache__/
 *.pyc
