@@ -197,16 +197,61 @@ class TestCacheDirectoriesAreNamed:
         )
 
     def test_the_marker_names_every_folder_the_build_writes(self) -> None:
-        """One marker names the caches, the scratch space, and a document cache.
+        """Every name the engine derives carries the one marker.
 
         The copy a parallel website build renders from is the parent directory of
-        the document Quarto is given, so its name is a render input too, and the
-        render is what answers for it rather than the marker.
+        the document Quarto is given, so its name is also a render input.  That is
+        an argument about the render, and not a licence to spell a folder the build
+        writes without the marker.
         """
-        from sdb.config import BUILD_TEMP_DIR, SDB_TEMP_PREFIX
+        from sdb.config import (
+            BUILD_CACHE_DIR,
+            BUILD_TEMP_DIR,
+            DISCOVERY_EXCLUDE_PATTERNS,
+            JUPYTER_CACHE_DIR,
+            SDB_TEMP_PREFIX,
+        )
 
         assert SDB_TEMP_PREFIX.startswith(".")
-        assert BUILD_TEMP_DIR.startswith(SDB_TEMP_PREFIX)
+        assert DISCOVERY_EXCLUDE_PATTERNS == [f"**/{SDB_TEMP_PREFIX}*/"]
+
+        names = [
+            BUILD_CACHE_DIR,
+            JUPYTER_CACHE_DIR,
+            BUILD_TEMP_DIR,
+            build.get_cache_dir(Path("docs/index.qmd")).name,
+            build.get_cache_dir_for_target(Path("docs/index.qmd"), "site").name,
+        ]
+        for name in names:
+            assert name.startswith(SDB_TEMP_PREFIX), name
+
+    def test_discovery_reads_no_folder_that_carries_the_marker(
+        self, tmp_path: Path
+    ) -> None:
+        """A document the build wrote never becomes a target of the next build."""
+        from sdb.config import (
+            BUILD_CACHE_DIR,
+            BUILD_TEMP_DIR,
+            ConfigManager,
+            JUPYTER_CACHE_DIR,
+        )
+
+        document = "---\ntitle: x\n---\n"
+        _write(tmp_path / "index.qmd", document)
+        for name in (
+            BUILD_CACHE_DIR,
+            JUPYTER_CACHE_DIR,
+            BUILD_TEMP_DIR,
+            ".sdbtmp_index_cache",
+        ):
+            (tmp_path / name).mkdir()
+            _write(tmp_path / name / "written.qmd", document)
+            (tmp_path / "sub" / name).mkdir(parents=True)
+            _write(tmp_path / "sub" / name / "written.qmd", document)
+
+        targets = ConfigManager.discover_quarto_targets(tmp_path)
+
+        assert set(targets) == {"index"}
 
     def test_the_marker_covers_a_folder_the_engine_has_not_grown(self) -> None:
         """The skip follows the marker, rather than a list of the folders."""
@@ -258,6 +303,27 @@ class TestCacheDirectoriesAreNamed:
 
         assert not (tmp_path / ".sdbtmp_jupyter").exists()
         assert not (tmp_path / ".sdbtmp_cache").exists()
+
+    def test_clean_reaches_a_cache_beside_a_docs_root_in_a_subdirectory(
+        self, tmp_path: Path
+    ) -> None:
+        """A docs root in a subdirectory keeps its cache at the parent.
+
+        The build writes where the command was run, so a project whose documents
+        sit in ``docs/`` has its caches one level above the directory ``clean`` is
+        given.  Reaching them is what keeps the tree clean in that layout.
+        """
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (tmp_path / ".sdbtmp_cache" / "index" / "hash").mkdir(parents=True)
+        (tmp_path / ".sdbtmp_jupyter" / "executed").mkdir(parents=True)
+        (tmp_path / ".sdbtmp_build" / "index").mkdir(parents=True)
+
+        assert build.clean_quarto_artifacts(docs) is True
+
+        assert not (tmp_path / ".sdbtmp_cache").exists()
+        assert not (tmp_path / ".sdbtmp_jupyter").exists()
+        assert not (tmp_path / ".sdbtmp_build").exists()
 
 
 class TestCacheWritesAreAtomic:
