@@ -344,8 +344,7 @@ class CleanupManager:
         os.path.join("..", ".rumdl_cache"),
         os.path.join("..", ".jupyter_cache"),
     ]
-    # Everything a build writes, which is what an isolated copy leaves behind and
-    # what target discovery skips.
+    # Everything a build writes, which is what an isolated copy leaves behind.
     IGNORING_ARTIFACT_PATTERNS = ARTIFACT_PATTERNS + CACHE_PATTERNS
 
     def patterns(self, caches: bool = False) -> List[str]:

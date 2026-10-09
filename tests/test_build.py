@@ -11,6 +11,7 @@ directory serves either layout of the docs root.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 
 import pytest
@@ -183,6 +184,39 @@ class TestCacheLocation:
         assert build.get_cache_base(tmp_path) == tmp_path / ".sdbtmp_cache"
         assert (tmp_path / ".sdbtmp_jupyter").is_dir()
 
+    def test_the_render_reads_the_cache_the_copy_does_not_carry(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The cache a render reads is outside the copy, so dropping it is safe.
+
+        The copy a parallel website build renders from carries no cache, since
+        the skip removes those folders.  The render reads the Jupyter cache from
+        the environment, which names a directory where the command was run, so
+        the cache and the copy are independent and the copy cannot lose it.
+        """
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "docs").mkdir()
+        for name in (
+            "CACHE_ROOT",
+            "JUPYTER_CACHE_PATH",
+            "EXTERNAL_CONFIG",
+            "TARGET_CONFIG",
+            "BUILD_FUNCTIONS",
+            "OUTPUT_DIR_TARGETS",
+        ):
+            monkeypatch.setattr(build, name, getattr(build, name))
+        monkeypatch.setenv("JUPYTERCACHE", "")
+
+        build.initialize_config(tmp_path / "docs")
+
+        cache = Path(os.environ["JUPYTERCACHE"])
+        assert cache.is_absolute()
+        assert cache == tmp_path / ".sdbtmp_jupyter"
+        assert tmp_path / build.BUILD_TEMP_DIR not in cache.parents
+
+        ignore = build.ignore_quarto_artifacts()
+        assert ".sdbtmp_jupyter" in ignore("docs", [".sdbtmp_jupyter", "index.qmd"])
+
 
 class TestCacheDirectoriesAreNamed:
     """One marker names every folder the build writes for itself, so a rule
@@ -286,6 +320,8 @@ class TestCacheDirectoriesAreNamed:
             ".sdbtmp_cache",
             ".sdbtmp_jupyter",
             "_sdbtmp_build",
+            ".rumdl_cache",
+            ".jupyter_cache",
             "_site",
         ):
             assert name in ignore("docs", [name, "index.qmd"]), name
