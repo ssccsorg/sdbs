@@ -140,14 +140,34 @@ class TestBuildCommand:
             mock_build.assert_called_once()
 
     def test_clean_exit_zero(self, tmp_path: Path) -> None:
-        """sdb clean <dir> triggers clean_quarto_artifacts."""
+        """sdb clean <dir> removes the artifacts and keeps the caches."""
         docs_root = tmp_path / "docs"
         docs_root.mkdir()
         with patch("sdb.cli.build_module.clean_quarto_artifacts") as mock_clean:
             mock_clean.return_value = True
             code = _run_main(["clean", str(docs_root)])
             assert code == 0
-            mock_clean.assert_called_once_with(docs_root.resolve())
+            mock_clean.assert_called_once_with(docs_root.resolve(), caches=False)
+
+    def test_clean_all_asks_for_the_caches(self, tmp_path: Path) -> None:
+        """The 'all' layer takes the caches as well."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
+        with patch("sdb.cli.build_module.clean_quarto_artifacts") as mock_clean:
+            mock_clean.return_value = True
+            code = _run_main(["clean", str(docs_root), "all"])
+            assert code == 0
+            mock_clean.assert_called_once_with(docs_root.resolve(), caches=True)
+
+    def test_an_unknown_layer_is_refused(self, tmp_path: Path, capsys) -> None:
+        """A layer the command does not have is refused rather than taken as a path."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
+        with patch("sdb.cli.build_module.clean_quarto_artifacts") as mock_clean:
+            code = _run_main(["clean", str(docs_root), "everything"])
+        assert code != 0
+        mock_clean.assert_not_called()
+        assert "everything" in capsys.readouterr().err
 
     def test_clean_exit_one(self, tmp_path: Path) -> None:
         """When clean fails, exit code is 1."""

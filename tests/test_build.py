@@ -318,35 +318,86 @@ class TestCacheDirectoriesAreNamed:
             assert not (destination / name).exists(), name
             assert not (destination / "sub" / name).exists(), f"sub/{name}"
 
-    def test_clean_removes_a_cache_inside_the_docs_root(self, tmp_path: Path) -> None:
-        (tmp_path / ".sdbtmp_jupyter" / "executed").mkdir(parents=True)
-        (tmp_path / ".sdbtmp_cache" / "index" / "hash").mkdir(parents=True)
+    def test_clean_keeps_the_caches_a_build_reuses(self, tmp_path: Path) -> None:
+        """A clean leaves the caches, so the next build finds them."""
+        caches = (
+            ".sdbtmp_jupyter",
+            ".sdbtmp_cache",
+            ".quarto",
+            ".rumdl_cache",
+            ".jupyter_cache",
+        )
+        for name in caches:
+            (tmp_path / name / "inner").mkdir(parents=True)
+        (tmp_path / "_sdbtmp_build" / "index").mkdir(parents=True)
+        (tmp_path / "_site").mkdir()
+        (tmp_path / "index.pdf").write_text("%PDF")
 
         assert build.clean_quarto_artifacts(tmp_path) is True
 
-        assert not (tmp_path / ".sdbtmp_jupyter").exists()
-        assert not (tmp_path / ".sdbtmp_cache").exists()
+        for name in caches:
+            assert (tmp_path / name).exists(), name
+        assert not (tmp_path / "_sdbtmp_build").exists()
+        assert not (tmp_path / "_site").exists()
+        assert not (tmp_path / "index.pdf").exists()
 
-    def test_clean_reaches_a_cache_beside_a_docs_root_in_a_subdirectory(
+    def test_clean_all_removes_the_caches_too(self, tmp_path: Path) -> None:
+        """The 'all' layer takes everything a build wrote, its caches included."""
+        names = (
+            ".sdbtmp_jupyter",
+            ".sdbtmp_cache",
+            ".quarto",
+            ".rumdl_cache",
+            ".jupyter_cache",
+            "_sdbtmp_build",
+            "_site",
+        )
+        for name in names:
+            (tmp_path / name / "inner").mkdir(parents=True)
+
+        assert build.clean_quarto_artifacts(tmp_path, caches=True) is True
+
+        for name in names:
+            assert not (tmp_path / name).exists(), name
+
+    def test_clean_reaches_what_a_build_wrote_beside_a_docs_root(
         self, tmp_path: Path
     ) -> None:
-        """A docs root in a subdirectory keeps its cache at the parent.
+        """A docs root in a subdirectory keeps its scratch and its cache at the parent.
 
         The build writes where the command was run, so a project whose documents
         sit in ``docs/`` has its caches one level above the directory ``clean`` is
-        given.  Reaching them is what keeps the tree clean in that layout.
+        given.  The scratch space goes in both layers and the caches only in the
+        one that asks for them, which is what keeps the tree clean in that layout.
         """
         docs = tmp_path / "docs"
         docs.mkdir()
-        (tmp_path / ".sdbtmp_cache" / "index" / "hash").mkdir(parents=True)
-        (tmp_path / ".sdbtmp_jupyter" / "executed").mkdir(parents=True)
-        (tmp_path / "_sdbtmp_build" / "index").mkdir(parents=True)
+        for name in (".sdbtmp_cache", ".sdbtmp_jupyter", "_sdbtmp_build", ".rumdl_cache"):
+            (tmp_path / name / "index").mkdir(parents=True)
 
         assert build.clean_quarto_artifacts(docs) is True
 
+        assert not (tmp_path / "_sdbtmp_build").exists()
+        assert (tmp_path / ".sdbtmp_cache").exists()
+        assert (tmp_path / ".sdbtmp_jupyter").exists()
+        assert (tmp_path / ".rumdl_cache").exists()
+
+        assert build.clean_quarto_artifacts(docs, caches=True) is True
+
         assert not (tmp_path / ".sdbtmp_cache").exists()
         assert not (tmp_path / ".sdbtmp_jupyter").exists()
-        assert not (tmp_path / "_sdbtmp_build").exists()
+        assert not (tmp_path / ".rumdl_cache").exists()
+
+    def test_the_layers_differ_only_by_the_caches(self) -> None:
+        """Every artifact pattern is in both layers, and the caches only in 'all'."""
+        manager = build.CleanupManager()
+        artifacts = manager.patterns()
+        everything = manager.patterns(caches=True)
+
+        assert set(artifacts) < set(everything)
+        assert set(everything) - set(artifacts) == set(
+            manager.CACHE_PATTERNS + manager.OUTSIDE_CACHE_PATTERNS
+        )
 
 
 class TestCacheWritesAreAtomic:

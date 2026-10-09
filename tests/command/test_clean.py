@@ -83,5 +83,13 @@ class TestCleanReal:
             cwd=str(SDBS_SRC.parent), env=_build_env(), timeout=30,
         )
         assert result.returncode == 0, f"Clean failed:\n{result.stderr}"
-        assert not cached.exists(), f"cache dir still exists: {cached}"
         assert not html.exists(), f"_files dir still exists: {html}"
+        assert cached.exists(), f"the cache did not survive the default clean: {cached}"
+
+        result = subprocess.run(
+            [sys.executable, "-m", "sdb.cli", "clean", str(docs), "all"],
+            capture_output=True, text=True,
+            cwd=str(SDBS_SRC.parent), env=_build_env(), timeout=30,
+        )
+        assert result.returncode == 0, f"Clean failed:\n{result.stderr}"
+        assert not cached.exists(), f"cache dir still exists: {cached}"

@@ -312,25 +312,53 @@ class ConfigManager:
 class CleanupManager:
     """Manages Quarto artifact patterns and cleanup operations."""
 
-    IGNORING_ARTIFACT_PATTERNS = [
+    # What a build writes and never reads back: the rendered output, and the
+    # scratch space a parallel website build copies a tree into.
+    ARTIFACT_PATTERNS = [
         "**/__pycache__", "**/*.pyc", "**/*.pyd", "**/*.log",
         "**/*_output", "**/*_extensions", "**/*_files",
         "**/*_libs", "**/_llms", "**/_site",
-        f"**/{SDB_TEMP_PREFIX}*", f"**/{SDB_BUILD_DIR}",
+        f"**/{SDB_BUILD_DIR}",
         "**/*.tex", "**/*.pdf", "**/*.html",
-        "**/*.quarto_ipynb*", "**/*.quarto",
+        "**/*.quarto_ipynb*",
         "**/*.c2pa", "**/*.c2pa_identifier.svg",
     ]
+    # What a build reuses, so a rebuild finds it: the two caches sdbs keeps,
+    # Quarto's own project cache, and the two tools that keep a cache under their
+    # own name.  None of it belongs in a commit, which is why the marker covers
+    # the caches, and all of it is expensive to rebuild, which is why a clean
+    # leaves it unless the caller asks for it.
+    CACHE_PATTERNS = [
+        f"**/{SDB_TEMP_PREFIX}*",
+        "**/*.quarto",
+        "**/.rumdl_cache",
+        "**/.jupyter_cache",
+    ]
+    # The cache and the scratch directory sit beside the docs root when the
+    # documents live in a subdirectory, and inside it when the docs root is the
+    # directory the build ran from, where the patterns above reach them.
+    OUTSIDE_ARTIFACT_PATTERNS = [os.path.join("..", SDB_BUILD_DIR)]
+    OUTSIDE_CACHE_PATTERNS = [
+        os.path.join("..", BUILD_CACHE_DIR),
+        os.path.join("..", JUPYTER_CACHE_DIR),
+        os.path.join("..", ".rumdl_cache"),
+        os.path.join("..", ".jupyter_cache"),
+    ]
+    # Everything a build writes, which is what an isolated copy leaves behind and
+    # what target discovery skips.
+    IGNORING_ARTIFACT_PATTERNS = ARTIFACT_PATTERNS + CACHE_PATTERNS
 
-    def __init__(self):
-        # The cache and the scratch directory sit beside the docs root when the
-        # documents live in a subdirectory, and inside it when the docs root is
-        # the directory the build ran from, where the patterns above reach them.
-        self._cleaning_patterns: List[str] = self.IGNORING_ARTIFACT_PATTERNS + [
-            os.path.join("..", BUILD_TEMP_DIR),
-            os.path.join("..", BUILD_CACHE_DIR),
-            os.path.join("..", JUPYTER_CACHE_DIR),
-        ]
+    def patterns(self, caches: bool = False) -> List[str]:
+        """The patterns a clean removes.
+
+        The artifacts go, and the caches stay unless the caller asks for them: a
+        clean that leaves a cache keeps the next build from repeating what the
+        cache holds, and one that removes it takes everything the build wrote.
+        """
+        patterns = self.ARTIFACT_PATTERNS + self.OUTSIDE_ARTIFACT_PATTERNS
+        if caches:
+            patterns += self.CACHE_PATTERNS + self.OUTSIDE_CACHE_PATTERNS
+        return patterns
 
     def ignore_quarto_artifacts(self) -> Callable[[str, list[str]], set[str]]:
         basename_patterns = []
@@ -340,10 +368,11 @@ class CleanupManager:
             basename_patterns.append(pat)
         return shutil.ignore_patterns(*basename_patterns)
 
-    def clean(self, docs_root: Path) -> bool:
+    def clean(self, docs_root: Path, caches: bool = False) -> bool:
+        """Remove what a build wrote under *docs_root*, and the caches on request."""
         deleted = []
         errors = []
-        for pattern in self._cleaning_patterns:
+        for pattern in self.patterns(caches):
             for item in docs_root.glob(pattern):
                 if item.is_dir():
                     try:

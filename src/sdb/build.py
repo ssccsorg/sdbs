@@ -177,8 +177,9 @@ def format_to_extension(fmt: str) -> str:
     return QuartoInspector.format_to_extension(fmt)
 
 
-def clean_quarto_artifacts(docs_root: Path) -> bool:
-    return CleanupManager().clean(docs_root)
+def clean_quarto_artifacts(docs_root: Path, caches: bool = False) -> bool:
+    """Remove what a build wrote, keeping the caches it reuses unless asked."""
+    return CleanupManager().clean(docs_root, caches)
 
 
 def load_external_config(config_path: Optional[Path]) -> Dict[str, Any]:

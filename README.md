@@ -61,8 +61,9 @@ sdb deploy docs
 sdb deploy docs --require-all
 sdb deploy docs --dry-run
 
-# Remove Quarto build artifacts (.sdbtmp_*, _files/, html, pdf...)
+# Remove what a build wrote, keeping the caches a rebuild uses
 sdb clean docs
+sdb clean docs all                 # the caches as well
 ```
 
 Every command that operates on a project takes the directory as its first positional argument: `init` takes the directory to scaffold, `build`, `check`, `pre`, and `clean` take the docs root the documents live in, and `deploy` and `plugins` take the directory holding `_deploy.yml`. `render` takes the documents to render and reads its first argument as the docs root only when that argument is a directory, so a plain short name searches the current one.
@@ -100,6 +101,8 @@ Every folder the build writes for itself carries one marker, `.sdbtmp_`: the cac
 That exception is a constraint rather than a preference. The scratch directory is the parent of the document Quarto is given, and Quarto resolves a project through the path of that document. A hidden component stops the search, and Quarto then renders the document on its own, so a website build loses the site directory and every file the website writes for a page. Measured on the Quarto the image pins, 1.9.35, over the ssccs corpus: with `_sdbtmp_build` the build cached a site directory for each of its 112 targets and the post-render step collected llms.txt from them, and with `.sdbtmp_build` every target reported no site directory and the post-render step had nothing to collect. The caches are never on an input's ancestry, so a hidden name is safe for them.
 
 The copy a target renders from lives in the scratch directory and is removed when the build finishes, so a workflow never caches it. What a workflow caches is the two caches the command wrote, which is the pair named above.
+
+`sdb clean` removes what a build wrote, including the scratch directory, and keeps the caches so the next build finds them. `sdb clean <root> all` removes those as well, and it takes Quarto's own `.quarto` and the `.rumdl_cache` and `.jupyter_cache` the two tools keep under their own name.
 
 ## External Deploy Plugins
 
