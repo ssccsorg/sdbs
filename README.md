@@ -44,6 +44,7 @@ sdb init docs --template ssccs     # with SSCCS-specific templates
 sdb build .                        # the formats each target declares
 sdb build . --website -j 4         # parallel website build
 sdb build . --article              # article output, assembled for publication
+sdb build . map --article          # a short name selects the document to publish
 
 # Pre-render steps (latest docs, path resolution, footnote cleanup, formatting, metadata)
 sdb pre docs
@@ -51,9 +52,9 @@ sdb pre docs
 # Validate links and citations
 sdb check .
 
-# Render a single document by short name for quick preview
-sdb render docs map
-sdb render docs map --to pdf       # render to a specific format
+# Render documents by short name and assemble what each one publishes
+sdb render map                     # searches the current directory
+sdb render docs map --to pdf       # a leading directory is the docs root
 
 # Upload built artifacts to an external deploy channel
 sdb deploy docs
@@ -64,9 +65,9 @@ sdb deploy docs --dry-run
 sdb clean docs
 ```
 
-Every command that operates on a project takes the directory as its first positional argument: `init` takes the directory to scaffold, `build`, `check`, `pre`, `render`, and `clean` take the docs root the documents live in, and `deploy` and `plugins` take the directory holding `_deploy.yml`.
+Every command that operates on a project takes the directory as its first positional argument: `init` takes the directory to scaffold, `build`, `check`, `pre`, and `clean` take the docs root the documents live in, and `deploy` and `plugins` take the directory holding `_deploy.yml`. `render` takes the documents to render and reads its first argument as the docs root only when that argument is a directory, so a plain short name searches the current one.
 
-Every command that takes a docs root stops when the path is not a directory, and names the path it rejected. A command that would otherwise walk no documents and report success fails instead, so a typo or a wrong working directory is visible where it happens rather than later as a render error in a document that was never processed.
+Every command that takes a docs root stops when the path is not a directory, and names the path it rejected. A command that would otherwise walk no documents and report success fails instead, so a typo or a wrong working directory is visible where it happens rather than later as a render error in a document that was never processed. `render` has no root argument to reject: it reads a leading directory as the root and runs in the current one otherwise, so a short name that selects no document is what reports a wrong directory, and it fails the run by name.
 
 ## Build Outputs
 
@@ -74,9 +75,17 @@ Every command that takes a docs root stops when the path is not a directory, and
 
 `--website` renders the Quarto website profile. It owns the site directory (`_site` by default, or `--output-dir`), and it clears that directory before it renders, so a website build replaces the site rather than adding to it.
 
-`--article` renders the PDF form of each target and assembles the distribution an article is published as: the PDF, its LaTeX source, the figures, the media, and the shared `_files`. Each document's distribution is a directory named after it, beside the document itself, or under `--output-dir` when one is given. It is the form an external deploy channel carries, which is what lets a Zenodo-style channel be added as a plugin: `sdb build docs --article` produces the article, and a deploy activation names the directory it publishes.
+`--article` renders the PDF form of each target and assembles the distribution an article is published as: the PDF, the LaTeX source a format that keeps one (`keep-tex: true`) leaves beside it, the figures, the media, the `_files` entry the document inputs, and the c2pa signature its name carries. A project's `_files` holds the generated metadata file of every document, so only the tex this document inputs is assembled, and only the signature named after it. The article assembles a signature that is already beside the document and does not sign one; signing belongs to a build whose configuration enables it. Each document's distribution is a directory named after it, beside the document itself, or under `--output-dir` when one is given. It is the form an external deploy channel carries, which is what lets a Zenodo-style channel be added as a plugin: `sdb build docs --article` produces the article, and a deploy activation names the directory it publishes.
+
+A target is named by its target name, or by a short name that selects a document the way `sdb render` does: the best match wins, and any other match is named. That is how a document is reached without its target name, and it is the invocation the removed `sdb pub` command had.
 
 An article build goes through the renderer rather than through the site orchestration, since an article is a document's publication artifact rather than a page. It therefore neither reads nor writes the site directory, and `--sequence`, `--jobs`, `--parallel-formats`, and the `snapshot` target do not apply: the article is rendered document by document, and `sdb build` refuses those rather than ignoring them. The built-in pre-build sequence does run, so the version stamp an article carries agrees with the one a full build writes for the same document.
+
+## Quick Render
+
+`render` locates documents by short name and renders them with the underlying tool directly, skipping the pre-build sequence. The render writes the renderer's own output and nothing else: the distribution a document is published as is what `build --article` assembles.
+
+The search runs in the current directory, so `sdb render map` looks for a document whose stem matches `map` where the command is run. A first argument that names a directory is the docs root instead, so `sdb render docs map` searches `docs/`. Several short names may follow. A short name that selects no document is reported by name and fails the run, which is what surfaces a wrong directory now that the root is not a required argument.
 
 ## Build Cache
 

@@ -309,10 +309,47 @@ class TestDeployCommand:
 
 
 class TestRenderCommand:
-    """Tests for the ``sdb render`` subcommand."""
+    """Tests for the ``sdb render`` subcommand.
 
-    def test_the_docs_root_reaches_the_search(self, tmp_path: Path) -> None:
-        """sdb render <docs_root> map searches the named root, not the cwd."""
+    The search runs in the current directory unless a leading argument names one.
+    The render writes the renderer's own output: the distribution a document is
+    published as is what ``build --article`` assembles.
+    """
+
+    def test_a_short_name_searches_the_current_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A plain short name is looked up in the current directory."""
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
+            patch(
+                "sdb.utils.quick_render.resolve_and_render",
+                return_value=(True, []),
+            ) as mock_resolve,
+        ):
+            code = _run_main(["render", "map"])
+        assert code == 0
+        assert mock_resolve.call_args.args == (["map"], Path.cwd())
+
+    def test_several_short_names_share_the_current_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without a directory, every argument is a short name."""
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
+            patch(
+                "sdb.utils.quick_render.resolve_and_render",
+                return_value=(True, []),
+            ) as mock_resolve,
+        ):
+            code = _run_main(["render", "map", "id"])
+        assert code == 0
+        assert mock_resolve.call_args.args == (["map", "id"], Path.cwd())
+
+    def test_a_leading_directory_is_the_docs_root(self, tmp_path: Path) -> None:
+        """A first argument that names a directory is the root, not a short name."""
         docs_root = tmp_path / "docs"
         docs_root.mkdir()
         with (
@@ -326,42 +363,32 @@ class TestRenderCommand:
         assert code == 0
         assert mock_resolve.call_args.args == (["map"], docs_root.resolve())
 
-    def test_several_patterns_follow_one_root(self, tmp_path: Path) -> None:
-        """The root is the first argument, so the patterns that follow are patterns."""
-        docs_root = tmp_path / "docs"
-        docs_root.mkdir()
-        with (
-            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
-            patch(
-                "sdb.utils.quick_render.resolve_and_render",
-                return_value=(True, []),
-            ) as mock_resolve,
-        ):
-            code = _run_main(["render", str(docs_root), "map", "id"])
-        assert code == 0
-        assert mock_resolve.call_args.args == (["map", "id"], docs_root.resolve())
-
-    def test_a_root_alone_is_not_enough(self, tmp_path: Path) -> None:
-        """A root with no pattern has nothing to select, and says so."""
+    def test_a_root_alone_is_not_enough(self, tmp_path: Path, capsys) -> None:
+        """A directory with no short name following it has nothing to select."""
         docs_root = tmp_path / "docs"
         docs_root.mkdir()
         with patch("sdb.utils.quick_render.resolve_and_render") as mock_resolve:
             code = _run_main(["render", str(docs_root)])
         assert code != 0
         mock_resolve.assert_not_called()
+        assert "no short name follows it" in capsys.readouterr().err
 
-    def test_a_missing_root_stops_before_the_search(
-        self, tmp_path: Path, capsys
-    ) -> None:
-        """A root that is not a directory stops the search rather than walking nothing."""
-        absent = tmp_path / "absent"
-        with patch("sdb.utils.quick_render.resolve_and_render") as mock_resolve:
-            code = _run_main(["render", str(absent), "map"])
-        assert code == 1
-        mock_resolve.assert_not_called()
-        captured = capsys.readouterr()
-        assert "sdb render: docs root is not a directory" in captured.err
-        assert "absent" in captured.err
+    def test_the_render_writes_only_the_renderer_output(self, tmp_path: Path) -> None:
+        """A render is not a distribution: 'build --article' assembles it."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
+        document = docs_root / "map.qmd"
+        with (
+            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
+            patch(
+                "sdb.utils.quick_render.resolve_and_render",
+                return_value=(True, [document]),
+            ),
+            patch("sdb.utils.quick_render.article_artifacts") as mock_assemble,
+        ):
+            code = _run_main(["render", str(docs_root), "map"])
+        assert code == 0
+        mock_assemble.assert_not_called()
 
 
 class TestBuildArticle:
@@ -426,6 +453,114 @@ class TestBuildArticle:
             )
         assert code == 0
         assert mock_assemble.call_args.args == ([docs_root / "map.qmd"], output_dir)
+
+    def test_a_short_name_selects_a_document(self, tmp_path: Path) -> None:
+        """A target is named by its target name or by a short name."""
+        docs_root = self._docs(tmp_path)
+        with (
+            patch("sdb.cli.build_module.initialize_config"),
+            patch("sdb.cli.build_module.TARGET_CONFIG", self.TARGET_CONFIG),
+            patch("sdb.cli.build_module.BUILD_FUNCTIONS", {"map": lambda: True}),
+            patch("sdb.cli.build_module.EXTERNAL_CONFIG", {}),
+            patch("sdb.cli.build_module.run_pre_build_sequence"),
+            patch(
+                "sdb.utils.quick_render.find_qmd_files",
+                return_value=[docs_root / "map.qmd"],
+            ) as mock_select,
+            patch(
+                "sdb.utils.quick_render.render_qmd", return_value=True
+            ) as mock_render,
+            patch(
+                "sdb.utils.quick_render.article_artifacts", return_value=1
+            ) as mock_assemble,
+        ):
+            code = _run_main(["build", str(docs_root), "mp", "--article"])
+        assert code == 0
+        assert mock_select.call_args.args[:2] == ("mp", docs_root)
+        assert mock_render.call_args.args[0] == docs_root / "map.qmd"
+        assert mock_assemble.call_args.args == ([docs_root / "map.qmd"], None)
+
+    def test_a_short_name_selects_its_best_match(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        """The best match wins, and the other matches are named."""
+        docs_root = self._docs(tmp_path)
+        with (
+            caplog.at_level(logging.INFO),
+            patch("sdb.cli.build_module.initialize_config"),
+            patch(
+                "sdb.cli.build_module.TARGET_CONFIG",
+                {"map": {"qmd": "map.qmd"}, "maps": {"qmd": "maps.qmd"}},
+            ),
+            patch(
+                "sdb.cli.build_module.BUILD_FUNCTIONS",
+                {"map": lambda: True, "maps": lambda: True},
+            ),
+            patch("sdb.cli.build_module.EXTERNAL_CONFIG", {}),
+            patch("sdb.cli.build_module.run_pre_build_sequence"),
+            patch(
+                "sdb.utils.quick_render.find_qmd_files",
+                return_value=[docs_root / "map.qmd", docs_root / "maps.qmd"],
+            ),
+            patch(
+                "sdb.utils.quick_render.render_qmd", return_value=True
+            ) as mock_render,
+            patch("sdb.utils.quick_render.article_artifacts", return_value=1),
+        ):
+            code = _run_main(["build", str(docs_root), "mp", "--article"])
+        assert code == 0
+        assert mock_render.call_args.args[0] == docs_root / "map.qmd"
+        assert "maps" in caplog.text
+
+    def test_a_short_name_that_matches_nothing_stops(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        """A name that is neither a target nor a match stops the run."""
+        docs_root = self._docs(tmp_path)
+        with (
+            caplog.at_level(logging.ERROR),
+            patch("sdb.cli.build_module.initialize_config"),
+            patch("sdb.cli.build_module.BUILD_FUNCTIONS", {}),
+            patch("sdb.cli.build_module.TARGET_CONFIG", {}),
+            patch("sdb.cli.build_module.EXTERNAL_CONFIG", {}),
+            patch("sdb.utils.quick_render.find_qmd_files", return_value=[]),
+            patch("sdb.utils.quick_render.render_qmd") as mock_render,
+        ):
+            code = _run_main(["build", str(docs_root), "nope", "--article"])
+        assert code == 1
+        mock_render.assert_not_called()
+        assert "nope" in caplog.text
+
+    def test_a_target_the_project_excluded_is_still_included(
+        self, tmp_path: Path
+    ) -> None:
+        """A target named on the command line is included although the project excludes it."""
+        docs_root = self._docs(tmp_path)
+        (docs_root / "excluded.qmd").write_text(
+            "---\ntitle: e\n---\n", encoding="utf-8"
+        )
+        functions: dict = {}
+        config: dict = {}
+
+        def include(root: Path, names: list[str]) -> None:
+            config["excluded"] = {"qmd": "excluded.qmd"}
+            functions["excluded"] = lambda: True
+
+        with (
+            patch("sdb.cli.build_module.initialize_config"),
+            patch("sdb.cli.build_module.EXTERNAL_CONFIG", {}),
+            patch("sdb.cli.build_module.BUILD_FUNCTIONS", functions),
+            patch("sdb.cli.build_module.TARGET_CONFIG", config),
+            patch("sdb.cli.build_module.ensure_explicit_targets", include),
+            patch("sdb.cli.build_module.run_pre_build_sequence"),
+            patch(
+                "sdb.utils.quick_render.render_qmd", return_value=True
+            ) as mock_render,
+            patch("sdb.utils.quick_render.article_artifacts", return_value=1),
+        ):
+            code = _run_main(["build", str(docs_root), "excluded", "--article"])
+        assert code == 0
+        assert mock_render.call_args.args[0] == docs_root / "excluded.qmd"
 
     def test_a_failed_render_assembles_nothing(self, tmp_path: Path) -> None:
         """A render that failed is not assembled into a distribution."""

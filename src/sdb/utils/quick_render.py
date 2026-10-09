@@ -1,13 +1,16 @@
 """
-Quick render: locate one or more .qmd files by short name and render them.
+Quick render: locate one or more .qmd files by short name, render them, and
+assemble what each one publishes.
 
-Provides a convenience subcommand ``sdb render <docs_root> <name>`` so that, for
-example, ``sdb render docs map`` finds ``docs/projects/section/chapter/map.qmd``
-and runs ``quarto render`` on it automatically.
+Provides the ``sdb render`` subcommand.  ``sdb render map`` finds ``map.qmd``
+under the current directory and runs ``quarto render`` on it, and ``sdb render
+docs map`` searches ``docs/`` instead, because a first argument that names a
+directory is the docs root.
 """
 
 from __future__ import annotations
 
+import glob
 import logging
 import subprocess
 from pathlib import Path
@@ -412,12 +415,14 @@ def resolve_and_render(
     Returns:
         A tuple of ``(success, rendered_qmd_paths)`` where
         *rendered_qmd_paths* is the list of rendered QMD files
-        (in original order, duplicates removed).
+        (in original order, duplicates removed).  *success* is false when a
+        render failed or when a short name selected no document.
     """
     total = len(patterns)
     all_selected: list[tuple[Path, str]] = []
     n_ok = 0
     n_fail = 0
+    missing: list[str] = []
 
     for i, pattern in enumerate(patterns, 1):
         label = f"{i}/{total}" if total > 1 else None
@@ -433,6 +438,10 @@ def resolve_and_render(
                 all_selected.append((p, pattern))
         else:
             n_fail += 1
+            missing.append(pattern)
+
+    if missing:
+        logger.error("No document matches: %s", ", ".join(missing))
 
     if not all_selected:
         return (False, [])
@@ -484,8 +493,10 @@ def resolve_and_render(
     except Exception as exc:  # a build input must not stop the render
         logger.warning("Metadata generation failed: %s", exc)
 
-    # Render
-    success = True
+    # A short name that selected no document is a failure to select, not a
+    # success: a mistyped root or short name would otherwise pass as a pattern
+    # that matched nothing while another pattern carried the run.
+    success = not missing
     for entry in all_selected:
         qmd = entry[0] if isinstance(entry, tuple) else entry
         if not render_qmd(qmd, cwd=root, format=format):
@@ -512,15 +523,42 @@ def resolve_and_render(
 # ---------------------------------------------------------------------------
 
 
+def _referenced_files(qmd_path: Path) -> list[Path]:
+    """The ``_files`` entries the document inputs, relative to that directory.
+
+    A project's ``_files`` holds the generated metadata file of every document
+    that consumes one, so a distribution that took the directory would carry the
+    other documents' files.  The reference in the document is the pattern:
+    ``\\input{./_files/<name>_metadata.tex}`` names what this document uses, and
+    only that is assembled with it.  An article is a pdf artifact, so only tex is
+    taken: anything else a project keeps in ``_files`` is not part of it.
+    """
+    from sdb.utils.metadata import find_inputs
+
+    try:
+        text = qmd_path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    rows: list[Path] = []
+    for reference in find_inputs(text):
+        relative = Path(reference)
+        if relative.suffix != ".tex" or relative.parts[:1] != ("_files",):
+            continue
+        rows.append(Path(*relative.parts[1:]))
+    return rows
+
+
 def _collect_one(qmd_path: Path, dest: Path) -> list[Path]:
     """Copy the artifacts a single rendered QMD produced into *dest*.
 
     Copies (when they exist):
-      {stem}_files/figure-pdf/
-      {stem}_files/mediabag/
-      _files/
       {stem}.pdf
       {stem}.tex
+      {stem}.c2pa, {stem}.c2pa_identifier.svg, and any other name the stem
+        starts, which is the signature the document carries
+      {stem}_files/figure-pdf/
+      {stem}_files/mediabag/
+      _files/<the tex this document inputs>
 
     Returns the list of copied files/directories.
     """
@@ -540,7 +578,6 @@ def _collect_one(qmd_path: Path, dest: Path) -> list[Path]:
     dirs = [
         (src_dir / f"{stem}_files" / "figure-pdf", dest / f"{stem}_files" / "figure-pdf"),
         (src_dir / f"{stem}_files" / "mediabag", dest / f"{stem}_files" / "mediabag"),
-        (src_dir / "_files", dest / "_files"),
     ]
 
     for src, dst in artifacts:
@@ -559,6 +596,29 @@ def _collect_one(qmd_path: Path, dest: Path) -> list[Path]:
             copied.append(dst)
             logger.info("  Copied %s", dst)
 
+    # A collection into a destination that already holds a distribution replaces
+    # what it carries, so nothing from an earlier name survives this one.
+    files_dest = dest / "_files"
+    if files_dest.exists():
+        shutil.rmtree(files_dest)
+    for relative in _referenced_files(qmd_path):
+        source = src_dir / "_files" / relative
+        if not source.is_file():
+            continue
+        destination = files_dest / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        copied.append(destination)
+        logger.info("  Copied %s", destination)
+
+    for source in sorted(src_dir.glob(f"{glob.escape(stem)}.c2pa*")):
+        if not source.is_file():
+            continue
+        destination = dest / source.name
+        shutil.copy2(source, destination)
+        copied.append(destination)
+        logger.info("  Copied %s", destination)
+
     return copied
 
 
@@ -569,7 +629,8 @@ def article_artifacts(
 
     For each rendered QMD, creates a folder named after the file's stem and
     copies the artifacts a published article carries into it: the PDF, the
-    LaTeX source, the figures, the media, and the shared ``_files``.  The folder
+    LaTeX source, the figures, the media, the ``_files`` entry the document
+    inputs, and the c2pa signature its name carries.  The folder
     sits beside the QMD file itself (e.g. ``map.qmd`` → ``map/``) unless
     *dest_root* places it elsewhere, in which case each folder is named after
     the file's stem under that root.
