@@ -308,12 +308,112 @@ class TestDeployCommand:
             assert code == 1
 
 
+class TestDeployBuiltinChannel:
+    """``sdb deploy pdf`` runs the engine's own channel, with no plugin.
+
+    The channel is where the removed ``sdb pub`` command's work lives: it renders
+    a document and assembles the distribution it is published as, which is the
+    distribution a plugin that publishes documents uploads.
+    """
+
+    def test_the_channel_runs_without_a_plugin(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A named channel renders and assembles, and consults no plugin."""
+        monkeypatch.chdir(tmp_path)
+        document = tmp_path / "map.qmd"
+        with (
+            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
+            patch(
+                "sdb.utils.quick_render.resolve_and_render",
+                return_value=(True, [document]),
+            ) as mock_resolve,
+            patch(
+                "sdb.utils.quick_render.article_artifacts", return_value=2
+            ) as mock_assemble,
+            patch("sdb.deploy.run_deploy") as mock_deploy,
+        ):
+            code = _run_main(["deploy", "pdf", "map"])
+        assert code == 0
+        assert mock_resolve.call_args.args == (["map"], Path.cwd())
+        assert mock_resolve.call_args.kwargs["format"] == "pdf"
+        assert mock_assemble.call_args.args == ([document],)
+        mock_deploy.assert_not_called()
+
+    def test_the_channel_publishes_the_project_without_names(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With no name, every discovered target is published as an article."""
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("sdb.cli.build_module.initialize_config") as mock_init,
+            patch("sdb.cli.build_module.BUILD_FUNCTIONS", {"map": object()}),
+            patch("sdb.cli._build_article", return_value=True) as mock_article,
+        ):
+            code = _run_main(["deploy", "pdf"])
+        assert code == 0
+        mock_init.assert_called_once()
+        assert mock_article.call_args.args == (Path.cwd(), ["map"], None)
+
+    def test_nothing_to_publish_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A project with nothing discovered fails rather than reporting success."""
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("sdb.cli.build_module.initialize_config"),
+            patch("sdb.cli.build_module.BUILD_FUNCTIONS", {}),
+            patch("sdb.cli._build_article") as mock_article,
+        ):
+            code = _run_main(["deploy", "pdf"])
+        assert code == 1
+        mock_article.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "flag", ["--dry-run", "--require-all", "--plugin-path", "--timeout"]
+    )
+    def test_an_option_of_the_plugin_path_is_refused(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        flag: str,
+        caplog,
+    ) -> None:
+        """The plugin path's options have nothing to act on, and are reported."""
+        monkeypatch.chdir(tmp_path)
+        argv = ["deploy", "pdf", flag]
+        if flag == "--timeout":
+            argv.append("120")
+        if flag == "--plugin-path":
+            argv.append("/x")
+        with (
+            caplog.at_level(logging.ERROR),
+            patch("sdb.cli._deploy_pdf") as mock_channel,
+        ):
+            code = _run_main(argv)
+        assert code == 1
+        mock_channel.assert_not_called()
+        assert flag in caplog.text
+
+    def test_a_directory_named_like_a_channel_is_the_project_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A real folder that shares a channel's name is still a project root."""
+        monkeypatch.chdir(tmp_path)
+        project = tmp_path / "pdf"
+        project.mkdir()
+        with patch("sdb.deploy.run_deploy", return_value=True) as mock_deploy:
+            code = _run_main(["deploy", "pdf"])
+        assert code == 0
+        assert mock_deploy.call_args.args == (project.resolve(),)
+
+
 class TestRenderCommand:
     """Tests for the ``sdb render`` subcommand.
 
-    The search runs in the current directory unless a leading argument names one,
-    and each document that rendered is assembled into the distribution it is
-    published as, which is the role the removed ``sdb pub`` command carried.
+    The search runs in the current directory unless a leading argument names one.
+    The render writes the renderer's own output: the distribution a document is
+    published as belongs to the built-in pdf channel of ``deploy``.
     """
 
     def test_a_short_name_searches_the_current_directory(
@@ -373,8 +473,8 @@ class TestRenderCommand:
         mock_resolve.assert_not_called()
         assert "no short name follows it" in capsys.readouterr().err
 
-    def test_the_render_assembles_what_it_produced(self, tmp_path: Path) -> None:
-        """A document that rendered is assembled into its distribution."""
+    def test_the_render_writes_only_the_renderer_output(self, tmp_path: Path) -> None:
+        """A render is not a distribution: the pdf channel of deploy assembles it."""
         docs_root = tmp_path / "docs"
         docs_root.mkdir()
         document = docs_root / "map.qmd"
@@ -384,29 +484,10 @@ class TestRenderCommand:
                 "sdb.utils.quick_render.resolve_and_render",
                 return_value=(True, [document]),
             ),
-            patch(
-                "sdb.utils.quick_render.article_artifacts", return_value=3
-            ) as mock_assemble,
-        ):
-            code = _run_main(["render", str(docs_root), "map"])
-        assert code == 0
-        assert mock_assemble.call_args.args == ([document],)
-
-    def test_a_failed_render_assembles_nothing(self, tmp_path: Path) -> None:
-        """A render that failed is not assembled into a distribution."""
-        docs_root = tmp_path / "docs"
-        docs_root.mkdir()
-        document = docs_root / "map.qmd"
-        with (
-            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
-            patch(
-                "sdb.utils.quick_render.resolve_and_render",
-                return_value=(False, [document]),
-            ),
             patch("sdb.utils.quick_render.article_artifacts") as mock_assemble,
         ):
             code = _run_main(["render", str(docs_root), "map"])
-        assert code == 1
+        assert code == 0
         mock_assemble.assert_not_called()
 
 

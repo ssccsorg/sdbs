@@ -6,17 +6,19 @@ Subcommands:
   build    Build one or more Quarto targets, as a website or as an article.
   check    Validate links, citations, and cross-references.
   pre      Run pre-render steps (latest docs, path resolution, formatting).
-  render   Render documents by short name and assemble what each one publishes.
-  deploy   Run the external deploy plugins a project activates.
+  render   Locate .qmd files by short name and render them directly.
+  deploy   Run a built-in channel or the external deploy plugins a project activates.
   plugins  List the deploy plugins found on the plugin path.
   clean    Remove Quarto build artifacts.
 
 Every command that operates on a project takes the directory as its first
 positional argument: init takes the directory to scaffold, build, check, pre,
-and clean take the docs root the documents live in, and deploy and plugins take
-the directory holding ``_deploy.yml``.  render takes the documents to render and
+and clean take the docs root the documents live in, and plugins takes the
+directory holding ``_deploy.yml``.  render takes the documents to render and
 reads its first argument as the docs root only when that argument is a directory,
-so a plain short name searches the current one.
+so a plain short name searches the current one.  deploy takes a built-in channel
+to run before the project root, so a channel name runs the engine's own channel
+and any other argument is the directory holding ``_deploy.yml``.
 """
 
 import argparse
@@ -91,6 +93,55 @@ def _build_article(
         "Assembled %d artifact(s) for %d document(s).", total, len(documents)
     )
     return True
+
+
+def _deploy_pdf(docs_root: Path, names: list[str]) -> bool:
+    """Run the built-in pdf channel, the distribution a document is published as.
+
+    With names, the short-name path renders and assembles just those documents,
+    which is what the removed ``sdb pub`` command did. Without names the channel
+    publishes the project: every discovered target is rendered as an article and
+    assembled, so the distribution ``build --article`` writes is reached without
+    naming the targets. The channel contacts nothing, so it needs no plugin and
+    reads no ``_deploy.yml``.
+    """
+    from .utils.quick_render import (
+        article_artifacts,
+        find_build_yml,
+        load_exclude_patterns,
+        resolve_and_render,
+    )
+
+    if names:
+        build_yml = find_build_yml(docs_root)
+        exclude_patterns = load_exclude_patterns(build_yml) if build_yml else []
+        success, rendered = resolve_and_render(
+            names,
+            docs_root,
+            prompt=False,
+            exclude_patterns=exclude_patterns,
+            format="pdf",
+        )
+        if success and rendered:
+            total = article_artifacts(rendered)
+            logging.info(
+                "Assembled %d artifact(s) for %d document(s).",
+                total,
+                len(rendered),
+            )
+        return success
+
+    config_path = docs_root / "build.yml"
+    build_module.initialize_config(
+        docs_root, config_path if config_path.exists() else None
+    )
+    targets = list(build_module.BUILD_FUNCTIONS.keys())
+    if not targets:
+        logging.error(
+            "sdb deploy pdf: no document was discovered under %s", docs_root
+        )
+        return False
+    return _build_article(docs_root, targets, None)
 
 
 def _setup_logging() -> None:
@@ -266,10 +317,10 @@ def main(argv: list[str] | None = None) -> None:
         help="Path to the docs directory (default: current directory)",
     )
 
-    # --- render (render by short name, then assemble the distribution) ---
+    # --- render (render by short name) ---
     render_parser = subparsers.add_parser(
         "render",
-        help="Render documents by short name and assemble what each one publishes",
+        help="Render documents by short name",
         description="Search for .qmd files whose stem matches one or more short "
         "names (e.g. 'map' → "
         "docs/projects/section/chapter/map/index.qmd) and render them by calling the "
@@ -283,11 +334,9 @@ def main(argv: list[str] | None = None) -> None:
         "The search runs in the current directory.  A first argument that names a "
         "directory is the docs root instead, so 'sdb render map' searches where it "
         "is run and 'sdb render docs map' searches docs/.\n\n"
-        "Each document that rendered is then assembled into the distribution it "
-        "is published as (the PDF, its LaTeX source, the figures, and the media) "
-        "in a folder named after the document beside it.  This is the assembly "
-        "'sdb build --article' produces for a named target, reached here by short "
-        "name.\n\n"
+        "The render writes the renderer's own output and nothing else: the "
+        "distribution a document is published as is the built-in pdf channel of "
+        "'sdb deploy'.\n\n"
         "Multiple short names render several documents in sequence (e.g. 'sdb "
         "render map id').  Contrast this with 'sdb build', which runs the full "
         "SDBS pipeline before rendering.  When several files match one short name, "
@@ -320,13 +369,18 @@ def main(argv: list[str] | None = None) -> None:
         help="Render all matching files without prompting",
     )
 
-    # --- deploy (external plugins) ---
+    # --- deploy (built-in channels and external plugins) ---
     deploy_parser = subparsers.add_parser(
         "deploy",
-        help="Run the external deploy plugins a project activates",
-        description="Read '_deploy.yml' in the project root and run each plugin it "
-        "names. A plugin is an external tool with a manifest.yml at its root, found "
-        "on the plugin path (SDB_PLUGIN_PATH, then <root>/plugins). A plugin that is "
+        help="Run the channels a project deploys through",
+        description="Run a built-in channel named on the command line, or the "
+        "external plugins a project activates in '_deploy.yml'.\n\n"
+        f"The built-in channels are {', '.join(deploy_module.BUILTIN_CHANNELS)}. A "
+        "built-in channel needs no plugin: it is engine code, so it runs whether "
+        "or not anything is installed, and the project's configuration is not read "
+        "for it.\n\n"
+        "A plugin is an external tool with a manifest.yml at its root, found on the "
+        "plugin path (SDB_PLUGIN_PATH, then <root>/plugins). A plugin that is "
         "named but not found is skipped unless the activation sets require: true, "
         "and an option the manifest does not declare fails the run. "
         "sdbs carries no plugin code.\n\n"
@@ -334,17 +388,22 @@ def main(argv: list[str] | None = None) -> None:
         "runs as its own step from the render, which executes project code.",
         epilog=(
             "Examples:\n"
+            "  sdb deploy pdf\n"
+            "  sdb deploy pdf map\n"
             "  sdb deploy docs\n"
             "  sdb deploy . --dry-run\n"
             "  sdb deploy . --require-all\n"
         ),
     )
     deploy_parser.add_argument(
-        "docs_root",
-        type=Path,
-        nargs="?",
-        default=Path("."),
-        help="Directory holding _deploy.yml (default: current directory)",
+        "paths",
+        type=str,
+        nargs="*",
+        metavar="CHANNEL_OR_ROOT",
+        help="A built-in channel to run, then its own arguments, or the directory "
+        "holding _deploy.yml. A first argument that names a built-in channel runs "
+        "it; otherwise the first argument is the project root, and the current "
+        "directory when it is omitted.",
     )
     deploy_parser.add_argument(
         "--config", "-c", type=Path, default=None,
@@ -363,7 +422,7 @@ def main(argv: list[str] | None = None) -> None:
         help="Fail when an activated plugin is not found",
     )
     deploy_parser.add_argument(
-        "--timeout", type=float, default=deploy_module.DEFAULT_TIMEOUT,
+        "--timeout", type=float, default=None,
         metavar="SECONDS",
         help="Seconds to allow each plugin before failing "
         f"(default: {deploy_module.DEFAULT_TIMEOUT:g})",
@@ -558,7 +617,6 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "render":
         _setup_logging()
         from .utils.quick_render import (
-            article_artifacts,
             find_build_yml,
             load_exclude_patterns,
             resolve_and_render,
@@ -589,35 +647,76 @@ def main(argv: list[str] | None = None) -> None:
             load_exclude_patterns(build_yml) if build_yml else []
         )
 
-        success, rendered = resolve_and_render(
+        # The render is the renderer's own output; the distribution a document is
+        # published as is the built-in pdf channel of 'deploy'.
+        success, _ = resolve_and_render(
             patterns,
             docs_root,
             prompt=not args.all,
             exclude_patterns=exclude_patterns,
             format=args.format,
         )
-        if success and rendered:
-            total = article_artifacts(rendered)
-            logging.info(
-                "Assembled %d artifact(s) for %d document(s).",
-                total,
-                len(rendered),
-            )
         sys.exit(0 if success else 1)
 
     elif args.command == "deploy":
         _setup_logging()
 
-        docs_root = args.docs_root.resolve()
-        _require_docs_root(docs_root, "deploy")
-        success = deploy_module.run_deploy(
-            docs_root,
-            config_path=args.config,
-            dry_run=args.dry_run,
-            require_all=args.require_all,
-            extra_plugin_dirs=args.plugin_path,
-            timeout=args.timeout,
-        )
+        tokens = list(args.paths)
+        # A built-in channel is named where the project root would be. The name
+        # only wins when it does not name a directory, so a project rooted at a
+        # folder that shares a channel's name still deploys through its config.
+        channel = None
+        if (
+            tokens
+            and tokens[0] in deploy_module.BUILTIN_CHANNELS
+            and not Path(tokens[0]).is_dir()
+        ):
+            channel = tokens.pop(0)
+
+        if channel is None:
+            if len(tokens) > 1:
+                print(
+                    f"sdb deploy: unexpected argument: {tokens[1]}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            docs_root = Path(tokens[0]).resolve() if tokens else Path(".").resolve()
+            _require_docs_root(docs_root, "deploy")
+            success = deploy_module.run_deploy(
+                docs_root,
+                config_path=args.config,
+                dry_run=args.dry_run,
+                require_all=args.require_all,
+                extra_plugin_dirs=args.plugin_path,
+                timeout=(
+                    deploy_module.DEFAULT_TIMEOUT
+                    if args.timeout is None
+                    else args.timeout
+                ),
+            )
+        else:
+            # A built-in channel runs no plugin and contacts nothing, so the plugin
+            # path's own options have nothing to act on.
+            inapplicable = [
+                flag
+                for flag, given in (
+                    ("--config", args.config is not None),
+                    ("--plugin-path", args.plugin_path is not None),
+                    ("--dry-run", args.dry_run),
+                    ("--require-all", args.require_all),
+                    ("--timeout", args.timeout is not None),
+                )
+                if given
+            ]
+            if inapplicable:
+                logging.error(
+                    "sdb deploy %s: %s does not apply; a built-in channel runs no "
+                    "plugin and contacts nothing",
+                    channel,
+                    ", ".join(inapplicable),
+                )
+                sys.exit(1)
+            success = _deploy_pdf(Path.cwd(), tokens)
         sys.exit(0 if success else 1)
 
     elif args.command == "plugins":
