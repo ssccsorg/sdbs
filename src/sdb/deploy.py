@@ -21,11 +21,6 @@ script's: the engine knows where the build wrote its output and which of those
 paths are documents rather than page assets, copies the selection into a
 directory it owns, and hands that directory to the plugin.
 
-Deploy carries channels of its own as well. A built-in channel needs no plugin:
-it is named on the command line, and the project's ``_deploy.yml`` is not read for
-it. ``pdf`` is the first, and it produces the distribution a document is published
-as, which is the distribution a plugin that publishes documents uploads.
-
 The contract across the process boundary is one JSON request on the plugin's
 stdin and one JSON result on its stdout, with the exit code carrying success or
 failure. Credentials travel in the environment, never on the command line or in
@@ -64,10 +59,6 @@ SITE_DIR = "_site"
 # that publishes documents.
 PAGE_ASSET_DIR_NAMES = frozenset({"site_libs"})
 PAGE_ASSET_DIR_SUFFIXES = ("_files",)
-# The channels the engine carries itself, so a project that wants one of them
-# declares no plugin and installs nothing. A built-in channel is named on the
-# command line rather than in a project's ``_deploy.yml``.
-BUILTIN_CHANNELS = ("pdf",)
 
 
 class DeployError(RuntimeError):

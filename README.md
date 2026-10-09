@@ -55,11 +55,7 @@ sdb check .
 sdb render map                     # searches the current directory
 sdb render docs map --to pdf       # a leading directory is the docs root
 
-# Run a built-in channel, which needs no plugin
-sdb deploy pdf                     # the distribution each document is published as
-sdb deploy pdf map                 # just the documents a short name selects
-
-# Upload built artifacts through an external deploy plugin
+# Upload built artifacts to an external deploy channel
 sdb deploy docs
 sdb deploy docs --require-all
 sdb deploy docs --dry-run
@@ -84,7 +80,7 @@ An article build goes through the renderer rather than through the site orchestr
 
 ## Quick Render
 
-`render` locates documents by short name and renders them with the underlying tool directly, skipping the pre-build sequence. The render writes the renderer's own output and nothing else: the distribution a document is published as belongs to the built-in pdf channel of `deploy`.
+`render` locates documents by short name and renders them with the underlying tool directly, skipping the pre-build sequence. The render writes the renderer's own output and nothing else: the distribution a document is published as is what `build --article` assembles.
 
 The search runs in the current directory, so `sdb render map` looks for a document whose stem matches `map` where the command is run. A first argument that names a directory is the docs root instead, so `sdb render docs map` searches `docs/`. Several short names may follow. A short name that selects no document is reported by name and fails the run, which is what surfaces a wrong directory now that the root is not a required argument.
 
@@ -102,19 +98,9 @@ That exception is a constraint rather than a preference. The scratch directory i
 
 The copy a target renders from lives in the scratch directory and is removed when the build finishes, so a workflow never caches it. What a workflow caches is the two caches the command wrote, which is the pair named above.
 
-## Built-in Deploy Channels
-
-A deploy channel is a way a project's output leaves the build. `sdb deploy` runs the channel named on the command line, or, when none is named, the plugins a project activates.
-
-A built-in channel is engine code, so it needs no plugin, runs wherever sdbs runs, and reads no `_deploy.yml`. `pdf` is the first: it produces the distribution each document is published as, which is the same distribution a plugin that publishes documents uploads.
-
-`sdb deploy pdf` publishes the project, rendering every discovered target as an article and assembling it. `sdb deploy pdf map` renders and assembles just the documents a short name selects, the selection `sdb render` uses, which is where the removed `sdb pub` command's work lives. Either way a distribution is a folder named after the document beside it, under `--output-dir` when the article mode places one, and the channel contacts nothing.
-
-A built-in channel runs no plugin, so the plugin path's own options (`--config`, `--plugin-path`, `--dry-run`, `--require-all`, `--timeout`) have nothing to act on and are refused rather than ignored.
-
 ## External Deploy Plugins
 
-The external channels are the plugins a project activates. A plugin is an external tool, unrelated to sdbs: sdbs carries no plugin code and imports no plugin. It reads a manifest at the plugin's root, runs its command, and reads the result.
+`sdb deploy` runs the plugins a project activates. A plugin is an external tool, unrelated to sdbs: sdbs carries no plugin code and imports no plugin. It reads a manifest at the plugin's root, runs its command, and reads the result.
 
 A plugin lives in its own directory with a `manifest.yml` at that root:
 
