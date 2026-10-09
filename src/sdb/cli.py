@@ -30,6 +30,7 @@ from sdb import __version__
 from . import build as build_module
 from . import deploy as deploy_module
 from . import init as init_module
+from .config import ConfigManager
 
 
 logging.basicConfig(
@@ -91,6 +92,64 @@ def _build_article(
         "Assembled %d artifact(s) for %d document(s).", total, len(documents)
     )
     return True
+
+
+def _article_targets(docs_root: Path, names: list[str]) -> list[str]:
+    """Resolve what an article build was asked for to the targets to render.
+
+    A name that is already a target is taken as it is, and a target the project
+    excluded is included, both of which an article build has always allowed.
+    Anything else is read as a short name and resolved to the document it selects,
+    so an article build reaches a document the way the removed ``sdb pub`` command
+    did and still goes through the article machine: the pre-build sequence runs
+    first, so the version stamp agrees with a full build's for the same document.
+
+    A short name selects the way a render does when it is answered with its
+    default, so the best match wins and any other match is named, and a name that
+    is neither a target nor a match stops the run.
+    """
+    from .utils.quick_render import find_qmd_files
+
+    exclude_patterns = ConfigManager.get_exclude_patterns(
+        build_module.EXTERNAL_CONFIG
+    )
+    target_of_qmd = {
+        config["qmd"]: target
+        for target, config in build_module.TARGET_CONFIG.items()
+        if config.get("qmd")
+    }
+
+    resolved: list[str] = []
+    for name in names:
+        if name in build_module.BUILD_FUNCTIONS:
+            resolved.append(name)
+            continue
+        build_module.ensure_explicit_targets(docs_root, [name])
+        if name in build_module.BUILD_FUNCTIONS:
+            resolved.append(name)
+            continue
+
+        matches = find_qmd_files(name, docs_root, exclude_patterns)
+        selected = [
+            target_of_qmd[document.relative_to(docs_root).as_posix()]
+            for document in matches
+            if document.relative_to(docs_root).as_posix() in target_of_qmd
+        ]
+        if not selected:
+            logging.error(
+                "sdb build --article: %r is not a target and matches no document",
+                name,
+            )
+            sys.exit(1)
+        resolved.append(selected[0])
+        if len(selected) > 1:
+            logging.info(
+                "sdb build --article: %r also matches %s",
+                name,
+                ", ".join(selected[1:]),
+            )
+
+    return list(dict.fromkeys(resolved))
 
 
 def _setup_logging() -> None:
@@ -172,12 +231,15 @@ def main(argv: list[str] | None = None) -> None:
         "--website renders the website profile. --article renders the PDF form of "
         "each target and assembles the distribution an article is published as "
         "(the PDF, its LaTeX source, the figures, and the media), which is the "
-        "form an external deploy channel carries. The two are mutually exclusive.",
+        "form an external deploy channel carries. The two are mutually exclusive. "
+        "A target is named by its target name or by a short name, which selects "
+        "the best matching document the way 'render' does.",
         epilog=(
             "Examples:\n"
             "  sdb build docs whitepaper\n"
             "  sdb build docs whitepaper proposal --website -j 4\n"
             "  sdb build docs --article\n"
+            "  sdb build docs map --article\n"
             "  sdb build docs snapshot\n"
             "  sdb clean docs"
         ),
@@ -271,8 +333,8 @@ def main(argv: list[str] | None = None) -> None:
         "render",
         help="Render documents by short name",
         description="Search for .qmd files whose stem matches one or more short "
-        "names (e.g. 'map' → "
-        "docs/projects/section/chapter/map/index.qmd) and render them by calling the "
+        "names (e.g. 'map' → a map.qmd, or a path fragment such as 'chapter/map') "
+        "and render them by calling the "
         "underlying tool directly, without the full SDBS preprocessing pipeline "
         "(include resolution, footnote cleanup, formatting, and the latest-docs "
         "list are skipped).  The metadata file a PDF or beamer header consumes is "
@@ -475,9 +537,9 @@ def main(argv: list[str] | None = None) -> None:
             if "all" in args.targets:
                 article_targets = list(build_module.BUILD_FUNCTIONS.keys())
             else:
-                article_targets = build_module.parse_targets(args.targets)
-                build_module.ensure_explicit_targets(docs_root, article_targets)
-                article_targets = build_module.validate_targets(article_targets)
+                article_targets = _article_targets(
+                    docs_root, build_module.parse_targets(args.targets)
+                )
             success = _build_article(docs_root, article_targets, args.output_dir)
             sys.exit(0 if success else 1)
 

@@ -44,6 +44,7 @@ sdb init docs --template ssccs     # with SSCCS-specific templates
 sdb build .                        # the formats each target declares
 sdb build . --website -j 4         # parallel website build
 sdb build . --article              # article output, assembled for publication
+sdb build . map --article          # a short name selects the document to publish
 
 # Pre-render steps (latest docs, path resolution, footnote cleanup, formatting, metadata)
 sdb pre docs
@@ -74,7 +75,9 @@ Every command that takes a docs root stops when the path is not a directory, and
 
 `--website` renders the Quarto website profile. It owns the site directory (`_site` by default, or `--output-dir`), and it clears that directory before it renders, so a website build replaces the site rather than adding to it.
 
-`--article` renders the PDF form of each target and assembles the distribution an article is published as: the PDF, its LaTeX source, the figures, the media, and the shared `_files`. Each document's distribution is a directory named after it, beside the document itself, or under `--output-dir` when one is given. It is the form an external deploy channel carries, which is what lets a Zenodo-style channel be added as a plugin: `sdb build docs --article` produces the article, and a deploy activation names the directory it publishes.
+`--article` renders the PDF form of each target and assembles the distribution an article is published as: the PDF, the LaTeX source a format that keeps one (`keep-tex: true`) leaves beside it, the figures, the media, and the shared `_files`. Each document's distribution is a directory named after it, beside the document itself, or under `--output-dir` when one is given. It is the form an external deploy channel carries, which is what lets a Zenodo-style channel be added as a plugin: `sdb build docs --article` produces the article, and a deploy activation names the directory it publishes.
+
+A target is named by its target name, or by a short name that selects a document the way `sdb render` does: the best match wins, and any other match is named. That is how a document is reached without its target name, and it is the invocation the removed `sdb pub` command had.
 
 An article build goes through the renderer rather than through the site orchestration, since an article is a document's publication artifact rather than a page. It therefore neither reads nor writes the site directory, and `--sequence`, `--jobs`, `--parallel-formats`, and the `snapshot` target do not apply: the article is rendered document by document, and `sdb build` refuses those rather than ignoring them. The built-in pre-build sequence does run, so the version stamp an article carries agrees with the one a full build writes for the same document.
 
