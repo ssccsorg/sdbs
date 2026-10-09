@@ -555,7 +555,8 @@ def _collect_one(qmd_path: Path, dest: Path) -> list[Path]:
       {stem}.pdf
       {stem}.tex
       {stem}.c2pa, {stem}.c2pa_identifier.svg, and any other name the stem
-        starts, which is the signature the document carries
+        starts, which is the signature the document carries; the manifest
+        source, {stem}.c2pa_manifest.json, is not taken
       {stem}_files/figure-pdf/
       {stem}_files/mediabag/
       _files/<the tex this document inputs>
@@ -611,8 +612,11 @@ def _collect_one(qmd_path: Path, dest: Path) -> list[Path]:
         copied.append(destination)
         logger.info("  Copied %s", destination)
 
+    # The manifest is the source c2patool signs and the document tracks, so the
+    # distribution carries the generated signature and stops short of the source.
+    manifest_source = f"{stem}.c2pa_manifest.json"
     for source in sorted(src_dir.glob(f"{glob.escape(stem)}.c2pa*")):
-        if not source.is_file():
+        if not source.is_file() or source.name == manifest_source:
             continue
         destination = dest / source.name
         shutil.copy2(source, destination)
@@ -630,7 +634,8 @@ def article_artifacts(
     For each rendered QMD, creates a folder named after the file's stem and
     copies the artifacts a published article carries into it: the PDF, the
     LaTeX source, the figures, the media, the ``_files`` entry the document
-    inputs, and the c2pa signature its name carries.  The folder
+    inputs, and the c2pa signature its name carries, but not the manifest
+    source it was signed from.  The folder
     sits beside the QMD file itself (e.g. ``map.qmd`` → ``map/``) unless
     *dest_root* places it elsewhere, in which case each folder is named after
     the file's stem under that root.

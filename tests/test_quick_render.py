@@ -980,10 +980,11 @@ class TestArticleArtifacts:
         assert (dest / "_files" / "doc_metadata.tex").exists()
         assert not (dest / "_files" / "stale_metadata.tex").exists()
 
-    def test_collect_one_takes_the_c2pa_that_carries_the_stem(
+    def test_collect_one_takes_the_signature_and_not_the_manifest_source(
         self, tmp_path: Path
     ) -> None:
-        """The signature the stem names is assembled with the document."""
+        """The signature the stem names is assembled; the source it was signed
+        from is not."""
         from sdb.utils.quick_render import _collect_one
         qmd = tmp_path / "doc.qmd"
         qmd.write_text("---\n", encoding="utf-8")
@@ -997,7 +998,7 @@ class TestArticleArtifacts:
         _collect_one(qmd, dest)
         assert (dest / "doc.c2pa").exists()
         assert (dest / "doc.c2pa_identifier.svg").exists()
-        assert (dest / "doc.c2pa_manifest.json").exists()
+        assert not (dest / "doc.c2pa_manifest.json").exists()
         assert not (dest / "other.c2pa").exists()
 
     def test_article_artifacts_creates_folder(self, tmp_path: Path) -> None:
