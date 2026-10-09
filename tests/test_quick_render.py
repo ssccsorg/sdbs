@@ -916,7 +916,7 @@ class TestArticleArtifacts:
         assert (dest / "doc.tex").exists()
 
     def test_collect_one_copies_dirs(self, tmp_path: Path) -> None:
-        """_files/ and {stem}_files/figure-pdf/ are copied recursively."""
+        """{stem}_files/figure-pdf/ is copied recursively."""
         from sdb.utils.quick_render import _collect_one
         qmd = tmp_path / "doc.qmd"
         qmd.write_text("---\n")
@@ -925,14 +925,80 @@ class TestArticleArtifacts:
         figures = tmp_path / "doc_files" / "figure-pdf"
         figures.mkdir(parents=True)
         (figures / "fig1.pdf").write_text("fig")
-        shared = tmp_path / "_files"
-        shared.mkdir()
-        (shared / "style.css").write_text("css")
         dest = tmp_path / "doc"
         dest.mkdir()
         _collect_one(qmd, dest)
         assert (dest / "doc_files" / "figure-pdf" / "fig1.pdf").exists()
-        assert (dest / "_files" / "style.css").exists()
+
+    def test_collect_one_takes_only_the_files_tex_the_document_inputs(
+        self, tmp_path: Path
+    ) -> None:
+        """_files carries the metadata tex this document inputs, and nothing else."""
+        from sdb.utils.quick_render import _collect_one
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text(
+            "---\n"
+            "format:\n"
+            "  pdf:\n"
+            "    include-in-header:\n"
+            "      text: |\n"
+            "        \\IfFileExists{./_files/doc_metadata.tex}"
+            "{\\input{./_files/doc_metadata.tex}}{}\n"
+            "---\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "doc.pdf").write_text("%PDF")
+        shared = tmp_path / "_files"
+        shared.mkdir()
+        (shared / "doc_metadata.tex").write_text(r"\newcommand{\version}{1}")
+        (shared / "other_metadata.tex").write_text(r"\newcommand{\version}{2}")
+        (shared / "style.css").write_text("css")
+        dest = tmp_path / "doc"
+        dest.mkdir()
+        _collect_one(qmd, dest)
+        assert (dest / "_files" / "doc_metadata.tex").exists()
+        assert not (dest / "_files" / "other_metadata.tex").exists()
+        assert not (dest / "_files" / "style.css").exists()
+
+    def test_collect_one_replaces_an_earlier_files_entry(self, tmp_path: Path) -> None:
+        """A name an earlier collection carried does not survive this one."""
+        from sdb.utils.quick_render import _collect_one
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text(
+            "---\nformat:\n  pdf:\n    include-in-header:\n      text: |\n"
+            "        \\input{./_files/doc_metadata.tex}\n---\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "doc.pdf").write_text("%PDF")
+        shared = tmp_path / "_files"
+        shared.mkdir()
+        (shared / "doc_metadata.tex").write_text(r"\newcommand{\version}{1}")
+        dest = tmp_path / "doc"
+        (dest / "_files").mkdir(parents=True)
+        (dest / "_files" / "stale_metadata.tex").write_text("old")
+        _collect_one(qmd, dest)
+        assert (dest / "_files" / "doc_metadata.tex").exists()
+        assert not (dest / "_files" / "stale_metadata.tex").exists()
+
+    def test_collect_one_takes_the_c2pa_that_carries_the_stem(
+        self, tmp_path: Path
+    ) -> None:
+        """The signature the stem names is assembled with the document."""
+        from sdb.utils.quick_render import _collect_one
+        qmd = tmp_path / "doc.qmd"
+        qmd.write_text("---\n", encoding="utf-8")
+        (tmp_path / "doc.pdf").write_text("%PDF")
+        (tmp_path / "doc.c2pa").write_text("manifest")
+        (tmp_path / "doc.c2pa_identifier.svg").write_text("<svg/>")
+        (tmp_path / "doc.c2pa_manifest.json").write_text("{}")
+        (tmp_path / "other.c2pa").write_text("other")
+        dest = tmp_path / "doc"
+        dest.mkdir()
+        _collect_one(qmd, dest)
+        assert (dest / "doc.c2pa").exists()
+        assert (dest / "doc.c2pa_identifier.svg").exists()
+        assert (dest / "doc.c2pa_manifest.json").exists()
+        assert not (dest / "other.c2pa").exists()
 
     def test_article_artifacts_creates_folder(self, tmp_path: Path) -> None:
         """article_artifacts creates a folder alongside the QMD."""
