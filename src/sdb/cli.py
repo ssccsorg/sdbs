@@ -9,7 +9,7 @@ Subcommands:
   render   Locate .qmd files by short name and render them directly.
   deploy   Run the external deploy plugins a project activates.
   plugins  List the deploy plugins found on the plugin path.
-  clean    Remove Quarto build artifacts.
+  clean    Remove what a build wrote, keeping or removing its caches.
 
 Every command that operates on a project takes the directory as its first
 positional argument: init takes the directory to scaffold, build, check, pre,
@@ -448,12 +448,22 @@ def main(argv: list[str] | None = None) -> None:
         help="Extra directory to search for plugin manifests (repeatable)",
     )
 
-    # --- clean ---
+    # --- clean (what a build wrote, in two layers) ---
     clean_parser = subparsers.add_parser(
         "clean",
-        help="Remove Quarto build artifacts",
-        description="Delete all Quarto rendering artifacts (.sdbtmp_*, _sdbtmp_build, _files/, html, pdf, tex) "
-        "from the docs directory. Run before committing to avoid bloat.",
+        help="Remove what a build wrote",
+        description="Delete what a build wrote under the docs directory: the rendered "
+        "output and the scratch space, so _files/, _site/, html, pdf, tex, and "
+        "_sdbtmp_build. Run before committing to avoid bloat.\n\n"
+        "The caches a rebuild finds are kept: the .sdbtmp_ caches, Quarto's own "
+        ".quarto, and the .rumdl_cache and .jupyter_cache the two tools keep under "
+        "their own name. The 'all' layer removes those as well, which takes "
+        "everything a build wrote.",
+        epilog=(
+            "Examples:\n"
+            "  sdb clean docs\n"
+            "  sdb clean docs all\n"
+        ),
     )
     clean_parser.add_argument(
         "docs_root",
@@ -461,6 +471,15 @@ def main(argv: list[str] | None = None) -> None:
         nargs="?",
         default=Path("."),
         help="Path to the docs directory (default: current directory)",
+    )
+    clean_parser.add_argument(
+        "layer",
+        type=str,
+        nargs="?",
+        default="artifacts",
+        choices=("artifacts", "all"),
+        help="artifacts removes what a build wrote and keeps the caches it reuses "
+        "(default); all removes those caches too",
     )
 
     args = parser.parse_args(argv)
@@ -691,7 +710,9 @@ def main(argv: list[str] | None = None) -> None:
         _setup_logging()
         docs_root = args.docs_root.resolve()
         _require_docs_root(docs_root, "clean")
-        success = build_module.clean_quarto_artifacts(docs_root)
+        success = build_module.clean_quarto_artifacts(
+            docs_root, caches=args.layer == "all"
+        )
         sys.exit(0 if success else 1)
 
     else:

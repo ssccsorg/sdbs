@@ -11,6 +11,7 @@ directory serves either layout of the docs root.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 
 import pytest
@@ -183,6 +184,39 @@ class TestCacheLocation:
         assert build.get_cache_base(tmp_path) == tmp_path / ".sdbtmp_cache"
         assert (tmp_path / ".sdbtmp_jupyter").is_dir()
 
+    def test_the_render_reads_the_cache_the_copy_does_not_carry(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The cache a render reads is outside the copy, so dropping it is safe.
+
+        The copy a parallel website build renders from carries no cache, since
+        the skip removes those folders.  The render reads the Jupyter cache from
+        the environment, which names a directory where the command was run, so
+        the cache and the copy are independent and the copy cannot lose it.
+        """
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "docs").mkdir()
+        for name in (
+            "CACHE_ROOT",
+            "JUPYTER_CACHE_PATH",
+            "EXTERNAL_CONFIG",
+            "TARGET_CONFIG",
+            "BUILD_FUNCTIONS",
+            "OUTPUT_DIR_TARGETS",
+        ):
+            monkeypatch.setattr(build, name, getattr(build, name))
+        monkeypatch.setenv("JUPYTERCACHE", "")
+
+        build.initialize_config(tmp_path / "docs")
+
+        cache = Path(os.environ["JUPYTERCACHE"])
+        assert cache.is_absolute()
+        assert cache == tmp_path / ".sdbtmp_jupyter"
+        assert tmp_path / build.BUILD_TEMP_DIR not in cache.parents
+
+        ignore = build.ignore_quarto_artifacts()
+        assert ".sdbtmp_jupyter" in ignore("docs", [".sdbtmp_jupyter", "index.qmd"])
+
 
 class TestCacheDirectoriesAreNamed:
     """One marker names every folder the build writes for itself, so a rule
@@ -286,6 +320,8 @@ class TestCacheDirectoriesAreNamed:
             ".sdbtmp_cache",
             ".sdbtmp_jupyter",
             "_sdbtmp_build",
+            ".rumdl_cache",
+            ".jupyter_cache",
             "_site",
         ):
             assert name in ignore("docs", [name, "index.qmd"]), name
@@ -318,35 +354,86 @@ class TestCacheDirectoriesAreNamed:
             assert not (destination / name).exists(), name
             assert not (destination / "sub" / name).exists(), f"sub/{name}"
 
-    def test_clean_removes_a_cache_inside_the_docs_root(self, tmp_path: Path) -> None:
-        (tmp_path / ".sdbtmp_jupyter" / "executed").mkdir(parents=True)
-        (tmp_path / ".sdbtmp_cache" / "index" / "hash").mkdir(parents=True)
+    def test_clean_keeps_the_caches_a_build_reuses(self, tmp_path: Path) -> None:
+        """A clean leaves the caches, so the next build finds them."""
+        caches = (
+            ".sdbtmp_jupyter",
+            ".sdbtmp_cache",
+            ".quarto",
+            ".rumdl_cache",
+            ".jupyter_cache",
+        )
+        for name in caches:
+            (tmp_path / name / "inner").mkdir(parents=True)
+        (tmp_path / "_sdbtmp_build" / "index").mkdir(parents=True)
+        (tmp_path / "_site").mkdir()
+        (tmp_path / "index.pdf").write_text("%PDF")
 
         assert build.clean_quarto_artifacts(tmp_path) is True
 
-        assert not (tmp_path / ".sdbtmp_jupyter").exists()
-        assert not (tmp_path / ".sdbtmp_cache").exists()
+        for name in caches:
+            assert (tmp_path / name).exists(), name
+        assert not (tmp_path / "_sdbtmp_build").exists()
+        assert not (tmp_path / "_site").exists()
+        assert not (tmp_path / "index.pdf").exists()
 
-    def test_clean_reaches_a_cache_beside_a_docs_root_in_a_subdirectory(
+    def test_clean_all_removes_the_caches_too(self, tmp_path: Path) -> None:
+        """The 'all' layer takes everything a build wrote, its caches included."""
+        names = (
+            ".sdbtmp_jupyter",
+            ".sdbtmp_cache",
+            ".quarto",
+            ".rumdl_cache",
+            ".jupyter_cache",
+            "_sdbtmp_build",
+            "_site",
+        )
+        for name in names:
+            (tmp_path / name / "inner").mkdir(parents=True)
+
+        assert build.clean_quarto_artifacts(tmp_path, caches=True) is True
+
+        for name in names:
+            assert not (tmp_path / name).exists(), name
+
+    def test_clean_reaches_what_a_build_wrote_beside_a_docs_root(
         self, tmp_path: Path
     ) -> None:
-        """A docs root in a subdirectory keeps its cache at the parent.
+        """A docs root in a subdirectory keeps its scratch and its cache at the parent.
 
         The build writes where the command was run, so a project whose documents
         sit in ``docs/`` has its caches one level above the directory ``clean`` is
-        given.  Reaching them is what keeps the tree clean in that layout.
+        given.  The scratch space goes in both layers and the caches only in the
+        one that asks for them, which is what keeps the tree clean in that layout.
         """
         docs = tmp_path / "docs"
         docs.mkdir()
-        (tmp_path / ".sdbtmp_cache" / "index" / "hash").mkdir(parents=True)
-        (tmp_path / ".sdbtmp_jupyter" / "executed").mkdir(parents=True)
-        (tmp_path / "_sdbtmp_build" / "index").mkdir(parents=True)
+        for name in (".sdbtmp_cache", ".sdbtmp_jupyter", "_sdbtmp_build", ".rumdl_cache"):
+            (tmp_path / name / "index").mkdir(parents=True)
 
         assert build.clean_quarto_artifacts(docs) is True
 
+        assert not (tmp_path / "_sdbtmp_build").exists()
+        assert (tmp_path / ".sdbtmp_cache").exists()
+        assert (tmp_path / ".sdbtmp_jupyter").exists()
+        assert (tmp_path / ".rumdl_cache").exists()
+
+        assert build.clean_quarto_artifacts(docs, caches=True) is True
+
         assert not (tmp_path / ".sdbtmp_cache").exists()
         assert not (tmp_path / ".sdbtmp_jupyter").exists()
-        assert not (tmp_path / "_sdbtmp_build").exists()
+        assert not (tmp_path / ".rumdl_cache").exists()
+
+    def test_the_layers_differ_only_by_the_caches(self) -> None:
+        """Every artifact pattern is in both layers, and the caches only in 'all'."""
+        manager = build.CleanupManager()
+        artifacts = manager.patterns()
+        everything = manager.patterns(caches=True)
+
+        assert set(artifacts) < set(everything)
+        assert set(everything) - set(artifacts) == set(
+            manager.CACHE_PATTERNS + manager.OUTSIDE_CACHE_PATTERNS
+        )
 
 
 class TestCacheWritesAreAtomic:
