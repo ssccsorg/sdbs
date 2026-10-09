@@ -1,9 +1,11 @@
 """
-Quick render: locate one or more .qmd files by short name and render them.
+Quick render: locate one or more .qmd files by short name, render them, and
+assemble what each one publishes.
 
-Provides a convenience subcommand ``sdb render <docs_root> <name>`` so that, for
-example, ``sdb render docs map`` finds ``docs/projects/section/chapter/map.qmd``
-and runs ``quarto render`` on it automatically.
+Provides the ``sdb render`` subcommand.  ``sdb render map`` finds ``map.qmd``
+under the current directory and runs ``quarto render`` on it, and ``sdb render
+docs map`` searches ``docs/`` instead, because a first argument that names a
+directory is the docs root.
 """
 
 from __future__ import annotations
@@ -412,12 +414,14 @@ def resolve_and_render(
     Returns:
         A tuple of ``(success, rendered_qmd_paths)`` where
         *rendered_qmd_paths* is the list of rendered QMD files
-        (in original order, duplicates removed).
+        (in original order, duplicates removed).  *success* is false when a
+        render failed or when a short name selected no document.
     """
     total = len(patterns)
     all_selected: list[tuple[Path, str]] = []
     n_ok = 0
     n_fail = 0
+    missing: list[str] = []
 
     for i, pattern in enumerate(patterns, 1):
         label = f"{i}/{total}" if total > 1 else None
@@ -433,6 +437,10 @@ def resolve_and_render(
                 all_selected.append((p, pattern))
         else:
             n_fail += 1
+            missing.append(pattern)
+
+    if missing:
+        logger.error("No document matches: %s", ", ".join(missing))
 
     if not all_selected:
         return (False, [])
@@ -484,8 +492,10 @@ def resolve_and_render(
     except Exception as exc:  # a build input must not stop the render
         logger.warning("Metadata generation failed: %s", exc)
 
-    # Render
-    success = True
+    # A short name that selected no document is a failure to select, not a
+    # success: a mistyped root or short name would otherwise pass as a pattern
+    # that matched nothing while another pattern carried the run.
+    success = not missing
     for entry in all_selected:
         qmd = entry[0] if isinstance(entry, tuple) else entry
         if not render_qmd(qmd, cwd=root, format=format):

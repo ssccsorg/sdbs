@@ -809,6 +809,21 @@ class TestResolveAndRender:
         assert len(paths) == 2
 
     @patch("sdb.utils.quick_render.render_qmd")
+    def test_a_short_name_that_selects_nothing_fails_the_run(
+        self, mock_render: MagicMock, qmd_tree: Path, caplog
+    ) -> None:
+        """A short name that matched no document fails the run, and is named."""
+        from sdb.utils.quick_render import resolve_and_render
+        mock_render.return_value = True
+        with caplog.at_level(logging.ERROR):
+            success, paths = resolve_and_render(
+                ["report", "nonexistent"], qmd_tree, prompt=False,
+            )
+        assert success is False
+        assert [p.name for p in paths] == ["report.qmd"]
+        assert "nonexistent" in caplog.text
+
+    @patch("sdb.utils.quick_render.render_qmd")
     def test_multi_pattern_dedup_skip(
         self, mock_render: MagicMock, qmd_tree: Path
     ) -> None:

@@ -309,10 +309,47 @@ class TestDeployCommand:
 
 
 class TestRenderCommand:
-    """Tests for the ``sdb render`` subcommand."""
+    """Tests for the ``sdb render`` subcommand.
 
-    def test_the_docs_root_reaches_the_search(self, tmp_path: Path) -> None:
-        """sdb render <docs_root> map searches the named root, not the cwd."""
+    The search runs in the current directory unless a leading argument names one,
+    and each document that rendered is assembled into the distribution it is
+    published as, which is the role the removed ``sdb pub`` command carried.
+    """
+
+    def test_a_short_name_searches_the_current_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A plain short name is looked up in the current directory."""
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
+            patch(
+                "sdb.utils.quick_render.resolve_and_render",
+                return_value=(True, []),
+            ) as mock_resolve,
+        ):
+            code = _run_main(["render", "map"])
+        assert code == 0
+        assert mock_resolve.call_args.args == (["map"], Path.cwd())
+
+    def test_several_short_names_share_the_current_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without a directory, every argument is a short name."""
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
+            patch(
+                "sdb.utils.quick_render.resolve_and_render",
+                return_value=(True, []),
+            ) as mock_resolve,
+        ):
+            code = _run_main(["render", "map", "id"])
+        assert code == 0
+        assert mock_resolve.call_args.args == (["map", "id"], Path.cwd())
+
+    def test_a_leading_directory_is_the_docs_root(self, tmp_path: Path) -> None:
+        """A first argument that names a directory is the root, not a short name."""
         docs_root = tmp_path / "docs"
         docs_root.mkdir()
         with (
@@ -326,42 +363,51 @@ class TestRenderCommand:
         assert code == 0
         assert mock_resolve.call_args.args == (["map"], docs_root.resolve())
 
-    def test_several_patterns_follow_one_root(self, tmp_path: Path) -> None:
-        """The root is the first argument, so the patterns that follow are patterns."""
-        docs_root = tmp_path / "docs"
-        docs_root.mkdir()
-        with (
-            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
-            patch(
-                "sdb.utils.quick_render.resolve_and_render",
-                return_value=(True, []),
-            ) as mock_resolve,
-        ):
-            code = _run_main(["render", str(docs_root), "map", "id"])
-        assert code == 0
-        assert mock_resolve.call_args.args == (["map", "id"], docs_root.resolve())
-
-    def test_a_root_alone_is_not_enough(self, tmp_path: Path) -> None:
-        """A root with no pattern has nothing to select, and says so."""
+    def test_a_root_alone_is_not_enough(self, tmp_path: Path, capsys) -> None:
+        """A directory with no short name following it has nothing to select."""
         docs_root = tmp_path / "docs"
         docs_root.mkdir()
         with patch("sdb.utils.quick_render.resolve_and_render") as mock_resolve:
             code = _run_main(["render", str(docs_root)])
         assert code != 0
         mock_resolve.assert_not_called()
+        assert "no short name follows it" in capsys.readouterr().err
 
-    def test_a_missing_root_stops_before_the_search(
-        self, tmp_path: Path, capsys
-    ) -> None:
-        """A root that is not a directory stops the search rather than walking nothing."""
-        absent = tmp_path / "absent"
-        with patch("sdb.utils.quick_render.resolve_and_render") as mock_resolve:
-            code = _run_main(["render", str(absent), "map"])
+    def test_the_render_assembles_what_it_produced(self, tmp_path: Path) -> None:
+        """A document that rendered is assembled into its distribution."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
+        document = docs_root / "map.qmd"
+        with (
+            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
+            patch(
+                "sdb.utils.quick_render.resolve_and_render",
+                return_value=(True, [document]),
+            ),
+            patch(
+                "sdb.utils.quick_render.article_artifacts", return_value=3
+            ) as mock_assemble,
+        ):
+            code = _run_main(["render", str(docs_root), "map"])
+        assert code == 0
+        assert mock_assemble.call_args.args == ([document],)
+
+    def test_a_failed_render_assembles_nothing(self, tmp_path: Path) -> None:
+        """A render that failed is not assembled into a distribution."""
+        docs_root = tmp_path / "docs"
+        docs_root.mkdir()
+        document = docs_root / "map.qmd"
+        with (
+            patch("sdb.utils.quick_render.find_build_yml", return_value=None),
+            patch(
+                "sdb.utils.quick_render.resolve_and_render",
+                return_value=(False, [document]),
+            ),
+            patch("sdb.utils.quick_render.article_artifacts") as mock_assemble,
+        ):
+            code = _run_main(["render", str(docs_root), "map"])
         assert code == 1
-        mock_resolve.assert_not_called()
-        captured = capsys.readouterr()
-        assert "sdb render: docs root is not a directory" in captured.err
-        assert "absent" in captured.err
+        mock_assemble.assert_not_called()
 
 
 class TestBuildArticle:

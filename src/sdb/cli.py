@@ -6,15 +6,17 @@ Subcommands:
   build    Build one or more Quarto targets, as a website or as an article.
   check    Validate links, citations, and cross-references.
   pre      Run pre-render steps (latest docs, path resolution, formatting).
-  render   Locate .qmd files by short name and render them directly (no preprocessing).
+  render   Render documents by short name and assemble what each one publishes.
   deploy   Run the external deploy plugins a project activates.
   plugins  List the deploy plugins found on the plugin path.
   clean    Remove Quarto build artifacts.
 
 Every command that operates on a project takes the directory as its first
 positional argument: init takes the directory to scaffold, build, check, pre,
-render, and clean take the docs root the documents live in, and deploy and
-plugins take the directory holding ``_deploy.yml``.
+and clean take the docs root the documents live in, and deploy and plugins take
+the directory holding ``_deploy.yml``.  render takes the documents to render and
+reads its first argument as the docs root only when that argument is a directory,
+so a plain short name searches the current one.
 """
 
 import argparse
@@ -107,9 +109,12 @@ def _setup_logging() -> None:
 def _require_docs_root(docs_root: Path, command: str) -> None:
     """Stop when the named docs root is not a directory.
 
-    Every project-scoped command takes the docs root from the command line, so a
-    typo or a wrong working directory would otherwise walk no documents, report
-    success, and leave the failure to surface later as an unreadable render error.
+    The commands that take the docs root as their first argument read it from the
+    command line, so a typo or a wrong working directory would otherwise walk no
+    documents, report success, and leave the failure to surface later as an
+    unreadable render error.  ``render`` has no such argument to check: it reads a
+    leading directory as the root and otherwise runs in the current one, so a
+    short name that selects nothing is what reports a wrong directory there.
     """
     if docs_root.is_dir():
         return
@@ -261,12 +266,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Path to the docs directory (default: current directory)",
     )
 
-    # --- render (quick render by short name) ---
+    # --- render (render by short name, then assemble the distribution) ---
     render_parser = subparsers.add_parser(
         "render",
-        help="Locate .qmd files by short name and render them directly",
-        description="Search the docs root for .qmd files whose stem "
-        "matches one or more short names (e.g. 'map' → "
+        help="Render documents by short name and assemble what each one publishes",
+        description="Search for .qmd files whose stem matches one or more short "
+        "names (e.g. 'map' → "
         "docs/projects/section/chapter/map/index.qmd) and render them by calling the "
         "underlying tool directly, without the full SDBS preprocessing pipeline "
         "(include resolution, footnote cleanup, formatting, and the latest-docs "
@@ -275,30 +280,36 @@ def main(argv: list[str] | None = None) -> None:
         "here as well: it writes the file for the selected documents when it is "
         "missing or stale, inserts the reference a header that names a metadata "
         "macro needs, and supplies the affiliation keys a header links with.\n\n"
-        "Multiple patterns can be given to render several documents in sequence "
-        "(e.g. 'sdb render docs map id').  Contrast this with 'sdb build', which "
-        "runs the full SDBS pipeline before rendering.  Use 'render' when you only "
-        "need a quick preview or to verify the document structure.\n\n"
-        "When multiple files match, prompts for selection unless --all is given.",
+        "The search runs in the current directory.  A first argument that names a "
+        "directory is the docs root instead, so 'sdb render map' searches where it "
+        "is run and 'sdb render docs map' searches docs/.\n\n"
+        "Each document that rendered is then assembled into the distribution it "
+        "is published as (the PDF, its LaTeX source, the figures, and the media) "
+        "in a folder named after the document beside it.  This is the assembly "
+        "'sdb build --article' produces for a named target, reached here by short "
+        "name.\n\n"
+        "Multiple short names render several documents in sequence (e.g. 'sdb "
+        "render map id').  Contrast this with 'sdb build', which runs the full "
+        "SDBS pipeline before rendering.  When several files match one short name, "
+        "prompts for selection unless --all is given.  A short name that selects "
+        "no document fails the run.",
         epilog=(
             "Examples:\n"
+            "  sdb render map\n"
+            "  sdb render map --to pdf\n"
             "  sdb render docs map\n"
-            "  sdb render docs map --to pdf\n"
-            "  sdb render docs chapter/map\n"
-            "  sdb render docs map id wp"
+            "  sdb render map id wp"
         ),
     )
     render_parser.add_argument(
-        "docs_root",
-        type=Path,
-        help="Path to the docs directory to search",
-    )
-    render_parser.add_argument(
-        "patterns",
+        "names",
         type=str,
         nargs="+",
-        help="One or more short names or path fragments to match against .qmd "
-        "file stems (e.g. 'map', 'whitepaper', 'chapter/map')",
+        metavar="NAME",
+        help="The docs root when the first argument names a directory, then one "
+        "or more short names or path fragments to match against .qmd file stems "
+        "(e.g. 'map', 'whitepaper', 'chapter/map').  Without a directory, every "
+        "argument is a short name and the search runs in the current directory.",
     )
     render_parser.add_argument(
         "--to", "-t", dest="format", type=str, default=None,
@@ -547,26 +558,51 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "render":
         _setup_logging()
         from .utils.quick_render import (
+            article_artifacts,
             find_build_yml,
             load_exclude_patterns,
             resolve_and_render,
         )
 
-        docs_root = args.docs_root.resolve()
-        _require_docs_root(docs_root, "render")
+        # The first argument is the docs root when it names a directory; without
+        # one the search runs where the command was invoked, so a short name is
+        # looked up in the current folder.
+        first = Path(args.names[0])
+        if first.is_dir():
+            docs_root = first.resolve()
+            patterns = list(args.names[1:])
+        else:
+            docs_root = Path.cwd()
+            patterns = list(args.names)
+
+        if not patterns:
+            print(
+                f"sdb render: {args.names[0]} is a directory, so it is the docs "
+                f"root and no short name follows it\n"
+                f"  Name the document to render.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
         build_yml = find_build_yml(docs_root)
         exclude_patterns = (
             load_exclude_patterns(build_yml) if build_yml else []
         )
 
-        success, _ = resolve_and_render(
-            args.patterns,
+        success, rendered = resolve_and_render(
+            patterns,
             docs_root,
             prompt=not args.all,
             exclude_patterns=exclude_patterns,
             format=args.format,
         )
+        if success and rendered:
+            total = article_artifacts(rendered)
+            logging.info(
+                "Assembled %d artifact(s) for %d document(s).",
+                total,
+                len(rendered),
+            )
         sys.exit(0 if success else 1)
 
     elif args.command == "deploy":
