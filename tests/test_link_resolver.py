@@ -89,6 +89,68 @@ class TestImageDestination:
         ) == 0
 
 
+    def test_keeps_the_title_inside_the_parenthesis(self, tmp_path: Path) -> None:
+        """Only the path is replaced, so a title beside it survives."""
+        _write(tmp_path / "mtep" / "_include" / "shot.png", "png")
+        doc = _write(
+            tmp_path / "mtep" / "page.qmd",
+            '![shot](../_include/shot.png "Caption")\n',
+        )
+
+        assert LinkResolver().fix_one_file(
+            doc, tmp_path, dry_run=False, verbose=False
+        ) == 1
+        assert doc.read_text() == '![shot](./_include/shot.png "Caption")\n'
+
+    def test_keeps_the_angle_brackets(self, tmp_path: Path) -> None:
+        _write(tmp_path / "mtep" / "_include" / "shot.png", "png")
+        doc = _write(
+            tmp_path / "mtep" / "page.qmd",
+            "![shot](<../_include/shot.png>)\n",
+        )
+
+        assert LinkResolver().fix_one_file(
+            doc, tmp_path, dry_run=False, verbose=False
+        ) == 1
+        assert doc.read_text() == "![shot](<./_include/shot.png>)\n"
+
+    def test_leaves_a_destination_in_a_fenced_block(self, tmp_path: Path) -> None:
+        """A markdown example is not a link."""
+        _write(tmp_path / "mtep" / "_include" / "shot.png", "png")
+        doc = _write(
+            tmp_path / "mtep" / "page.qmd",
+            "Example:\n\n```markdown\n![shot](../_include/shot.png)\n```\n",
+        )
+
+        assert LinkResolver().fix_one_file(
+            doc, tmp_path, dry_run=False, verbose=False
+        ) == 0
+        assert "../_include/shot.png" in doc.read_text()
+
+    def test_leaves_a_destination_in_an_inline_span(self, tmp_path: Path) -> None:
+        _write(tmp_path / "mtep" / "_include" / "shot.png", "png")
+        doc = _write(
+            tmp_path / "mtep" / "page.qmd",
+            "Write `![shot](../_include/shot.png)` to embed it.\n",
+        )
+
+        assert LinkResolver().fix_one_file(
+            doc, tmp_path, dry_run=False, verbose=False
+        ) == 0
+
+    def test_leaves_a_suffix_the_set_does_not_name(self, tmp_path: Path) -> None:
+        """The suffix comparison is exact, as it is for the documents."""
+        _write(tmp_path / "mtep" / "_include" / "SHOT.PNG", "png")
+        doc = _write(
+            tmp_path / "mtep" / "page.qmd",
+            "![shot](../_include/SHOT.PNG)\n",
+        )
+
+        assert LinkResolver().fix_one_file(
+            doc, tmp_path, dry_run=False, verbose=False
+        ) == 0
+
+
 class TestDocumentLink:
     """The document case is unchanged by the widened suffix set."""
 

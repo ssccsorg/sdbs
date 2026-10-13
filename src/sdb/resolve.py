@@ -6,9 +6,11 @@ Reads ``build.yml`` for ``exclude`` patterns (gitignore-style), so it
 respects the same exclusion rules as ``build.py`` without depending on it.
 
 Architecture
-  Single-file multi-resolver: ``PathResolver`` handles the current
-  ``../`` asset-path correction.  Future resolvers can be added as
-  additional classes in this file and dispatched from ``resolve_all()``.
+  Single-file multi-resolver.  ``PathResolver`` corrects the ``../`` asset
+  paths a build consumes (frontmatter keys, ``%run``, Python string literals),
+  and ``LinkResolver`` heals a markdown link whose target moved, whether the
+  target is a document or the asset an image displays.  A new resolver is a
+  class in this file, dispatched from ``resolve_all()``.
 
 Usage::
 
@@ -160,6 +162,22 @@ class _BaseResolver:
         )
 
     @staticmethod
+    def _mask_code(text: str) -> str:
+        """Blank fenced blocks and inline code, keeping the length.
+
+        A destination quoted in an example is not a live one, and the result has
+        the same length as the text, so a caller can match on the result and
+        edit the original at the offsets it reads.
+        """
+        chars = list(text)
+        for pattern in (r"```.*?```", r"`[^`\n]*`"):
+            for m in re.finditer(pattern, text, re.DOTALL):
+                for i in range(m.start(), m.end()):
+                    if chars[i] != "\n":
+                        chars[i] = " "
+        return "".join(chars)
+
+    @staticmethod
     def _parse_frontmatter(text: str):
         m = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
         if not m:
@@ -285,6 +303,9 @@ class PathResolver(_BaseResolver):
     Covers:
     * YAML frontmatter: ``metadata-files``, ``bibliography``, ``csl``
     * Jupyter ``%run`` directives inside code cells
+
+    The assets a document displays are healed by ``LinkResolver``, which already
+    reads a markdown link's destination.
 
     Inherits build.yml exclusion rules as-is: files like ``README.md``
     that are excluded from the build are also excluded from asset-path
@@ -479,6 +500,9 @@ class LinkResolver(_BaseResolver):
 
     An image is a markdown link as well, so the destination of
     ``![alt](shot.png)`` is healed the same way when the asset it names moves.
+
+    A destination written inside a fenced block or an inline code span is an
+    example rather than a link, and it is left alone.
     """
 
     _APPLY_BUILD_YML_EXCLUDE = False
@@ -489,7 +513,7 @@ class LinkResolver(_BaseResolver):
     # to another directory, which breaks its relative path the same way.
     TARGET_SUFFIXES: Set[str] = {
         ".md", ".qmd",
-        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp",
+        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif",
     }
 
     # Match [text](path), [text](<path>), [text](path "title"),
@@ -517,6 +541,18 @@ class LinkResolver(_BaseResolver):
         return bool(
             url.startswith(("http://", "https://", "mailto:", "#", "data:"))
         )
+
+    @staticmethod
+    def _url_span(raw: str, start: int, url: str) -> Tuple[int, int]:
+        """The span of the bare destination inside a link's parenthesis text.
+
+        The text may carry ``<>`` brackets or a trailing title, and only the path
+        is replaced, so the rest of the parenthesis survives a fix.
+        """
+        offset = raw.find(url)
+        if offset < 0:
+            return start, start + len(raw)
+        return start + offset, start + offset + len(url)
 
     @staticmethod
     def _try_migration(base_dir: Path, rel: str) -> Optional[Path]:
@@ -551,14 +587,17 @@ class LinkResolver(_BaseResolver):
         except Exception:
             return results
 
-        for m in self.RE_LINK.finditer(text):
+        # A destination written inside an example is not a live one.  The mask
+        # keeps the length, so the offsets are valid in the text itself.
+        masked = self._mask_code(text)
+        for m in self.RE_LINK.finditer(masked):
             raw_url = m.group(2)
             url = self._clean_url(raw_url)
             if not url or self._skip_link(url):
                 continue
             if Path(url).suffix not in self.TARGET_SUFFIXES:
                 continue
-            results.append((url, m.start(2), m.end(2)))
+            results.append((url, *self._url_span(raw_url, m.start(2), url)))
 
         return results
 
@@ -1009,8 +1048,9 @@ class QmdLinkResolver(LinkResolver):
     * Replace the link label with the target file's YAML ``title``.
     * Apply build.yml exclusion rules (true for QMD sources).
 
-    Inherits ``_extract_links``, ``_resolve_link``, ``_clean_url``,
-    ``_skip_link``, and ``_try_migration`` from ``LinkResolver``.
+    Inherits ``_resolve_link``, ``_clean_url``, ``_skip_link``, and
+    ``_try_migration`` from ``LinkResolver``, and replaces ``_extract_links``
+    with its own filter.
     """
 
     _APPLY_BUILD_YML_EXCLUDE = False
