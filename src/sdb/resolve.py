@@ -476,10 +476,21 @@ class LinkResolver(_BaseResolver):
     Extends build.yml exclusion rules: unlike ``PathResolver``, this
     resolver scans ``.md`` files too (including ``README.md``) because
     they contain markdown links that need checking.
+
+    An image is a markdown link as well, so the destination of
+    ``![alt](shot.png)`` is healed the same way when the asset it names moves.
     """
 
     _APPLY_BUILD_YML_EXCLUDE = False
     SOURCE_EXTENSIONS: Set[str] = {".qmd", ".md"}
+
+    # The suffixes whose target this resolver heals.  A document moves between
+    # ``.md``, ``.qmd``, and ``index.<ext>``; an asset a document displays moves
+    # to another directory, which breaks its relative path the same way.
+    TARGET_SUFFIXES: Set[str] = {
+        ".md", ".qmd",
+        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp",
+    }
 
     # Match [text](path), [text](<path>), [text](path "title"),
     # [text](path 'title')
@@ -545,7 +556,7 @@ class LinkResolver(_BaseResolver):
             url = self._clean_url(raw_url)
             if not url or self._skip_link(url):
                 continue
-            if not url.endswith((".md", ".qmd")):
+            if Path(url).suffix not in self.TARGET_SUFFIXES:
                 continue
             results.append((url, m.start(2), m.end(2)))
 
