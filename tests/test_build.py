@@ -496,3 +496,110 @@ class TestCacheActivityIsReported:
         build.reset_cache_activity()
 
         assert "Cache: 0 artifact(s) written" in build.cache_activity_summary(tmp_path)
+
+
+class TestCachedArtifactsPublish:
+    """A target folder holds the render record beside the artifacts.
+
+    A docs root with no project renders each document beside its source, so a
+    website build has no ``_site`` to merge and publishes the cached artifact
+    instead.  Reading the folder's first entry as the artifact directory fails
+    whenever the filesystem lists the record file first.
+    """
+
+    @staticmethod
+    def _target(
+        cache_root: Path,
+        monkeypatch,
+        target: str = "note",
+        qmd: str = "notes/note.md",
+        hash_str: str = "a" * 64,
+    ) -> Path:
+        monkeypatch.setattr(build, "TARGET_CONFIG", {target: {"qmd": qmd}})
+        hash_dir = build.get_cache_base(cache_root) / target / hash_str
+        hash_dir.mkdir(parents=True)
+        _write(hash_dir / f"{target}.html", "<html></html>")
+        build.write_hash_pair(
+            build.get_cache_file(target, "html", cache_root), hash_str, "b" * 64
+        )
+        return hash_dir
+
+    def test_the_record_is_not_read_as_the_artifact_directory(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
+        hash_dir = self._target(tmp_path, monkeypatch)
+
+        assert build.artifact_directory("note", tmp_path) == hash_dir
+
+    def test_the_record_names_the_directory_to_read(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Two renders leave two folders, and the record names the live one."""
+        monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
+        cache_dir = build.get_cache_base(tmp_path) / "note"
+        recorded = cache_dir / ("c" * 64)
+        stale = cache_dir / ("a" * 64)
+        for directory, mtime in ((recorded, 1_000_000), (stale, 9_000_000_000)):
+            directory.mkdir(parents=True)
+            _write(directory / "note.html", "<html></html>")
+            os.utime(directory, (mtime, mtime))
+        build.write_hash_pair(
+            build.get_cache_file("note", "html", tmp_path), "c" * 64, "b" * 64
+        )
+
+        assert build.artifact_directory("note", tmp_path) == recorded
+
+    def test_the_artifact_lands_where_the_site_would_have_put_it(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
+        hash_dir = self._target(tmp_path, monkeypatch)
+        (hash_dir / "site").mkdir()
+        site = tmp_path / "_site"
+
+        assert build.copy_cached_artifacts("note", site, tmp_path) is True
+
+        assert (site / "notes" / "note.html").read_text(
+            encoding="utf-8"
+        ) == "<html></html>"
+        assert not (site / "site").exists()
+
+    def test_a_target_with_nothing_cached_fails_rather_than_vanish(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A site that omits a document reports a failure, not a clean build."""
+        monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
+        monkeypatch.setattr(build, "TARGET_CONFIG", {"note": {"qmd": "note.md"}})
+        cache_dir = build.get_cache_base(tmp_path) / "note"
+        cache_dir.mkdir(parents=True)
+        build.write_hash_pair(
+            build.get_cache_file("note", "html", tmp_path), "a" * 64, "b" * 64
+        )
+        site = tmp_path / "_site"
+
+        assert build.artifact_directory("note", tmp_path) is None
+        assert build.copy_cached_artifacts("note", site, tmp_path) is False
+        assert build.merge_target_output(
+            "note", site, tmp_path / "copy", tmp_path
+        ) is False
+
+    def test_a_rendered_site_is_merged_and_the_cache_is_left_alone(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(build, "CACHE_ROOT", tmp_path)
+        self._target(tmp_path, monkeypatch)
+        temp_docs = tmp_path / "copy"
+        _write(temp_docs / "_site" / "notes" / "note.html", "<html></html>")
+        merged = []
+
+        def fake_merge(src: Path, dst: Path, target_name: str = "") -> bool:
+            merged.append(target_name)
+            return True
+
+        monkeypatch.setattr(build, "merge_dirs", fake_merge)
+
+        assert build.merge_target_output(
+            "note", tmp_path / "_site", temp_docs, tmp_path
+        ) is True
+        assert merged == ["note"]

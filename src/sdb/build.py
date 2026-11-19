@@ -363,6 +363,90 @@ def write_hash_pair(cache_file: Path, qmd_hash: str, output_hash: str) -> None:
         f.write(f"{qmd_hash}_{output_hash}")
 
 
+def artifact_directory(target_name: str, docs_root: Path) -> Optional[Path]:
+    """Return the directory under a target that holds its cached artifacts.
+
+    The target directory holds the ``rendered_<fmt>.txt`` records beside the hash
+    directories, so only a directory is a candidate.  A record names the hash the
+    last render wrote, which is preferred; the newest directory answers when no
+    record does.
+    """
+    cache_dir = get_cache_base(docs_root) / target_name
+    if not cache_dir.is_dir():
+        return None
+    candidates = [entry for entry in cache_dir.iterdir() if entry.is_dir()]
+    if not candidates:
+        return None
+    recorded = set()
+    for record in cache_dir.glob("rendered_*.txt"):
+        pair = read_hash_pair(record)
+        if pair is not None:
+            recorded.add(pair[0])
+    for candidate in candidates:
+        if candidate.name in recorded:
+            return candidate
+    return max(candidates, key=lambda entry: (entry.stat().st_mtime, entry.name))
+
+
+def copy_cached_artifacts(
+    target_name: str, final_output: Path, docs_root: Path
+) -> bool:
+    """Publish a target's cached artifacts when its render made no site.
+
+    A docs root without a project renders a document beside its source, so a
+    website build has no ``_site`` to merge and the artifact the cache holds is
+    the only output there is.  Returns False when the target has nothing cached,
+    which means the site would silently omit it.
+    """
+    hash_dir = artifact_directory(target_name, docs_root)
+    if hash_dir is None:
+        logger.error(
+            f"No cached artifact directory for {target_name}, "
+            "the site would omit it."
+        )
+        return False
+    qmd_path = Path(TARGET_CONFIG[target_name]["qmd"])
+    src_parent = qmd_path.parent
+    src_stem = qmd_path.stem
+    for src_file in hash_dir.iterdir():
+        if src_file.name == "site" or not src_file.is_file():
+            continue
+        if src_parent == Path("."):
+            dest_parent = final_output
+        else:
+            dest_parent = final_output / src_parent
+        dest = dest_parent / (src_stem + src_file.suffix)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_file, dest)
+        logger.debug(f"Copied cached artifact {src_file} -> {dest}")
+    return True
+
+
+def merge_target_output(
+    target_name: str, final_output: Path, temp_docs: Path, docs_root: Path
+) -> bool:
+    """Merge one target's output into the site.
+
+    A target that rendered a site merges that site; a target that produced
+    none is published from its cached artifact, which is what a docs root
+    without a project renders.  The result is the target's own, so the caller
+    records a failure and carries on with the remaining targets.
+    """
+    temp_site = temp_docs / "_site"
+    if temp_site.exists():
+        if merge_dirs(temp_site, final_output, target_name=target_name):
+            return True
+        logger.warning(
+            f"Failed to merge {target_name} output into {final_output}"
+        )
+        return False
+    try:
+        return copy_cached_artifacts(target_name, final_output, docs_root)
+    except Exception as e:
+        logger.error(f"Failed to publish cached artifacts for {target_name}: {e}")
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Render decision helpers
 # ---------------------------------------------------------------------------
@@ -1983,42 +2067,13 @@ def build_targets(
                 succeeded, key=lambda x: (x == "index", x)
             )
             for target in sorted_succeeded:
-                temp_docs = target_temp_dirs[target]
-                temp_site = temp_docs / "_site"
-                if not temp_site.exists():
-                    cache_dir = get_cache_base(docs_root) / target
-                    if cache_dir.exists():
-                        hash_dirs = list(cache_dir.iterdir())
-                        if hash_dirs:
-                            hash_dir = hash_dirs[0]
-                            qmd_path = Path(TARGET_CONFIG[target]["qmd"])
-                            src_parent = qmd_path.parent
-                            src_stem = qmd_path.stem
-                            for src_file in hash_dir.iterdir():
-                                if src_file.name == "site":
-                                    continue
-                                if src_file.is_file():
-                                    if src_parent == Path("."):
-                                        dest_parent = final_output
-                                    else:
-                                        dest_parent = final_output / src_parent
-                                    dest_name = src_stem + src_file.suffix
-                                    dest = dest_parent / dest_name
-                                    dest.parent.mkdir(parents=True, exist_ok=True)
-                                    shutil.copy2(src_file, dest)
-                                    logger.debug(
-                                        f"Copied cached artifact "
-                                        f"{src_file} -> {dest}"
-                                    )
-                if temp_site.exists():
-                    if not merge_dirs(
-                        temp_site, final_output, target_name=target
-                    ):
-                        logger.warning(
-                            f"Failed to merge {target} output "
-                            f"into {final_output}"
-                        )
-                        results[target] = False
+                if not merge_target_output(
+                    target,
+                    final_output,
+                    target_temp_dirs[target],
+                    docs_root,
+                ):
+                    results[target] = False
 
             succeeded = [t for t, s in results.items() if s]
             failed = [t for t, s in results.items() if not s]
