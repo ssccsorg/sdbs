@@ -225,6 +225,16 @@ class _BaseResolver:
         prefix = "../" * up if up > 0 else "./"
         return f"{prefix}{down}" if down else prefix.rstrip("/")
 
+    @staticmethod
+    def _inside_root(path: Path, root: Path) -> bool:
+        """Return True when a resolved path is one the build carries.
+
+        A build copies the docs root alone, so a path that resolves above it is
+        absent from the copy even when it exists in the source tree.
+        """
+        root_resolved = root.resolve()
+        return path == root_resolved or root_resolved in path.parents
+
     def resolve_all(
         self,
         root: Path,
@@ -387,11 +397,17 @@ class PathResolver(_BaseResolver):
         fixes: List[Tuple[int, int, str]] = []
 
         for rel, start, end in paths:
-            if (doc_dir / rel).resolve().exists():
+            candidate = (doc_dir / rel).resolve()
+            if candidate.exists() and self._inside_root(candidate, root):
                 continue
             found = self._search_upward(doc_dir, rel, root)
             if found is None:
-                if verbose:
+                if candidate.exists():
+                    print(
+                        f"  {file_path.relative_to(root)}: {rel}  "
+                        "-> [OUTSIDE the docs root, no copy in it]"
+                    )
+                elif verbose:
                     print(f"  {file_path.relative_to(root)}: {rel}  -> [NOT FOUND]")
                 continue
             new_rel = self._compute_rel_path(doc_dir, found)
@@ -1325,12 +1341,17 @@ class IncludeResolver(_BaseResolver):
         for m in reversed(matches):
             raw_path = m.group(1).strip()
             candidate = (doc_dir / raw_path).resolve()
-            if candidate.exists():
+            if candidate.exists() and self._inside_root(candidate, root):
                 continue
             # File not found — use PathResolver's search_upward logic
             found = _BaseResolver._search_upward(doc_dir, raw_path, root)
             if found is None:
-                if verbose:
+                if candidate.exists():
+                    print(
+                        f"  {file_path.relative_to(root)}: {raw_path}  "
+                        "-> [OUTSIDE the docs root, no copy in it]"
+                    )
+                elif verbose:
                     print(
                         f"  {file_path.relative_to(root)}: {raw_path}  -> [NOT FOUND]"
                     )
