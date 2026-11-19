@@ -40,11 +40,20 @@ RUN sed -i 's/archive.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.li
 # Install binary
 RUN uv tool install rumdl
 
-# Install TinyTeX and LaTeX packages
-RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
+# Install TinyTeX and LaTeX packages.
+# The release is resolved through the GitHub API, which fails intermittently on a
+# shared runner, so the fetch is retried.  TinyTeX records the CTAN mirror it
+# finds at install time, and a stale mirror makes `tlmgr update` refuse a release
+# that is newer than the mirror, so the repository is set to mirror.ctan.org.
+RUN for attempt in 1 2 3; do \
+        /opt/quarto/bin/quarto install tinytex --no-prompt && break; \
+        sleep 20; \
+    done \
+    && test -d /root/.TinyTeX \
     && mv /root/.TinyTeX /opt/tinytex \
     && /opt/tinytex/bin/x86_64-linux/tlmgr path add \
     && chmod -R 755 /opt/tinytex \
+    && tlmgr option repository https://mirror.ctan.org/systems/texlive/tlnet \
     && tlmgr update --self \
     && tlmgr update --all \
     && tlmgr install \
