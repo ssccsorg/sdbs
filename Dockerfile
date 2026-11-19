@@ -21,6 +21,7 @@ RUN sed -i 's/archive.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.li
     sed -i 's/security.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.list.d/ubuntu.sources && \
     apt-get update && apt-get install -y --no-install-recommends \
     python3 python-is-python3 graphviz librsvg2-bin wget curl ca-certificates sudo \
+    xz-utils \
     fonts-noto-cjk \
     fonts-inter \
     fonts-jetbrains-mono \
@@ -41,16 +42,19 @@ RUN sed -i 's/archive.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.li
 RUN uv tool install rumdl
 
 # Install TinyTeX and LaTeX packages.
-# The release is resolved through the GitHub API, which fails intermittently on a
-# shared runner, so the fetch is retried.  TinyTeX records the CTAN mirror it
-# finds at install time, and a stale mirror makes `tlmgr update` refuse a release
-# that is newer than the mirror, so the repository is set to mirror.ctan.org.
-RUN for attempt in 1 2 3; do \
-        /opt/quarto/bin/quarto install tinytex --no-prompt && break; \
-        sleep 20; \
-    done \
-    && test -d /root/.TinyTeX \
-    && mv /root/.TinyTeX /opt/tinytex \
+# The release is pinned and fetched by URL, because `quarto install tinytex` asks
+# the GitHub API for the latest release and that call fails intermittently on a
+# shared runner.  The packages below still float: tlmgr reads mirror.ctan.org,
+# which serves a current database, and the update moves the tree to the next
+# TeX Live release on its own.
+ARG TINYTEX_VERSION=v2026.11
+ARG TINYTEX_SHA256=5b75befa848deae702ae6fa12ff0eef3f110d7e4e2a979ae99f101eba3c9c70d
+RUN curl -fsSL -o /tmp/tinytex.tar.xz \
+        "https://github.com/rstudio/tinytex-releases/releases/download/${TINYTEX_VERSION}/TinyTeX-1-linux-x86_64-${TINYTEX_VERSION}.tar.xz" \
+    && echo "${TINYTEX_SHA256}  /tmp/tinytex.tar.xz" | sha256sum -c - \
+    && mkdir -p /opt/tinytex \
+    && tar -xJf /tmp/tinytex.tar.xz -C /opt/tinytex --strip-components=1 \
+    && rm /tmp/tinytex.tar.xz \
     && /opt/tinytex/bin/x86_64-linux/tlmgr path add \
     && chmod -R 755 /opt/tinytex \
     && tlmgr option repository https://mirror.ctan.org/systems/texlive/tlnet \
